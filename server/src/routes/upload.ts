@@ -3,11 +3,11 @@ import multipart from "@fastify/multipart";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { join, extname } from "node:path";
+import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { UploadResponse, ErrorResponse } from "@lusk/shared";
 
-export const TEMP_DIR = join(process.cwd(), "temp");
+export const TEMP_DIR = join(import.meta.dirname, "../../.lusk_temp");
 
 export async function uploadRoute(app: FastifyInstance) {
   await app.register(multipart, {
@@ -30,18 +30,18 @@ export async function uploadRoute(app: FastifyInstance) {
         return reply.status(400).send({ success: false, error: "No file uploaded" });
       }
 
-      await mkdir(TEMP_DIR, { recursive: true });
+      const sessionId = randomUUID();
+      const sessionDir = join(TEMP_DIR, sessionId);
+      await mkdir(sessionDir, { recursive: true });
 
-      const ext = extname(data.filename) || ".mp4";
-      const savedName = `${randomUUID()}${ext}`;
-      const savePath = join(TEMP_DIR, savedName);
-
+      const savePath = join(sessionDir, "input.mp4");
       await pipeline(data.file, createWriteStream(savePath));
 
       return {
         success: true as const,
-        fileName: savedName,
-        url: `/uploads/${savedName}`,
+        sessionId,
+        fileName: "input.mp4",
+        url: `/static/${sessionId}/input.mp4`,
       };
     }
   );

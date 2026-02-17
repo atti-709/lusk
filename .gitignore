@@ -1,7 +1,8 @@
 node_modules/
 dist/
-temp/
+.lusk_temp/
 output/
 .env
 *.log
+*.mp4
 .DS_Store

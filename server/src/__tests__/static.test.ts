@@ -6,10 +6,12 @@ import { staticPlugin, TEMP_DIR } from "../plugins/static.js";
 
 describe("Static file serving", () => {
   const app = Fastify();
+  const sessionId = "test-session";
 
   beforeAll(async () => {
-    await mkdir(TEMP_DIR, { recursive: true });
-    await writeFile(join(TEMP_DIR, "test-file.txt"), "hello world");
+    const sessionDir = join(TEMP_DIR, sessionId);
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(join(sessionDir, "input.mp4"), "fake-video-content");
     await app.register(staticPlugin);
     await app.ready();
   });
@@ -19,19 +21,19 @@ describe("Static file serving", () => {
     await rm(TEMP_DIR, { recursive: true, force: true });
   });
 
-  it("serves files from temp directory at /uploads/", async () => {
+  it("serves files from session directory at /static/", async () => {
     const response = await app.inject({
       method: "GET",
-      url: "/uploads/test-file.txt",
+      url: `/static/${sessionId}/input.mp4`,
     });
     expect(response.statusCode).toBe(200);
-    expect(response.body).toBe("hello world");
+    expect(response.body).toBe("fake-video-content");
   });
 
   it("returns 404 for missing files", async () => {
     const response = await app.inject({
       method: "GET",
-      url: "/uploads/nonexistent.mp4",
+      url: "/static/nonexistent/input.mp4",
     });
     expect(response.statusCode).toBe(404);
   });

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Fastify from "fastify";
-import { mkdir, rm, readdir } from "node:fs/promises";
+import { readdir, stat, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { uploadRoute, TEMP_DIR } from "../routes/upload.js";
 
@@ -49,11 +49,13 @@ describe("POST /api/upload", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.success).toBe(true);
-    expect(body.fileName).toBeDefined();
-    expect(body.url).toMatch(/^\/uploads\//);
+    expect(body.sessionId).toBeDefined();
+    expect(body.fileName).toBe("input.mp4");
+    expect(body.url).toMatch(/^\/static\/[^/]+\/input\.mp4$/);
 
-    // Verify file was actually saved
-    const files = await readdir(TEMP_DIR);
-    expect(files.length).toBeGreaterThan(0);
+    // Verify session directory and file were created
+    const sessionDir = join(TEMP_DIR, body.sessionId);
+    const info = await stat(join(sessionDir, "input.mp4"));
+    expect(info.isFile()).toBe(true);
   });
 });

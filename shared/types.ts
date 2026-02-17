@@ -1,5 +1,6 @@
 export interface UploadResponse {
   success: boolean;
+  sessionId: string;
   fileName: string;
   url: string;
 }
