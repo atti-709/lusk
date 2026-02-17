@@ -1,9 +1,11 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import { uploadRoute } from "./routes/upload.js";
 
 const server = Fastify({ logger: true });
 
 await server.register(cors, { origin: true });
+await server.register(uploadRoute);
 
 server.get("/api/health", async () => {
   return { status: "ok" as const, uptime: process.uptime() };
