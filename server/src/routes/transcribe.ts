@@ -25,9 +25,42 @@ async function runTranscription(sessionId: string, app: FastifyInstance): Promis
   orchestrator.setTranscript(sessionId, transcript);
   orchestrator.setCaptions(sessionId, captions);
 
-  // Phase 2 & 3: Alignment + LLM (skipped for now)
-  // Walk through required states so the orchestrator doesn't reject the transition
+  // Phase 2: Alignment (optional)
+  // We must transition ensuring the orchestrator state machine is satisfied
   orchestrator.transition(sessionId, "ALIGNING");
+
+  if (session.sourceScript) {
+    orchestrator.updateProgress(sessionId, 0, "Aligning with source text...");
+
+    try {
+      const alignedTranscript = alignTranscript(
+        transcript,
+        session.sourceScript
+      );
+      
+      // Update transcript with aligned version
+      orchestrator.setTranscript(sessionId, alignedTranscript);
+      
+      // Update captions from aligned transcript
+      // We need to map TranscriptData back to CaptionWord[]
+      // For now, we reuse the timestamp structure but use corrected words
+      const alignedCaptions = alignedTranscript.words.map(w => ({
+        text: w.word,
+        startMs: w.startMs,
+        endMs: w.endMs,
+        timestampMs: w.startMs,
+        confidence: 1.0 // Aligned words are considered high confidence
+      }));
+      
+      orchestrator.setCaptions(sessionId, alignedCaptions);
+      orchestrator.updateProgress(sessionId, 100, "Alignment complete");
+    } catch (err) {
+      console.error("Alignment failed, proceeding with original transcript", err);
+    }
+  }
+
+  // Phase 3: Analysis (LLM) - skipped for now
+  // Walk through required states so the orchestrator doesn't reject the transition
   orchestrator.transition(sessionId, "ANALYZING");
   orchestrator.setViralClips(sessionId, []);
 
