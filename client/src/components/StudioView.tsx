@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Player } from "@remotion/player";
 import type { Caption } from "@remotion/captions";
-import type { CaptionWord } from "@lusk/shared";
+import type { CaptionWord, ViralClip } from "@lusk/shared";
 import {
   VideoComposition,
   COMP_WIDTH,
@@ -13,8 +13,9 @@ import "./StudioView.css";
 interface StudioViewProps {
   videoUrl: string;
   captions: CaptionWord[];
-  durationMs: number;
-  onRender: () => void;
+  clip: ViralClip;
+  onRender: (clip: ViralClip) => void;
+  onBack: () => void;
   outputUrl: string | null;
   isRendering: boolean;
 }
@@ -22,32 +23,48 @@ interface StudioViewProps {
 export function StudioView({
   videoUrl,
   captions,
-  durationMs,
+  clip,
   onRender,
+  onBack,
   outputUrl,
   isRendering,
 }: StudioViewProps) {
   const [offsetX, setOffsetX] = useState(0);
 
-  const remotionCaptions: Caption[] = useMemo(
-    () =>
-      captions.map((c) => ({
-        text: c.text,
-        startMs: c.startMs,
-        endMs: c.endMs,
-        timestampMs: c.timestampMs,
-        confidence: c.confidence,
-      })),
-    [captions]
-  );
-
+  const clipDurationMs = clip.endMs - clip.startMs;
+  const startFrame = Math.round((clip.startMs / 1000) * COMP_FPS);
   const durationInFrames = Math.max(
     1,
-    Math.ceil((durationMs / 1000) * COMP_FPS)
+    Math.ceil((clipDurationMs / 1000) * COMP_FPS)
+  );
+
+  // Filter and shift captions to be relative to clip start
+  const remotionCaptions: Caption[] = useMemo(
+    () =>
+      captions
+        .filter((c) => c.startMs >= clip.startMs && c.endMs <= clip.endMs)
+        .map((c) => ({
+          text: c.text,
+          startMs: c.startMs - clip.startMs,
+          endMs: c.endMs - clip.startMs,
+          timestampMs: c.timestampMs != null ? c.timestampMs - clip.startMs : null,
+          confidence: c.confidence,
+        })),
+    [captions, clip.startMs, clip.endMs]
   );
 
   return (
     <div className="studio">
+      <div className="studio-header">
+        <button className="secondary studio-back" onClick={onBack}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Back to clips
+        </button>
+        <div className="studio-clip-title">{clip.title}</div>
+      </div>
+
       <div className="studio-player">
         <Player
           component={VideoComposition}
@@ -55,6 +72,7 @@ export function StudioView({
             videoUrl,
             captions: remotionCaptions,
             offsetX,
+            startFrom: startFrame,
           }}
           compositionWidth={COMP_WIDTH}
           compositionHeight={COMP_HEIGHT}
@@ -91,7 +109,7 @@ export function StudioView({
 
         <div className="studio-actions">
           {!outputUrl && !isRendering && (
-            <button className="primary" onClick={onRender}>
+            <button className="primary" onClick={() => onRender(clip)}>
               Render Video
             </button>
           )}

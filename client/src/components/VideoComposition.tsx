@@ -11,12 +11,14 @@ export type VideoCompositionProps = {
   videoUrl: string;
   captions: Caption[];
   offsetX: number;
+  startFrom?: number;
 };
 
 export function VideoComposition({
   videoUrl,
   captions,
   offsetX,
+  startFrom = 0,
 }: VideoCompositionProps) {
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
@@ -24,6 +26,7 @@ export function VideoComposition({
       <AbsoluteFill>
         <Video
           src={videoUrl}
+          startFrom={startFrom}
           style={{
             width: "177.78%", // 16/9 of container width to fill vertically
             height: "100%",

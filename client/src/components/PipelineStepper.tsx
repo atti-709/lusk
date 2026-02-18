@@ -20,7 +20,6 @@ interface PipelineStepperProps {
   videoUrl: string | null;
   outputUrl: string | null;
   onTranscribe: () => void;
-  onRender: () => void;
 }
 
 function getStepStatus(
@@ -41,7 +40,6 @@ export function PipelineStepper({
   videoUrl,
   outputUrl,
   onTranscribe,
-  onRender,
 }: PipelineStepperProps) {
   const isProcessing = [
     "TRANSCRIBING",
@@ -106,16 +104,6 @@ export function PipelineStepper({
           <button className="primary" onClick={onTranscribe}>
             Start Transcription
           </button>
-        )}
-        {currentState === "READY" && (
-          <button className="primary" onClick={onRender}>
-            Render Video
-          </button>
-        )}
-        {currentState === "EXPORTED" && outputUrl && (
-          <a href={outputUrl} download className="download-btn">
-            Download Video
-          </a>
         )}
       </div>
     </div>

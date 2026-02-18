@@ -6,6 +6,31 @@
   gap: 1.5rem;
 }
 
+.studio-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.studio-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5em 1em;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.studio-clip-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .studio-player {
   width: 100%;
   max-width: 400px;
