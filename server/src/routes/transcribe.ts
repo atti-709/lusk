@@ -1,6 +1,4 @@
 import { FastifyInstance } from "fastify";
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { orchestrator } from "../services/Orchestrator.js";
 import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
@@ -8,7 +6,7 @@ import { alignTranscript } from "../services/AlignmentService.js";
 import { llmService } from "../services/LlmService.js";
 import type { TranscribeRequest, ErrorResponse } from "@lusk/shared";
 
-async function runTranscription(sessionId: string, app: FastifyInstance): Promise<void> {
+async function runTranscription(sessionId: string, log: FastifyInstance["log"]): Promise<void> {
   const sessionDir = tempManager.getSessionDir(sessionId);
   const session = orchestrator.getSession(sessionId)!;
 
@@ -44,18 +42,18 @@ async function runTranscription(sessionId: string, app: FastifyInstance): Promis
       // Update captions from aligned transcript
       // We need to map TranscriptData back to CaptionWord[]
       // For now, we reuse the timestamp structure but use corrected words
-      const alignedCaptions = alignedTranscript.words.map(w => ({
-        text: w.word,
+      const alignedCaptions = alignedTranscript.words.map((w, i) => ({
+        text: i === 0 ? w.word : ` ${w.word}`,
         startMs: w.startMs,
         endMs: w.endMs,
         timestampMs: w.startMs,
-        confidence: 1.0 // Aligned words are considered high confidence
+        confidence: 1.0,
       }));
       
       orchestrator.setCaptions(sessionId, alignedCaptions);
       orchestrator.updateProgress(sessionId, 100, "Alignment complete");
     } catch (err) {
-      console.error("Alignment failed, proceeding with original transcript", err);
+      log.error(err, "Alignment failed, proceeding with original transcript");
     }
   }
 
@@ -77,7 +75,7 @@ async function runTranscription(sessionId: string, app: FastifyInstance): Promis
     );
     orchestrator.setViralClips(sessionId, viralClips);
   } catch (err) {
-    console.error("Analysis failed", err);
+    log.error(err, "LLM analysis failed, proceeding without viral clips");
     orchestrator.setViralClips(sessionId, []);
   }
 
@@ -108,7 +106,7 @@ export async function transcribeRoute(app: FastifyInstance) {
       }
 
       // Fire-and-forget
-      runTranscription(sessionId, app).catch((err) => {
+      runTranscription(sessionId, app.log).catch((err) => {
         app.log.error(err, "Transcription pipeline failed");
       });
 

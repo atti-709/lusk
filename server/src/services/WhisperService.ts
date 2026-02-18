@@ -10,6 +10,11 @@ import type { TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
 const WHISPER_CPP_VERSION = "1.8.3";
 const MODEL = "large-v3-turbo";
 
+// Whisper's cross-attention alignment fires slightly before speech onset.
+// This offset (ms) shifts all word timestamps forward to better match
+// the perceived moment the word is spoken.
+const TIMING_OFFSET_MS = 60;
+
 export interface TranscriptionResult {
   transcript: TranscriptData;
   captions: CaptionWord[];
@@ -240,6 +245,12 @@ class WhisperService {
 
     for (const segment of whisperOutput.transcription) {
       words.push(...this.segmentToWords(segment));
+    }
+
+    // Compensate for Whisper's early-firing timestamps
+    for (const w of words) {
+      w.startMs += TIMING_OFFSET_MS;
+      w.endMs += TIMING_OFFSET_MS;
     }
 
     const captions: CaptionWord[] = words.map((w, i) => ({
