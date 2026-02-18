@@ -9,7 +9,7 @@ import {
 } from "@remotion/install-whisper-cpp";
 import type { TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
 
-const WHISPER_CPP_VERSION = "1.5.5";
+const WHISPER_CPP_VERSION = "1.8.3";
 const MODEL = "large-v3-turbo";
 
 export interface TranscriptionResult {
@@ -98,7 +98,6 @@ class WhisperService {
       model: MODEL,
       tokenLevelTimestamps: true,
       language: "sk",
-      flashAttention: true,
       printOutput: false,
       onProgress: (p) => {
         const pct = 16 + Math.round(p * 79);
