@@ -17,11 +17,20 @@ export interface TranscriptionResult {
 
 type ProgressCallback = (percent: number, message: string) => void;
 
-/** Shape of one segment in whisper-cli's --output-json */
+interface WhisperToken {
+  text: string;
+  timestamps: { from: string; to: string };
+  offsets: { from: number; to: number };
+  id: number;
+  p: number; // probability
+}
+
+/** Shape of one segment in whisper-cli's --output-json-full */
 interface WhisperJsonSegment {
   timestamps: { from: string; to: string };
   offsets: { from: number; to: number };
   text: string;
+  tokens: WhisperToken[];
 }
 
 interface WhisperJsonOutput {
@@ -107,7 +116,7 @@ class WhisperService {
         "-f", audioPath,
         "-l", "sk",
         "--no-prints",
-        "-oj",                   // --output-json
+        "-ojf",                  // --output-json-full (includes per-token timestamps)
         "-of", outputBase,       // output file base (produces outputBase.json)
       ];
 
@@ -143,6 +152,64 @@ class WhisperService {
     });
   }
 
+  /**
+   * Extract words from a segment using:
+   *   - segment.text for the actual word strings (correct UTF-8 / Slovak chars)
+   *   - token offsets for per-word timing (BPE text may be garbled but
+   *     space-prefix boundaries and ms offsets are reliable)
+   *   - segment.offsets.to as anchor for the last word's endMs, so that
+   *     inter-segment silence is naturally preserved.
+   */
+  private segmentToWords(segment: WhisperJsonSegment): TranscriptWord[] {
+    const segText = segment.text?.trim();
+    if (!segText) return [];
+
+    const wordStrings = segText.split(/\s+/);
+    const segStart = segment.offsets.from;
+    const segEnd = segment.offsets.to;
+
+    // Build per-word timing from token offsets.
+    // Space-prefixed tokens mark word boundaries in Whisper BPE.
+    const textTokens = (segment.tokens ?? []).filter(
+      (t) => t.text && !t.text.startsWith("[")
+    );
+
+    const timings: { from: number; to: number }[] = [];
+    if (textTokens.length > 0) {
+      let groupFrom = textTokens[0].offsets.from;
+      let groupTo = textTokens[0].offsets.to;
+
+      for (let i = 1; i < textTokens.length; i++) {
+        const token = textTokens[i];
+        if (token.text.startsWith(" ")) {
+          // New word boundary — flush previous timing group
+          timings.push({ from: groupFrom, to: groupTo });
+          groupFrom = token.offsets.from;
+        }
+        groupTo = token.offsets.to;
+      }
+      // Last group anchored to segment end
+      timings.push({ from: groupFrom, to: segEnd });
+    }
+
+    return wordStrings.map((word, i) => {
+      if (i < timings.length) {
+        return {
+          word,
+          startMs: timings[i].from,
+          endMs: i === wordStrings.length - 1 ? segEnd : timings[i].to,
+        };
+      }
+      // Fallback: distribute evenly within segment (should rarely happen)
+      const step = (segEnd - segStart) / wordStrings.length;
+      return {
+        word,
+        startMs: segStart + Math.round(i * step),
+        endMs: i === wordStrings.length - 1 ? segEnd : segStart + Math.round((i + 1) * step),
+      };
+    });
+  }
+
   async transcribe(
     sessionDir: string,
     onProgress?: ProgressCallback
@@ -156,8 +223,9 @@ class WhisperService {
     // Step 2: Ensure binary + model
     await this.ensureInstalled(onProgress);
 
-    // Step 3: Transcribe via whisper-cli directly
-    // This gives clean sentence-level segments with correct Slovak characters.
+    // Step 3: Transcribe via whisper-cli directly (--output-json-full).
+    // Natural sentence segments provide accurate boundaries; token-level
+    // data within each segment gives word timing.
     onProgress?.(16, "Starting transcription...");
 
     const outputBase = path.join(sessionDir, "whisper-raw");
@@ -165,49 +233,22 @@ class WhisperService {
 
     onProgress?.(96, "Processing results...");
 
-    // Build word-level data from sentence-level segments.
-    // Each segment is a phrase/sentence with a time range — we split by
-    // whitespace and distribute the segment duration proportionally.
+    // Build word-level data from segment tokens.
+    // Segment boundaries are reliable anchors — silence between segments
+    // is naturally captured without any heuristic gap injection.
     const words: TranscriptWord[] = [];
-    const captions: CaptionWord[] = [];
 
     for (const segment of whisperOutput.transcription) {
-      const segText = segment.text.trim();
-      if (!segText) continue;
-
-      const segWords = segText.split(/\s+/);
-      const segStartMs = segment.offsets.from;
-      const segEndMs = segment.offsets.to;
-      const segDuration = segEndMs - segStartMs;
-
-      // Distribute time proportionally by character count
-      const totalChars = segWords.reduce((sum, w) => sum + w.length, 0);
-      let cursor = segStartMs;
-
-      for (const wordText of segWords) {
-        const wordDuration =
-          totalChars > 0
-            ? Math.round((wordText.length / totalChars) * segDuration)
-            : Math.round(segDuration / segWords.length);
-        const wordStart = cursor;
-        const wordEnd = Math.min(cursor + wordDuration, segEndMs);
-        cursor = wordEnd;
-
-        words.push({
-          word: wordText,
-          startMs: wordStart,
-          endMs: wordEnd,
-        });
-
-        captions.push({
-          text: captions.length === 0 ? wordText : ` ${wordText}`,
-          startMs: wordStart,
-          endMs: wordEnd,
-          timestampMs: wordStart,
-          confidence: null,
-        });
-      }
+      words.push(...this.segmentToWords(segment));
     }
+
+    const captions: CaptionWord[] = words.map((w, i) => ({
+      text: i === 0 ? w.word : ` ${w.word}`,
+      startMs: w.startMs,
+      endMs: w.endMs,
+      timestampMs: w.startMs,
+      confidence: null,
+    }));
 
     const transcript: TranscriptData = {
       words,
