@@ -1,12 +1,37 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { UploadZone } from "./components/UploadZone";
 import { PipelineStepper } from "./components/PipelineStepper";
+import { StudioView } from "./components/StudioView";
 import { useSSE } from "./hooks/useSSE";
+import type { CaptionWord } from "@lusk/shared";
 import "./App.css";
+
+const STUDIO_STATES = ["READY", "RENDERING", "EXPORTED"];
 
 function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const { state } = useSSE(sessionId);
+  const [captions, setCaptions] = useState<CaptionWord[]>([]);
+  const [durationMs, setDurationMs] = useState(60000);
+
+  const showStudio = state && STUDIO_STATES.includes(state.state);
+
+  // Fetch captions when entering studio
+  useEffect(() => {
+    if (!sessionId || !showStudio) return;
+
+    fetch(`/api/project/${sessionId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.captions) setCaptions(data.captions);
+      })
+      .catch(() => {});
+  }, [sessionId, showStudio]);
+
+  // Get video duration from the video element
+  const handleVideoMetadata = useCallback((duration: number) => {
+    setDurationMs(duration * 1000);
+  }, []);
 
   const handleUploadComplete = useCallback((id: string) => {
     setSessionId(id);
@@ -46,7 +71,7 @@ function App() {
         </div>
       )}
 
-      {sessionId && state && (
+      {sessionId && state && !showStudio && (
         <div className="pipeline-stage">
           <PipelineStepper
             currentState={state.state}
@@ -56,6 +81,29 @@ function App() {
             outputUrl={state.outputUrl}
             onTranscribe={handleTranscribe}
             onRender={handleRender}
+          />
+          {/* Hidden video to get duration */}
+          {state.videoUrl && (
+            <video
+              src={state.videoUrl}
+              style={{ display: "none" }}
+              onLoadedMetadata={(e) =>
+                handleVideoMetadata(e.currentTarget.duration)
+              }
+            />
+          )}
+        </div>
+      )}
+
+      {sessionId && state && showStudio && state.videoUrl && (
+        <div className="pipeline-stage">
+          <StudioView
+            videoUrl={state.videoUrl}
+            captions={captions}
+            durationMs={durationMs}
+            onRender={handleRender}
+            outputUrl={state.outputUrl}
+            isRendering={state.state === "RENDERING"}
           />
         </div>
       )}
