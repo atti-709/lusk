@@ -3,12 +3,14 @@ import { useState, useCallback, type DragEvent, type ChangeEvent } from "react";
 interface UploadState {
   status: "idle" | "dragging" | "uploading" | "done" | "error";
   fileName?: string;
-  videoUrl?: string;
   error?: string;
-  progress?: number;
 }
 
-export function UploadZone() {
+interface UploadZoneProps {
+  onUploadComplete: (sessionId: string) => void;
+}
+
+export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   const [state, setState] = useState<UploadState>({ status: "idle" });
 
   const handleUpload = useCallback(async (file: File) => {
@@ -28,18 +30,15 @@ export function UploadZone() {
       }
 
       const data = await response.json();
-      setState({
-        status: "done",
-        fileName: file.name,
-        videoUrl: data.url,
-      });
+      setState({ status: "done", fileName: file.name });
+      onUploadComplete(data.sessionId);
     } catch (err) {
       setState({
         status: "error",
         error: err instanceof Error ? err.message : "Upload failed",
       });
     }
-  }, []);
+  }, [onUploadComplete]);
 
   const onDrop = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
@@ -97,12 +96,7 @@ export function UploadZone() {
       )}
 
       {state.status === "done" && (
-        <div>
-          <p>Uploaded: {state.fileName}</p>
-          {state.videoUrl && (
-            <video src={state.videoUrl} controls width={400} />
-          )}
-        </div>
+        <p>Uploaded: {state.fileName}</p>
       )}
 
       {state.status === "error" && (
