@@ -7,7 +7,9 @@ import { projectRoute } from "./routes/project.js";
 import { transcribeRoute } from "./routes/transcribe.js";
 import { renderRoute } from "./routes/render.js";
 import { scriptRoute } from "./routes/script.js";
+import { sessionsRoute } from "./routes/sessions.js";
 import { tempManager } from "./services/TempManager.js";
+import { orchestrator } from "./services/Orchestrator.js";
 
 const server = Fastify({ logger: true });
 
@@ -19,6 +21,7 @@ await server.register(projectRoute);
 await server.register(transcribeRoute);
 await server.register(renderRoute);
 await server.register(scriptRoute);
+await server.register(sessionsRoute);
 
 server.get("/api/health", async () => {
   return { status: "ok" as const, uptime: process.uptime() };
@@ -26,7 +29,15 @@ server.get("/api/health", async () => {
 
 const PORT = 3000;
 
-await tempManager.cleanupAll();
+// Restore existing sessions instead of cleaning up
+const sessions = await tempManager.listSessions();
+for (const summary of sessions) {
+  const state = await tempManager.restoreSession(summary.sessionId);
+  if (state) {
+    orchestrator.restoreSession(state);
+    console.log(`Restored session ${state.sessionId} (${state.state})`);
+  }
+}
 
 try {
   await server.listen({ port: PORT, host: "0.0.0.0" });

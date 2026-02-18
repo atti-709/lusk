@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { writeFile, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type {
   PipelineState,
   ProjectState,
@@ -7,6 +9,7 @@ import type {
   CaptionWord,
   ViralClip,
 } from "@lusk/shared";
+import { tempManager } from "./TempManager.js";
 
 const TRANSITIONS: Record<PipelineState, PipelineState[]> = {
   IDLE: ["UPLOADING"],
@@ -21,6 +24,7 @@ const TRANSITIONS: Record<PipelineState, PipelineState[]> = {
 
 class Orchestrator extends EventEmitter {
   private sessions = new Map<string, ProjectState>();
+  private writeQueue = new Map<string, Promise<void>>();
 
   createSession(id: string, videoUrl: string): ProjectState {
     const state: ProjectState = {
@@ -37,7 +41,12 @@ class Orchestrator extends EventEmitter {
     };
     this.sessions.set(id, state);
     this.emitProgress(state);
+    this.persistSession(id);
     return state;
+  }
+
+  restoreSession(state: ProjectState): void {
+    this.sessions.set(state.sessionId, state);
   }
 
   getSession(id: string): ProjectState | undefined {
@@ -56,6 +65,7 @@ class Orchestrator extends EventEmitter {
     session.progress = 0;
     session.message = "";
     this.emitProgress(session);
+    this.persistSession(id);
   }
 
   updateProgress(id: string, percent: number, message: string): void {
@@ -73,21 +83,25 @@ class Orchestrator extends EventEmitter {
   setTranscript(id: string, transcript: TranscriptData): void {
     const session = this.requireSession(id);
     session.transcript = transcript;
+    this.persistSession(id);
   }
 
   setCaptions(id: string, captions: CaptionWord[]): void {
     const session = this.requireSession(id);
     session.captions = captions;
+    this.persistSession(id);
   }
 
   setViralClips(id: string, clips: ViralClip[]): void {
     const session = this.requireSession(id);
     session.viralClips = clips;
+    this.persistSession(id);
   }
 
   setOutputUrl(id: string, url: string): void {
     const session = this.requireSession(id);
     session.outputUrl = url;
+    this.persistSession(id);
   }
 
   toProjectState(id: string): ProjectState | undefined {
@@ -112,6 +126,26 @@ class Orchestrator extends EventEmitter {
       message: session.message,
     };
     this.emit("progress", event);
+  }
+
+  private persistSession(id: string): void {
+    const session = this.sessions.get(id);
+    if (!session) return;
+
+    // Serialize writes per session to prevent file corruption
+    const prev = this.writeQueue.get(id) ?? Promise.resolve();
+    const next = prev.then(async () => {
+      const dir = tempManager.getSessionDir(id);
+      const data = JSON.stringify(session, null, 2);
+      const meta = JSON.stringify({
+        sessionId: session.sessionId,
+        state: session.state,
+        videoUrl: session.videoUrl,
+      });
+      await writeFile(join(dir, "session.json"), data);
+      await writeFile(join(dir, "session-meta.json"), meta);
+    }).catch(() => {});
+    this.writeQueue.set(id, next);
   }
 }
 

@@ -80,3 +80,10 @@ export interface TranscribeRequest {
 export interface RenderRequest {
   sessionId: string;
 }
+
+export interface SessionSummary {
+  sessionId: string;
+  state: PipelineState;
+  videoUrl: string | null;
+  createdAt: string;
+}

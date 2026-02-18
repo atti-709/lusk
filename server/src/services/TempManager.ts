@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, readdir, access } from "node:fs/promises";
+import { mkdir, rm, readdir, access, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import type { ProjectState, SessionSummary } from "@lusk/shared";
 
 class TempManager {
   readonly baseDir: string;
@@ -33,6 +34,53 @@ class TempManager {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  async listSessions(): Promise<SessionSummary[]> {
+    let entries;
+    try {
+      entries = await readdir(this.baseDir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+
+    const summaries: SessionSummary[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+
+      const dir = join(this.baseDir, entry.name);
+      // Try lightweight meta first, fall back to full session.json
+      for (const file of ["session-meta.json", "session.json"]) {
+        const filePath = join(dir, file);
+        try {
+          const raw = await readFile(filePath, "utf-8");
+          const data = JSON.parse(raw);
+          const stats = await stat(filePath);
+          summaries.push({
+            sessionId: data.sessionId,
+            state: data.state,
+            videoUrl: data.videoUrl,
+            createdAt: stats.mtime.toISOString(),
+          });
+          break;
+        } catch {
+          // Try next file
+        }
+      }
+    }
+
+    return summaries;
+  }
+
+  async restoreSession(id: string): Promise<ProjectState | null> {
+    const sessionFile = join(this.getSessionDir(id), "session.json");
+    try {
+      const raw = await readFile(sessionFile, "utf-8");
+      return JSON.parse(raw) as ProjectState;
+    } catch {
+      return null;
     }
   }
 
