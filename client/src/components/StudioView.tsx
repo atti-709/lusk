@@ -31,26 +31,28 @@ export function StudioView({
 }: StudioViewProps) {
   const [offsetX, setOffsetX] = useState(0);
 
-  const clipDurationMs = clip.endMs - clip.startMs;
+
   const startFrame = Math.round((clip.startMs / 1000) * COMP_FPS);
+  const actualStartMs = (startFrame / COMP_FPS) * 1000;
+  
   const durationInFrames = Math.max(
     1,
-    Math.ceil((clipDurationMs / 1000) * COMP_FPS)
+    Math.ceil(((clip.endMs - actualStartMs) / 1000) * COMP_FPS)
   );
 
-  // Filter and shift captions to be relative to clip start
+  // Filter and shift captions to be relative to clip start based on actual frame start
   const remotionCaptions: Caption[] = useMemo(
     () =>
       captions
         .filter((c) => c.endMs > clip.startMs && c.startMs < clip.endMs)
         .map((c) => ({
           text: c.text,
-          startMs: c.startMs - clip.startMs,
-          endMs: c.endMs - clip.startMs,
-          timestampMs: c.timestampMs != null ? c.timestampMs - clip.startMs : null,
+          startMs: c.startMs - actualStartMs,
+          endMs: c.endMs - actualStartMs,
+          timestampMs: c.timestampMs != null ? c.timestampMs - actualStartMs : null,
           confidence: c.confidence,
         })),
-    [captions, clip.startMs, clip.endMs]
+    [captions, clip.startMs, clip.endMs, actualStartMs]
   );
 
   return (

@@ -96,10 +96,13 @@ export function CaptionOverlay({ captions }: CaptionOverlayProps) {
       {pages.map((page, index) => {
         const nextPage = pages[index + 1] ?? null;
         const startFrame = (page.startMs / 1000) * fps;
-        const endFrame = Math.min(
-          nextPage ? (nextPage.startMs / 1000) * fps : Infinity,
-          startFrame + (SWITCH_CAPTIONS_EVERY_MS / 1000) * fps,
-        );
+        const lastToken = page.tokens[page.tokens.length - 1];
+        const endMs = lastToken ? lastToken.toMs : page.startMs + SWITCH_CAPTIONS_EVERY_MS;
+        const naturalEndFrame = (endMs / 1000) * fps;
+
+        const endFrame = nextPage 
+          ? Math.min((nextPage.startMs / 1000) * fps, naturalEndFrame)
+          : naturalEndFrame;
         const durationInFrames = endFrame - startFrame;
 
         if (durationInFrames <= 0) return null;
