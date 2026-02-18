@@ -1,30 +1,22 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import { rm, readdir } from "node:fs/promises";
-import { join } from "node:path";
 import { uploadRoute } from "./routes/upload.js";
-import { staticPlugin, TEMP_DIR } from "./plugins/static.js";
-
-async function cleanupSessions() {
-  let entries;
-  try {
-    entries = await readdir(TEMP_DIR, { withFileTypes: true });
-  } catch {
-    return; // Directory doesn't exist yet, nothing to clean
-  }
-
-  await Promise.all(
-    entries
-      .filter((e) => e.isDirectory())
-      .map((e) => rm(join(TEMP_DIR, e.name), { recursive: true, force: true }))
-  );
-}
+import { staticPlugin } from "./plugins/static.js";
+import { eventsRoute } from "./routes/events.js";
+import { projectRoute } from "./routes/project.js";
+import { transcribeRoute } from "./routes/transcribe.js";
+import { renderRoute } from "./routes/render.js";
+import { tempManager } from "./services/TempManager.js";
 
 const server = Fastify({ logger: true });
 
 await server.register(cors, { origin: true });
 await server.register(uploadRoute);
 await server.register(staticPlugin);
+await server.register(eventsRoute);
+await server.register(projectRoute);
+await server.register(transcribeRoute);
+await server.register(renderRoute);
 
 server.get("/api/health", async () => {
   return { status: "ok" as const, uptime: process.uptime() };
@@ -32,7 +24,7 @@ server.get("/api/health", async () => {
 
 const PORT = 3000;
 
-await cleanupSessions();
+await tempManager.cleanupAll();
 
 try {
   await server.listen({ port: PORT, host: "0.0.0.0" });

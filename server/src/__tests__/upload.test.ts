@@ -1,21 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Fastify from "fastify";
-import { readdir, stat, rm, mkdir } from "node:fs/promises";
+import { stat, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { uploadRoute, TEMP_DIR } from "../routes/upload.js";
+import { uploadRoute } from "../routes/upload.js";
+import { tempManager } from "../services/TempManager.js";
 
 describe("POST /api/upload", () => {
   const app = Fastify();
+  const createdSessions: string[] = [];
 
   beforeAll(async () => {
-    await mkdir(TEMP_DIR, { recursive: true });
+    await tempManager.init();
     await app.register(uploadRoute);
     await app.ready();
   });
 
   afterAll(async () => {
     await app.close();
-    await rm(TEMP_DIR, { recursive: true, force: true });
+    await Promise.all(
+      createdSessions.map((id) =>
+        rm(join(tempManager.baseDir, id), { recursive: true, force: true })
+      )
+    );
   });
 
   it("rejects requests without a file", async () => {
@@ -50,11 +56,12 @@ describe("POST /api/upload", () => {
     const body = response.json();
     expect(body.success).toBe(true);
     expect(body.sessionId).toBeDefined();
+    createdSessions.push(body.sessionId);
     expect(body.fileName).toBe("input.mp4");
     expect(body.url).toMatch(/^\/static\/[^/]+\/input\.mp4$/);
 
     // Verify session directory and file were created
-    const sessionDir = join(TEMP_DIR, body.sessionId);
+    const sessionDir = join(tempManager.baseDir, body.sessionId);
     const info = await stat(join(sessionDir, "input.mp4"));
     expect(info.isFile()).toBe(true);
   });

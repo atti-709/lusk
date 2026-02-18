@@ -2,14 +2,15 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Fastify from "fastify";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { staticPlugin, TEMP_DIR } from "../plugins/static.js";
+import { staticPlugin } from "../plugins/static.js";
+import { tempManager } from "../services/TempManager.js";
 
 describe("Static file serving", () => {
   const app = Fastify();
   const sessionId = "test-session";
 
   beforeAll(async () => {
-    const sessionDir = join(TEMP_DIR, sessionId);
+    const sessionDir = join(tempManager.baseDir, sessionId);
     await mkdir(sessionDir, { recursive: true });
     await writeFile(join(sessionDir, "input.mp4"), "fake-video-content");
     await app.register(staticPlugin);
@@ -18,7 +19,7 @@ describe("Static file serving", () => {
 
   afterAll(async () => {
     await app.close();
-    await rm(TEMP_DIR, { recursive: true, force: true });
+    await rm(join(tempManager.baseDir, sessionId), { recursive: true, force: true });
   });
 
   it("serves files from session directory at /static/", async () => {

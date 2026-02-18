@@ -1,15 +1,12 @@
 import { FastifyInstance } from "fastify";
 import fastifyStatic from "@fastify/static";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
-
-export const TEMP_DIR = join(import.meta.dirname, "../../.lusk_temp");
+import { tempManager } from "../services/TempManager.js";
 
 export async function staticPlugin(app: FastifyInstance) {
-  await mkdir(TEMP_DIR, { recursive: true });
+  await tempManager.init();
 
   await app.register(fastifyStatic, {
-    root: TEMP_DIR,
+    root: tempManager.baseDir,
     prefix: "/static/",
   });
 }
