@@ -1,99 +1,157 @@
-.resume-dialog {
+.resume-page {
   flex: 1;
+  width: 100%;
+  max-width: 960px;
+  padding: 2rem;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 2rem;
-  gap: 2rem;
+  gap: 1.5rem;
+  align-self: center;
 }
 
-.resume-dialog h2 {
+.resume-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.resume-header h2 {
   font-size: 1.1rem;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text);
   margin: 0;
 }
 
-.resume-sessions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  width: 100%;
-  max-width: 420px;
+/* ── Project grid ── */
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
 }
 
-.resume-card {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1rem 1.25rem;
+.project-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
+  overflow: hidden;
   cursor: pointer;
-  transition: all 0.2s ease;
-  text-align: left;
-  color: var(--text);
-  font-size: 0.9rem;
-  width: 100%;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
 }
 
-.resume-card:hover {
+.project-card:hover {
   border-color: var(--accent);
-  box-shadow: 0 0 16px var(--accent-glow);
+  box-shadow: 0 0 20px var(--accent-glow);
+  transform: translateY(-2px);
 }
 
-.resume-card-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--accent);
+.project-card.confirm-delete {
+  border-color: var(--error);
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.2);
+}
+
+.project-card-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  overflow: hidden;
+}
+
+.project-card-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.project-card-body {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.project-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+/* ── Badge ── */
+
+.project-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badge-ready {
+  background: rgba(139, 92, 246, 0.15);
+  color: var(--accent);
+}
+
+.badge-exported {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+}
+
+.badge-rendering {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+}
+
+.badge-processing {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+}
+
+/* ── Delete button ── */
+
+.project-delete-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
 }
 
-.resume-card-icon svg {
-  width: 18px;
-  height: 18px;
-  color: white;
+.project-delete-btn:hover {
+  color: var(--error);
+  background: rgba(239, 68, 68, 0.1);
+  transform: none;
+  box-shadow: none;
 }
 
-.resume-card-info {
-  flex: 1;
-  min-width: 0;
+.project-delete-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
-.resume-card-state {
+.project-delete-btn.is-confirm {
+  color: var(--error);
+  background: rgba(239, 68, 68, 0.15);
+}
+
+/* ── Card text ── */
+
+.project-card-id {
+  font-size: 0.8rem;
   font-weight: 600;
-  font-size: 0.85rem;
-  margin-bottom: 0.15rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
-.resume-card-time {
+.project-card-time {
+  font-size: 0.72rem;
   color: var(--text-muted);
-  font-size: 0.75rem;
-}
-
-.resume-divider {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  width: 100%;
-  max-width: 420px;
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.resume-divider::before,
-.resume-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--border);
 }

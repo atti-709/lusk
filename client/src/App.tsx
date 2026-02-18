@@ -72,6 +72,15 @@ function App() {
     setView("session");
   }, []);
 
+  const handleDeleteSession = useCallback((id: string) => {
+    fetch(`/api/sessions/${id}`, { method: "DELETE" }).catch(() => {});
+    setExistingSessions((prev) => {
+      const next = prev.filter((s) => s.sessionId !== id);
+      if (next.length === 0) setView("upload");
+      return next;
+    });
+  }, []);
+
   const handleNew = useCallback(() => {
     setView("upload");
   }, []);
@@ -122,6 +131,7 @@ function App() {
         <ResumeDialog
           sessions={existingSessions}
           onResume={handleResume}
+          onDelete={handleDeleteSession}
           onNew={handleNew}
         />
       )}
