@@ -1,6 +1,6 @@
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, writeFile } from "node:fs/promises";
 import {
   installWhisperCpp,
   downloadWhisperModel,
@@ -107,6 +107,12 @@ class WhisperService {
 
     onProgress?.(96, "Processing results...");
 
+    // Save raw whisper output for debugging
+    await writeFile(
+      path.join(sessionDir, "whisper-raw.json"),
+      JSON.stringify(whisperOutput, null, 2)
+    );
+
     // Step 4: Convert to captions
     const { captions } = toCaptions({ whisperCppOutput: whisperOutput });
 
@@ -128,6 +134,16 @@ class WhisperService {
       words,
       text: whisperOutput.transcription.map((s) => s.text).join(" ").trim(),
     };
+
+    // Save processed outputs for debugging
+    await writeFile(
+      path.join(sessionDir, "transcript.json"),
+      JSON.stringify(transcript, null, 2)
+    );
+    await writeFile(
+      path.join(sessionDir, "captions.json"),
+      JSON.stringify(captions, null, 2)
+    );
 
     onProgress?.(100, "Transcription complete");
 
