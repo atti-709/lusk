@@ -1,49 +1,96 @@
 .app {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-  font-family: system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-h1 {
-  font-size: 2.5rem;
-  margin-bottom: 0.25rem;
+/* ── Header ── */
+.app-header {
+  width: 100%;
+  padding: 1.5rem 2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
-.subtitle {
-  color: #888;
-  margin-bottom: 2rem;
+.app-header h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  background: linear-gradient(135deg, var(--text) 0%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
-.upload-zone {
-  border: 2px dashed #555;
-  border-radius: 12px;
-  padding: 3rem 2rem;
-  transition: all 0.2s;
-  cursor: pointer;
-}
-
-.upload-zone.dragging {
-  border-color: #646cff;
-  background: rgba(100, 108, 255, 0.05);
-}
-
-.upload-zone p {
-  margin: 0.5rem 0;
-}
-
-.file-label {
-  color: #646cff;
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-.error {
-  color: #ff4444;
-}
-
-video {
-  margin-top: 1rem;
+.logo-mark {
+  width: 28px;
+  height: 28px;
+  background: var(--accent);
   border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.8rem;
+  color: white;
+  flex-shrink: 0;
+}
+
+/* ── Upload hero (full viewport) ── */
+.upload-hero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 2rem;
+}
+
+.upload-hero .tagline {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  margin-bottom: 2.5rem;
+}
+
+/* ── Pipeline stage (post-upload) ── */
+.pipeline-stage {
+  flex: 1;
+  width: 100%;
+  max-width: 960px;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.connecting {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.connecting::after {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-left: 0.5rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }

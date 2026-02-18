@@ -32,23 +32,37 @@ function App() {
 
   return (
     <div className="app">
-      <h1>Lusk</h1>
-      <p className="subtitle">Create viral shorts from Slovak video podcasts</p>
+      <header className="app-header">
+        <div className="logo-mark">L</div>
+        <h1>Lusk</h1>
+      </header>
 
-      {!sessionId && <UploadZone onUploadComplete={handleUploadComplete} />}
-
-      {sessionId && state && (
-        <PipelineStepper
-          currentState={state.state}
-          progress={state.progress}
-          message={state.message}
-          outputUrl={state.outputUrl}
-          onTranscribe={handleTranscribe}
-          onRender={handleRender}
-        />
+      {!sessionId && (
+        <div className="upload-hero">
+          <p className="tagline">
+            Create viral shorts from Slovak video podcasts
+          </p>
+          <UploadZone onUploadComplete={handleUploadComplete} />
+        </div>
       )}
 
-      {sessionId && !state && <p>Connecting...</p>}
+      {sessionId && state && (
+        <div className="pipeline-stage">
+          <PipelineStepper
+            currentState={state.state}
+            progress={state.progress}
+            message={state.message}
+            videoUrl={state.videoUrl}
+            outputUrl={state.outputUrl}
+            onTranscribe={handleTranscribe}
+            onRender={handleRender}
+          />
+        </div>
+      )}
+
+      {sessionId && !state && (
+        <div className="connecting">Connecting</div>
+      )}
     </div>
   );
 }

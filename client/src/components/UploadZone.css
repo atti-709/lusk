@@ -1,0 +1,117 @@
+.upload-zone {
+  width: 100%;
+  max-width: 520px;
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  padding: 3.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.25s ease;
+  cursor: pointer;
+  background: var(--surface);
+}
+
+.upload-zone:hover {
+  border-color: var(--text-dim);
+}
+
+.upload-zone.dragging {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  box-shadow: 0 0 40px var(--accent-glow), inset 0 0 40px var(--accent-glow);
+}
+
+.upload-icon {
+  color: var(--text-dim);
+  margin-bottom: 0.5rem;
+  transition: color 0.25s;
+}
+
+.upload-zone:hover .upload-icon,
+.upload-zone.dragging .upload-icon {
+  color: var(--accent);
+}
+
+.upload-icon.pulse {
+  animation: pulse-icon 1s ease infinite;
+}
+
+@keyframes pulse-icon {
+  0%, 100% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(-4px); opacity: 0.7; }
+}
+
+.upload-title {
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--text);
+  margin: 0;
+}
+
+.upload-hint {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin: 0.25rem 0;
+}
+
+.browse-btn {
+  display: inline-block;
+  padding: 0.6em 1.4em;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.browse-btn:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 0 30px var(--accent-glow-strong);
+  transform: translateY(-1px);
+}
+
+.upload-formats {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+/* Uploading spinner */
+.uploading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error state */
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.error-message {
+  color: var(--error);
+  font-size: 0.9rem;
+  margin: 0;
+}
