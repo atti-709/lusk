@@ -29,6 +29,7 @@ class Orchestrator extends EventEmitter {
       progress: 100,
       message: "Upload complete",
       videoUrl,
+      sourceScript: null,
       transcript: null,
       captions: null,
       viralClips: null,
@@ -62,6 +63,11 @@ class Orchestrator extends EventEmitter {
     session.progress = Math.max(0, Math.min(100, percent));
     session.message = message;
     this.emitProgress(session);
+  }
+
+  setSourceScript(id: string, script: string): void {
+    const session = this.requireSession(id);
+    session.sourceScript = script;
   }
 
   setTranscript(id: string, transcript: TranscriptData): void {

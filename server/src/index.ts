@@ -6,6 +6,7 @@ import { eventsRoute } from "./routes/events.js";
 import { projectRoute } from "./routes/project.js";
 import { transcribeRoute } from "./routes/transcribe.js";
 import { renderRoute } from "./routes/render.js";
+import { scriptRoute } from "./routes/script.js";
 import { tempManager } from "./services/TempManager.js";
 
 const server = Fastify({ logger: true });
@@ -17,6 +18,7 @@ await server.register(eventsRoute);
 await server.register(projectRoute);
 await server.register(transcribeRoute);
 await server.register(renderRoute);
+await server.register(scriptRoute);
 
 server.get("/api/health", async () => {
   return { status: "ok" as const, uptime: process.uptime() };

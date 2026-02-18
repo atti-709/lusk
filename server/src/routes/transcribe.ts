@@ -1,34 +1,18 @@
 import { FastifyInstance } from "fastify";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { orchestrator } from "../services/Orchestrator.js";
 import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
-import type { TranscribeRequest, ErrorResponse, ViralClip } from "@lusk/shared";
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function generateMockViralClips(): ViralClip[] {
-  return [
-    {
-      title: "Virálny hook #1",
-      startMs: 0,
-      endMs: 15000,
-      hookText: "Ako sa robí virálny obsah?",
-    },
-    {
-      title: "Virálny hook #2",
-      startMs: 5000,
-      endMs: 20000,
-      hookText: "Sociálne siete a ich tajomstvá",
-    },
-  ];
-}
+import { alignTranscript } from "../services/AlignmentService.js";
+import { llmService } from "../services/LlmService.js";
+import type { TranscribeRequest, ErrorResponse } from "@lusk/shared";
 
 async function runTranscription(sessionId: string, app: FastifyInstance): Promise<void> {
   const sessionDir = tempManager.getSessionDir(sessionId);
+  const session = orchestrator.getSession(sessionId)!;
 
-  // Phase 1: Real transcription via whisper.cpp
+  // Phase 1: Transcription via whisper.cpp
   orchestrator.transition(sessionId, "TRANSCRIBING");
 
   const { transcript, captions } = await whisperService.transcribe(
@@ -41,24 +25,45 @@ async function runTranscription(sessionId: string, app: FastifyInstance): Promis
   orchestrator.setTranscript(sessionId, transcript);
   orchestrator.setCaptions(sessionId, captions);
 
-  // Phase 2: Alignment (still mock — Phase 3)
+  // Phase 2: Alignment (only if source script was provided)
   orchestrator.transition(sessionId, "ALIGNING");
-  orchestrator.updateProgress(sessionId, 30, "Aligning text...");
-  await delay(800);
-  orchestrator.updateProgress(sessionId, 100, "Alignment complete");
-  await delay(700);
 
-  // Phase 3: Viral clip detection (still mock — Phase 3)
+  if (session.sourceScript) {
+    orchestrator.updateProgress(sessionId, 20, "Aligning with source text...");
+
+    const aligned = alignTranscript(transcript, session.sourceScript);
+    orchestrator.setTranscript(sessionId, aligned);
+
+    await writeFile(
+      join(sessionDir, "aligned-transcript.json"),
+      JSON.stringify(aligned, null, 2)
+    );
+
+    orchestrator.updateProgress(sessionId, 100, "Alignment complete");
+  } else {
+    orchestrator.updateProgress(sessionId, 100, "No source script — skipping alignment");
+  }
+
+  // Phase 3: Viral clip detection via LLM
   orchestrator.transition(sessionId, "ANALYZING");
-  orchestrator.updateProgress(sessionId, 20, "Loading LLM...");
-  await delay(1000);
-  orchestrator.updateProgress(sessionId, 60, "Finding viral hooks...");
-  await delay(800);
 
-  const clips = generateMockViralClips();
-  orchestrator.setViralClips(sessionId, clips);
-  orchestrator.updateProgress(sessionId, 100, "Analysis complete");
-  await delay(200);
+  const currentTranscript = orchestrator.getSession(sessionId)!.transcript!;
+
+  try {
+    const clips = await llmService.findViralClips(
+      currentTranscript,
+      sessionDir,
+      (percent, message) => {
+        orchestrator.updateProgress(sessionId, percent, message);
+      }
+    );
+
+    orchestrator.setViralClips(sessionId, clips);
+  } catch (err) {
+    app.log.warn(err, "LLM viral detection failed, using empty clips");
+    orchestrator.setViralClips(sessionId, []);
+    orchestrator.updateProgress(sessionId, 100, "LLM unavailable — skipping clip detection");
+  }
 
   // Transition to READY
   orchestrator.transition(sessionId, "READY");
@@ -88,7 +93,7 @@ export async function transcribeRoute(app: FastifyInstance) {
 
       // Fire-and-forget
       runTranscription(sessionId, app).catch((err) => {
-        app.log.error(err, "Transcription failed");
+        app.log.error(err, "Transcription pipeline failed");
       });
 
       return { success: true as const };

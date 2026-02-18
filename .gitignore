@@ -7,3 +7,4 @@ output/
 *.mp4
 .DS_Store
 server/whisper.cpp/
+server/models/

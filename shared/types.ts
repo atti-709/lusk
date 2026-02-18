@@ -66,6 +66,7 @@ export interface ProjectState {
   progress: number;
   message: string;
   videoUrl: string | null;
+  sourceScript: string | null;
   transcript: TranscriptData | null;
   captions: CaptionWord[] | null;
   viralClips: ViralClip[] | null;
