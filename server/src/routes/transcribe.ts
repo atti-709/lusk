@@ -59,10 +59,27 @@ async function runTranscription(sessionId: string, app: FastifyInstance): Promis
     }
   }
 
-  // Phase 3: Analysis (LLM) - skipped for now
-  // Walk through required states so the orchestrator doesn't reject the transition
+  // Phase 3: Analysis (LLM)
   orchestrator.transition(sessionId, "ANALYZING");
-  orchestrator.setViralClips(sessionId, []);
+  
+  // Use aligned transcript if available, otherwise original
+  const currentTranscript = session.sourceScript 
+    ? orchestrator.getSession(sessionId)?.transcript ?? transcript 
+    : transcript;
+
+  try {
+    const viralClips = await llmService.findViralClips(
+      currentTranscript,
+      sessionDir,
+      (percent, message) => {
+        orchestrator.updateProgress(sessionId, percent, message);
+      }
+    );
+    orchestrator.setViralClips(sessionId, viralClips);
+  } catch (err) {
+    console.error("Analysis failed", err);
+    orchestrator.setViralClips(sessionId, []);
+  }
 
   // Transition to READY
   orchestrator.transition(sessionId, "READY");
