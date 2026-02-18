@@ -6,3 +6,4 @@ output/
 *.log
 *.mp4
 .DS_Store
+server/whisper.cpp/

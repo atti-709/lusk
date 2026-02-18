@@ -4,6 +4,7 @@ import type {
   ProjectState,
   ProgressEvent,
   TranscriptData,
+  CaptionWord,
   ViralClip,
 } from "@lusk/shared";
 
@@ -29,6 +30,7 @@ class Orchestrator extends EventEmitter {
       message: "Upload complete",
       videoUrl,
       transcript: null,
+      captions: null,
       viralClips: null,
       outputUrl: null,
     };
@@ -65,6 +67,11 @@ class Orchestrator extends EventEmitter {
   setTranscript(id: string, transcript: TranscriptData): void {
     const session = this.requireSession(id);
     session.transcript = transcript;
+  }
+
+  setCaptions(id: string, captions: CaptionWord[]): void {
+    const session = this.requireSession(id);
+    session.captions = captions;
   }
 
   setViralClips(id: string, clips: ViralClip[]): void {

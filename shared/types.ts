@@ -52,6 +52,14 @@ export interface ViralClip {
   hookText: string;
 }
 
+export interface CaptionWord {
+  text: string;
+  startMs: number;
+  endMs: number;
+  timestampMs: number | null;
+  confidence: number | null;
+}
+
 export interface ProjectState {
   sessionId: string;
   state: PipelineState;
@@ -59,6 +67,7 @@ export interface ProjectState {
   message: string;
   videoUrl: string | null;
   transcript: TranscriptData | null;
+  captions: CaptionWord[] | null;
   viralClips: ViralClip[] | null;
   outputUrl: string | null;
 }

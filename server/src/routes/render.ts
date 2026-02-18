@@ -28,7 +28,7 @@ export async function renderRoute(app: FastifyInstance) {
   app.post<{ Body: RenderRequest; Reply: { success: true } | ErrorResponse }>(
     "/api/render",
     async (request, reply) => {
-      const { sessionId } = request.body ?? {};
+      const { sessionId } = (request.body ?? {}) as Partial<RenderRequest>;
 
       if (!sessionId) {
         return reply.status(400).send({ success: false, error: "sessionId is required" });
