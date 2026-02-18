@@ -1,4 +1,4 @@
-import { AbsoluteFill } from "remotion";
+import { AbsoluteFill, Sequence } from "remotion";
 import { Video } from "@remotion/media";
 import type { Caption } from "@remotion/captions";
 import { CaptionOverlay } from "./CaptionOverlay";
@@ -24,18 +24,19 @@ export function VideoComposition({
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       {/* Video layer: horizontal podcast cropped to 9:16 */}
       <AbsoluteFill>
-        <Video
-          src={videoUrl}
-          startFrom={startFrom}
-          style={{
-            width: "177.78%", // 16/9 of container width to fill vertically
-            height: "100%",
-            objectFit: "cover",
-            position: "absolute",
-            left: "50%",
-            transform: `translateX(calc(-50% + ${offsetX}px))`,
-          }}
-        />
+        <Sequence from={-startFrom}>
+          <Video
+            src={videoUrl}
+            style={{
+              width: "177.78%", // 16/9 of container width to fill vertically
+              height: "100%",
+              objectFit: "cover",
+              position: "absolute",
+              left: "50%",
+              transform: `translateX(calc(-50% + ${offsetX}px))`,
+            }}
+          />
+        </Sequence>
       </AbsoluteFill>
 
       {/* Caption layer */}
