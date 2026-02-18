@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { PipelineState } from "@lusk/shared";
 import "./PipelineStepper.css";
 
@@ -18,8 +19,7 @@ interface PipelineStepperProps {
   progress: number;
   message: string;
   videoUrl: string | null;
-  outputUrl: string | null;
-  onTranscribe: () => void;
+  onTranscribe: (sourceScript?: string) => void;
 }
 
 function getStepStatus(
@@ -38,9 +38,10 @@ export function PipelineStepper({
   progress,
   message,
   videoUrl,
-  outputUrl,
   onTranscribe,
 }: PipelineStepperProps) {
+  const [scriptText, setScriptText] = useState("");
+
   const isProcessing = [
     "TRANSCRIBING",
     "ALIGNING",
@@ -101,9 +102,25 @@ export function PipelineStepper({
       {/* Action area */}
       <div className="actions">
         {currentState === "UPLOADING" && (
-          <button className="primary" onClick={onTranscribe}>
-            Start Transcription
-          </button>
+          <div className="script-section">
+            <label className="script-label" htmlFor="source-script">
+              Original text <span className="optional">(optional)</span>
+            </label>
+            <textarea
+              id="source-script"
+              className="script-textarea"
+              placeholder="Paste the original script here to improve caption accuracy (diacritics, spelling)…"
+              value={scriptText}
+              onChange={(e) => setScriptText(e.target.value)}
+              rows={5}
+            />
+            <button
+              className="primary"
+              onClick={() => onTranscribe(scriptText.trim() || undefined)}
+            >
+              Start Transcription
+            </button>
+          </div>
         )}
       </div>
     </div>

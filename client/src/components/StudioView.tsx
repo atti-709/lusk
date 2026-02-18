@@ -42,7 +42,7 @@ export function StudioView({
   const remotionCaptions: Caption[] = useMemo(
     () =>
       captions
-        .filter((c) => c.startMs >= clip.startMs && c.endMs <= clip.endMs)
+        .filter((c) => c.endMs > clip.startMs && c.startMs < clip.endMs)
         .map((c) => ({
           text: c.text,
           startMs: c.startMs - clip.startMs,

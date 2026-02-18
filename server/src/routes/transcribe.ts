@@ -25,45 +25,11 @@ async function runTranscription(sessionId: string, app: FastifyInstance): Promis
   orchestrator.setTranscript(sessionId, transcript);
   orchestrator.setCaptions(sessionId, captions);
 
-  // Phase 2: Alignment (only if source script was provided)
+  // Phase 2 & 3: Alignment + LLM (skipped for now)
+  // Walk through required states so the orchestrator doesn't reject the transition
   orchestrator.transition(sessionId, "ALIGNING");
-
-  if (session.sourceScript) {
-    orchestrator.updateProgress(sessionId, 20, "Aligning with source text...");
-
-    const aligned = alignTranscript(transcript, session.sourceScript);
-    orchestrator.setTranscript(sessionId, aligned);
-
-    await writeFile(
-      join(sessionDir, "aligned-transcript.json"),
-      JSON.stringify(aligned, null, 2)
-    );
-
-    orchestrator.updateProgress(sessionId, 100, "Alignment complete");
-  } else {
-    orchestrator.updateProgress(sessionId, 100, "No source script — skipping alignment");
-  }
-
-  // Phase 3: Viral clip detection via LLM
   orchestrator.transition(sessionId, "ANALYZING");
-
-  const currentTranscript = orchestrator.getSession(sessionId)!.transcript!;
-
-  try {
-    const clips = await llmService.findViralClips(
-      currentTranscript,
-      sessionDir,
-      (percent, message) => {
-        orchestrator.updateProgress(sessionId, percent, message);
-      }
-    );
-
-    orchestrator.setViralClips(sessionId, clips);
-  } catch (err) {
-    app.log.warn(err, "LLM viral detection failed, using empty clips");
-    orchestrator.setViralClips(sessionId, []);
-    orchestrator.updateProgress(sessionId, 100, "LLM unavailable — skipping clip detection");
-  }
+  orchestrator.setViralClips(sessionId, []);
 
   // Transition to READY
   orchestrator.transition(sessionId, "READY");

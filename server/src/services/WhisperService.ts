@@ -1,11 +1,9 @@
 import path from "node:path";
-import { execSync } from "node:child_process";
-import { access, writeFile } from "node:fs/promises";
+import { execSync, spawn } from "node:child_process";
+import { access, writeFile, readFile } from "node:fs/promises";
 import {
   installWhisperCpp,
   downloadWhisperModel,
-  transcribe,
-  toCaptions,
 } from "@remotion/install-whisper-cpp";
 import type { TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
 
@@ -18,6 +16,17 @@ export interface TranscriptionResult {
 }
 
 type ProgressCallback = (percent: number, message: string) => void;
+
+/** Shape of one segment in whisper-cli's --output-json */
+interface WhisperJsonSegment {
+  timestamps: { from: string; to: string };
+  offsets: { from: number; to: number };
+  text: string;
+}
+
+interface WhisperJsonOutput {
+  transcription: WhisperJsonSegment[];
+}
 
 class WhisperService {
   private whisperPath: string;
@@ -75,6 +84,65 @@ class WhisperService {
     onProgress?.(5, "Audio extracted");
   }
 
+  /**
+   * Call whisper-cli directly (bypassing Remotion's transcribe wrapper)
+   * to get clean sentence-level segments with correct Slovak characters.
+   * Remotion's wrapper produces 1 BPE token per segment and corrupts
+   * multi-byte chars (ľ, Ľ, ď, ň, ť) to U+FFFD.
+   */
+  private async runWhisperCli(
+    audioPath: string,
+    outputBase: string,
+    onProgress?: ProgressCallback
+  ): Promise<WhisperJsonOutput> {
+    const cliBin = path.join(this.whisperPath, "build", "bin", "whisper-cli");
+    const modelFile = path.join(
+      this.whisperPath,
+      `ggml-${MODEL}.bin`
+    );
+
+    return new Promise<WhisperJsonOutput>((resolve, reject) => {
+      const args = [
+        "-m", modelFile,
+        "-f", audioPath,
+        "-l", "sk",
+        "--no-prints",
+        "-oj",                   // --output-json
+        "-of", outputBase,       // output file base (produces outputBase.json)
+      ];
+
+      const proc = spawn(cliBin, args, { stdio: ["ignore", "pipe", "pipe"] });
+
+      let stderr = "";
+      proc.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+        // Parse progress from whisper-cli stderr if available
+        const match = /progress\s*=\s*(\d+)%/i.exec(stderr.slice(-200));
+        if (match) {
+          const pct = 16 + Math.round(parseInt(match[1]) * 0.79);
+          onProgress?.(pct, "Transcribing audio...");
+        }
+      });
+
+      proc.on("close", async (code) => {
+        if (code !== 0) {
+          return reject(new Error(`whisper-cli exited with code ${code}: ${stderr.slice(-500)}`));
+        }
+
+        try {
+          const jsonPath = `${outputBase}.json`;
+          const raw = await readFile(jsonPath, "utf-8");
+          const parsed: WhisperJsonOutput = JSON.parse(raw);
+          resolve(parsed);
+        } catch (err) {
+          reject(new Error(`Failed to parse whisper JSON: ${err}`));
+        }
+      });
+
+      proc.on("error", reject);
+    });
+  }
+
   async transcribe(
     sessionDir: string,
     onProgress?: ProgressCallback
@@ -88,51 +156,62 @@ class WhisperService {
     // Step 2: Ensure binary + model
     await this.ensureInstalled(onProgress);
 
-    // Step 3: Transcribe
+    // Step 3: Transcribe via whisper-cli directly
+    // This gives clean sentence-level segments with correct Slovak characters.
     onProgress?.(16, "Starting transcription...");
 
-    const whisperOutput = await transcribe({
-      inputPath: audioWav,
-      whisperPath: this.whisperPath,
-      whisperCppVersion: WHISPER_CPP_VERSION,
-      model: MODEL,
-      tokenLevelTimestamps: true,
-      language: "sk",
-      printOutput: false,
-      onProgress: (p) => {
-        const pct = 16 + Math.round(p * 79);
-        onProgress?.(pct, "Transcribing audio...");
-      },
-    });
+    const outputBase = path.join(sessionDir, "whisper-raw");
+    const whisperOutput = await this.runWhisperCli(audioWav, outputBase, onProgress);
 
     onProgress?.(96, "Processing results...");
 
-    // Save raw whisper output for debugging
-    await writeFile(
-      path.join(sessionDir, "whisper-raw.json"),
-      JSON.stringify(whisperOutput, null, 2)
-    );
-
-    // Step 4: Convert to captions
-    const { captions } = toCaptions({ whisperCppOutput: whisperOutput });
-
-    // Step 5: Build TranscriptData from whisper output
+    // Build word-level data from sentence-level segments.
+    // Each segment is a phrase/sentence with a time range — we split by
+    // whitespace and distribute the segment duration proportionally.
     const words: TranscriptWord[] = [];
+    const captions: CaptionWord[] = [];
+
     for (const segment of whisperOutput.transcription) {
-      for (const token of segment.tokens) {
-        const text = token.text.trim();
-        if (!text) continue;
+      const segText = segment.text.trim();
+      if (!segText) continue;
+
+      const segWords = segText.split(/\s+/);
+      const segStartMs = segment.offsets.from;
+      const segEndMs = segment.offsets.to;
+      const segDuration = segEndMs - segStartMs;
+
+      // Distribute time proportionally by character count
+      const totalChars = segWords.reduce((sum, w) => sum + w.length, 0);
+      let cursor = segStartMs;
+
+      for (const wordText of segWords) {
+        const wordDuration =
+          totalChars > 0
+            ? Math.round((wordText.length / totalChars) * segDuration)
+            : Math.round(segDuration / segWords.length);
+        const wordStart = cursor;
+        const wordEnd = Math.min(cursor + wordDuration, segEndMs);
+        cursor = wordEnd;
+
         words.push({
-          word: text,
-          startMs: token.offsets.from,
-          endMs: token.offsets.to,
+          word: wordText,
+          startMs: wordStart,
+          endMs: wordEnd,
+        });
+
+        captions.push({
+          text: captions.length === 0 ? wordText : ` ${wordText}`,
+          startMs: wordStart,
+          endMs: wordEnd,
+          timestampMs: wordStart,
+          confidence: null,
         });
       }
     }
 
     const transcript: TranscriptData = {
       words,
-      text: whisperOutput.transcription.map((s) => s.text).join(" ").trim(),
+      text: words.map((w) => w.word).join(" "),
     };
 
     // Save processed outputs for debugging

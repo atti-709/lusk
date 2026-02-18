@@ -32,11 +32,15 @@ class LlmService {
       modelsDir ?? path.join(import.meta.dirname, "../../models");
   }
 
-  private async ensureModel(): Promise<LlamaModel> {
+  private async ensureModel(): Promise<LlamaModel | null> {
     if (this.model) return this.model;
 
     const modelPath = path.join(this.modelsDir, MODEL_FILENAME);
-    await access(modelPath);
+    try {
+      await access(modelPath);
+    } catch {
+      return null;
+    }
 
     this.llama = await getLlama();
     this.model = await this.llama.loadModel({ modelPath });
@@ -90,6 +94,11 @@ class LlmService {
     onProgress?.(5, "Loading LLM...");
 
     const model = await this.ensureModel();
+
+    if (!model) {
+      onProgress?.(100, "LLM model not found — skipping clip detection");
+      return [];
+    }
 
     onProgress?.(20, "LLM loaded, analyzing transcript...");
 

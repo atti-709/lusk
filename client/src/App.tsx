@@ -25,12 +25,11 @@ function App() {
   const [captions, setCaptions] = useState<CaptionWord[]>([]);
   const [viralClips, setViralClips] = useState<ViralClip[]>([]);
   const [selectedClip, setSelectedClip] = useState<ViralClip | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null);
 
   const isReady = state && state.state === "READY";
-  const isStudio = selectedClip !== null && isReady;
-  const isProcessing =
-    state &&
-    !["UPLOADING", "READY", "RENDERING", "EXPORTED"].includes(state.state);
+  const isStudio = selectedClip !== null && !!isReady;
 
   // Check for existing sessions on mount
   useEffect(() => {
@@ -49,17 +48,30 @@ function App() {
       });
   }, []);
 
-  // Fetch project data when reaching READY state
+  // Fetch project data when reaching READY state and go straight to studio
   useEffect(() => {
     if (!sessionId || !isReady) return;
 
+    setProjectLoading(true);
     fetch(`/api/project/${sessionId}`)
       .then((r) => r.json())
       .then((data: ProjectState) => {
         if (data.captions) setCaptions(data.captions);
         if (data.viralClips) setViralClips(data.viralClips);
+
+        // Auto-navigate to studio with full video
+        // Estimate duration from last caption's endMs, or fall back to 10 min
+        const lastCaption = data.captions?.at(-1);
+        const durationMs = lastCaption ? lastCaption.endMs + 1000 : 600000;
+        setSelectedClip({
+          title: "Full video",
+          hookText: "",
+          startMs: 0,
+          endMs: durationMs,
+        } as ViralClip);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setProjectLoading(false));
   }, [sessionId, isReady]);
 
   const handleUploadComplete = useCallback((id: string) => {
@@ -85,8 +97,18 @@ function App() {
     setView("upload");
   }, []);
 
-  const handleTranscribe = useCallback(async () => {
+  const handleTranscribe = useCallback(async (sourceScript?: string) => {
     if (!sessionId) return;
+
+    // Upload source script if provided (for alignment step)
+    if (sourceScript) {
+      await fetch(`/api/project/${sessionId}/script`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: sourceScript }),
+      });
+    }
+
     await fetch("/api/transcribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -153,16 +175,21 @@ function App() {
             progress={state.progress}
             message={state.message}
             videoUrl={state.videoUrl}
-            outputUrl={state.outputUrl}
             onTranscribe={handleTranscribe}
           />
         </div>
+      )}
+
+      {/* Waiting for project data after reaching READY */}
+      {view === "session" && isReady && !isStudio && projectLoading && (
+        <div className="connecting">Loading clips</div>
       )}
 
       {/* Clip selection grid */}
       {view === "session" &&
         isReady &&
         !isStudio &&
+        !projectLoading &&
         state.videoUrl &&
         viralClips.length > 0 && (
           <div className="pipeline-stage">
@@ -171,6 +198,33 @@ function App() {
               videoUrl={state.videoUrl}
               onSelect={handleSelectClip}
             />
+          </div>
+        )}
+
+      {/* Fallback: no clips detected — open full video in studio */}
+      {view === "session" &&
+        isReady &&
+        !isStudio &&
+        !projectLoading &&
+        state.videoUrl &&
+        viralClips.length === 0 && (
+          <div className="pipeline-stage">
+            <div className="no-clips">
+              <p>No viral clips were detected.</p>
+              <button
+                className="primary"
+                onClick={() =>
+                  handleSelectClip({
+                    title: "Full video",
+                    hookText: "",
+                    startMs: 0,
+                    endMs: (captions.at(-1)?.endMs ?? 0) + 1000 || 600000,
+                  } as ViralClip)
+                }
+              >
+                Open in studio
+              </button>
+            </div>
           </div>
         )}
 

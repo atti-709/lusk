@@ -5,7 +5,7 @@ import { CaptionOverlay } from "./CaptionOverlay";
 
 export const COMP_WIDTH = 1080;
 export const COMP_HEIGHT = 1920;
-export const COMP_FPS = 30;
+export const COMP_FPS = 23.976;
 
 export type VideoCompositionProps = {
   videoUrl: string;
