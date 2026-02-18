@@ -132,7 +132,7 @@ ${transcript.text}`;
     // Parse JSON (or fallback to text)
     let parsedClips: LlmClipResponse["clips"] = [];
     
-    // 1. Try JSON parsing
+    // 1. Try strict JSON parsing
     try {
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -145,7 +145,23 @@ ${transcript.text}`;
       console.warn("JSON parsing failed, attempting fallback...", e);
     }
 
-    // 2. Fallback: Regex parsing for text format
+    // 2. Try extracting "clips": [...] array directly
+    // This handles cases where the outer object is malformed but the array is valid
+    if (parsedClips.length === 0) {
+      try {
+        const arrayMatch = response.match(/"clips"\s*:\s*(\[[\s\S]*?\])/);
+        if (arrayMatch) {
+             const clips = JSON.parse(arrayMatch[1]);
+             if (Array.isArray(clips)) {
+               parsedClips = clips;
+             }
+        }
+      } catch (e) {
+        console.warn("Array extraction failed, attempting fallback...", e);
+      }
+    }
+
+    // 3. Fallback: Regex parsing for text format
     // Matches format like: Title: "..." HookText: "..." QuoteStart: "..." QuoteEnd: "..."
     if (parsedClips.length === 0) {
       const clipBlocks = response.split(/\*\*Clip \d+:?\*\*/i).slice(1); // Skip preamble
@@ -162,12 +178,12 @@ ${transcript.text}`;
          }
       }
       
-      // If split failed, try global regex on the whole text
+      // If split failed, try global regex on the whole text (handles JSON-like keys in text)
       if (parsedClips.length === 0) {
-         const titles = [...response.matchAll(/Title:\s*"(.*?)"/gi)].map(m => m[1]);
-         const hooks = [...response.matchAll(/HookText:\s*"(.*?)"/gi)].map(m => m[1]);
-         const starts = [...response.matchAll(/QuoteStart:\s*"(.*?)"/gi)].map(m => m[1]);
-         const ends = [...response.matchAll(/QuoteEnd:\s*"(.*?)"/gi)].map(m => m[1]);
+         const titles = [...response.matchAll(/("title"|Title)\s*:\s*"(.*?)"/gi)].map(m => m[2]);
+         const hooks = [...response.matchAll(/("hookText"|HookText)\s*:\s*"(.*?)"/gi)].map(m => m[2]);
+         const starts = [...response.matchAll(/("quoteStart"|QuoteStart)\s*:\s*"(.*?)"/gi)].map(m => m[2]);
+         const ends = [...response.matchAll(/("quoteEnd"|QuoteEnd)\s*:\s*"(.*?)"/gi)].map(m => m[2]);
          
          const count = Math.min(titles.length, hooks.length, starts.length, ends.length);
          for (let i = 0; i < count; i++) {
