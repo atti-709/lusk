@@ -259,4 +259,98 @@ export async function alignRoute(app: FastifyInstance) {
       }
     }
   );
+// Helper to format SRT timestamp: HH:MM:SS,mmm
+function msToSrtTimestamp(ms: number): string {
+  const date = new Date(ms);
+  const h = String(Math.floor(ms / 3600000)).padStart(2, "0");
+  const m = String(date.getUTCMinutes()).padStart(2, "0");
+  const s = String(date.getUTCSeconds()).padStart(2, "0");
+  const msStr = String(date.getUTCMilliseconds()).padStart(3, "0");
+  return `${h}:${m}:${s},${msStr}`;
+}
+
+function captionsToSrt(captions: CaptionWord[]): string {
+  let srt = "";
+  let index = 1;
+  const GROUP_SIZE = 4000; // ~4 seconds per subtitle block? 
+  // Wait, `CaptionWord` is word-level. We need to group them into sentences or meaningful blocks for SRT?
+  // User just said "corrected subtitles for youtube". YouTube handles SRTs well.
+  // If we just dump 1 word per line it's terrible.
+  // BUT the "captions" we have in `orchestrator` are `CaptionWord[]`.
+  // We need to group them.
+  // Actually, let's keep it simple: group by ~3-5 seconds or sentence endings?
+  // Ideally, we'd use the original `Whisper` segments if we had them. But we only have words.
+  // Let's implement a simple greedy packer: max 42 chars per line, max 2 lines per subtitle.
+  
+  // Simple strategy: Group words into blocks until gap > 1s OR max chars reached.
+  
+  let currentBlock: CaptionWord[] = [];
+  let lastEnd = 0;
+  
+  for (const word of captions) {
+    // If gap is too large, start new block
+    if (currentBlock.length > 0 && word.startMs - lastEnd > 1000) {
+       srt += formatSrtBlock(index++, currentBlock);
+       currentBlock = [];
+    }
+    
+    currentBlock.push(word);
+    lastEnd = word.endMs;
+    
+    // Check length limit (rough heuristic: 80 chars)
+    const textLen = currentBlock.reduce((acc, w) => acc + w.text.trim().length + 1, 0);
+    if (textLen > 80) {
+       srt += formatSrtBlock(index++, currentBlock);
+       currentBlock = [];
+    }
+  }
+  
+  if (currentBlock.length > 0) {
+    srt += formatSrtBlock(index++, currentBlock);
+  }
+  
+  return srt;
+}
+
+function formatSrtBlock(index: number, words: CaptionWord[]): string {
+  if (words.length === 0) return "";
+  const start = msToSrtTimestamp(words[0].startMs);
+  const end = msToSrtTimestamp(words[words.length - 1].endMs);
+  const text = words.map(w => w.text.trim()).join(" ");
+  return `${index}\n${start} --> ${end}\n${text}\n\n`;
+}
+
+// ... inside alignRoute function ...
+
+  // 5e. Download captions as SRT
+  app.get<{ Params: { sessionId: string }; Reply: string | ErrorResponse }>(
+    "/api/project/:sessionId/captions.srt",
+    async (request, reply) => {
+      const { sessionId } = request.params;
+      const session = orchestrator.getSession(sessionId);
+
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+      if (!session.captions) {
+         // Fallback to transcript words if captions not set? 
+         // But `captions` should be set by align/viral-clips steps.
+         // If we are in REVIEW, captions exist.
+         // If they don't, try correct transcript?
+         if (session.transcript) {
+            // Convert transcript words to captions format on the fly if needed
+            session.captions = wordsToCaptions(session.transcript.words);
+         } else {
+            return reply.status(400).send({ success: false, error: "No captions available" });
+         }
+      }
+
+      const srt = captionsToSrt(session.captions);
+      
+      return reply
+        .header("Content-Type", "application/x-subrip")
+        .header("Content-Disposition", 'attachment; filename="captions.srt"')
+        .send(srt);
+    }
+  );
 }

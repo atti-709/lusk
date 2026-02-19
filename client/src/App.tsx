@@ -287,6 +287,20 @@ function App() {
                   ← Back to Align & Analyze
                 </button>
                 <button
+                  className="secondary"
+                  onClick={() => {
+                    const url = `/api/project/${sessionId}/captions.srt`;
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "captions.srt";
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                  }}
+                >
+                  Download .srt
+                </button>
+                <button
                   className="primary"
                   onClick={() => setReadySubView("clips")}
                 >
