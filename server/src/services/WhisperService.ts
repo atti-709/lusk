@@ -262,6 +262,7 @@ class WhisperService {
     }));
 
     const transcript: TranscriptData = {
+      text: words.map((w) => w.word).join(""),
       words,
     };
 

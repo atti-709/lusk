@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
+import archiver from "archiver";
 import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord } from "@lusk/shared";
 
 // ── Helpers ──
@@ -78,7 +79,7 @@ function wordsToCaptions(words: TranscriptWord[]): CaptionWord[] {
 
 export async function alignRoute(app: FastifyInstance) {
   // 5a. Download transcript as TSV
-  app.get<{ Params: { sessionId: string }; Reply: string | ErrorResponse }>(
+  app.get<{ Params: { sessionId: string }; Reply: string | ErrorResponse | unknown }>(
     "/api/project/:sessionId/transcript.tsv",
     async (request, reply) => {
       const { sessionId } = request.params;
@@ -92,10 +93,48 @@ export async function alignRoute(app: FastifyInstance) {
       }
 
       const tsv = wordsToTsv(session.transcript.words);
-      return reply
-        .header("Content-Type", "text/tab-separated-values")
-        .header("Content-Disposition", 'attachment; filename="transcription.tsv"')
-        .send(tsv);
+      const lines = tsv.split("\n");
+
+      // If short enough, download as single file
+      if (lines.length <= 2000) {
+        return reply
+          .header("Content-Type", "text/tab-separated-values")
+          .header("Content-Disposition", 'attachment; filename="transcription.tsv"')
+          .send(tsv);
+      }
+
+      // Otherwise, create a zip with chunks
+      const archive = archiver("zip", {
+        zlib: { level: 9 }, // Sets the compression level.
+      });
+
+      reply.header("Content-Type", "application/zip");
+      reply.header("Content-Disposition", 'attachment; filename="transcription_chunked.zip"');
+
+      // Pipe archive data to the response
+      // Fastify handles streams if we return the stream in send()
+      // However, archiver needs to be finalized.
+      
+      archive.on("error", (err: unknown) => {
+        throw err;
+      });
+
+      // 1. Add full transcript
+      archive.append(tsv, { name: "transcription_full.tsv" });
+
+      // 2. Add chunks
+      const CHUNK_SIZE = 2000;
+      let part = 1;
+      for (let i = 0; i < lines.length; i += CHUNK_SIZE) {
+        const chunk = lines.slice(i, i + CHUNK_SIZE).join("\n");
+        archive.append(chunk, { name: `transcription_part_${part}.tsv` });
+        part++;
+      }
+
+      // Finalize the archive (this indicates we are done appending)
+      archive.finalize();
+
+      return reply.send(archive);
     }
   );
 
@@ -131,6 +170,7 @@ export async function alignRoute(app: FastifyInstance) {
         const correctedWords = parseTsv(rawBody, fallbackEndMs);
 
         const correctedTranscript = {
+          text: "", // TODO: Reconstruct if needed, but for alignment words are key
           words: correctedWords,
         };
 

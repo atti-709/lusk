@@ -93,7 +93,7 @@ describe("Orchestrator", () => {
 
   it("setTranscript() stores transcript data", () => {
     orc.createSession("s1", "/v.mp4");
-    const transcript = { words: [{ word: "ahoj", startMs: 0, endMs: 500 }] };
+    const transcript = { text: "ahoj", words: [{ word: "ahoj", startMs: 0, endMs: 500 }] };
     orc.setTranscript("s1", transcript);
     expect(orc.toProjectState("s1")!.transcript).toEqual(transcript);
   });

@@ -28,17 +28,8 @@ export function AlignStep({ sessionId }: AlignStepProps) {
       .catch(() => {});
   }, []);
 
-  // Prefill both textareas from session data
+  // Prefill viral clips text from stored clips
   useEffect(() => {
-    // Prefill corrected TSV
-    fetch(`/api/project/${sessionId}/transcript.tsv`)
-      .then((res) => (res.ok ? res.text() : ""))
-      .then((text) => {
-        if (text) setCorrectedTsv(text);
-      })
-      .catch(() => {});
-
-    // Prefill viral clips text from stored clips
     fetch(`/api/project/${sessionId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -61,11 +52,17 @@ export function AlignStep({ sessionId }: AlignStepProps) {
   const handleDownloadTsv = useCallback(async () => {
     const res = await fetch(`/api/project/${sessionId}/transcript.tsv`);
     if (!res.ok) return;
+    
+    // Check content type to determine extension (zip vs tsv)
+    const contentType = res.headers.get("Content-Type") || "";
+    const isZip = contentType.includes("zip");
+    const filename = isZip ? "transcription.zip" : "transcription.tsv";
+
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "transcription.tsv";
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   }, [sessionId]);

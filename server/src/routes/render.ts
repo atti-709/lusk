@@ -74,8 +74,8 @@ export async function renderRoute(app: FastifyInstance) {
   app.post<{ Body: RenderRequest; Reply: { success: true } | ErrorResponse }>(
     "/api/render",
     async (request, reply) => {
-      const { sessionId, clip, offsetX, captions } =
-        (request.body ?? {}) as Partial<RenderRequest>;
+      const body = (request.body ?? {}) as any;
+      const { sessionId, clip, offsetX, captions } = body;
 
       if (!sessionId || !clip) {
         return reply

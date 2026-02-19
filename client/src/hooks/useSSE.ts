@@ -21,6 +21,11 @@ export function useSSE(sessionId: string | null): UseSSEResult {
       return;
     }
 
+    // Clear stale state from previous session immediately
+    setState(null);
+    setIsConnected(false);
+    setError(null);
+
     const es = new EventSource(`/api/events/${sessionId}`);
     eventSourceRef.current = es;
 
