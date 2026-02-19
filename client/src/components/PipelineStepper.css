@@ -98,6 +98,18 @@
   color: var(--text-muted);
 }
 
+.step.clickable {
+  cursor: pointer;
+}
+
+.step.clickable:hover .step-dot {
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.step.clickable:hover .step-label {
+  color: var(--accent);
+}
+
 /* ── Video preview ── */
 .video-preview {
   width: 100%;
@@ -317,4 +329,39 @@
   align-items: center;
   gap: 0.5rem;
   cursor: pointer;
+}
+
+/* ── Review step ── */
+.review-step {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin: 0 auto;
+}
+
+.review-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text);
+}
+
+.review-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0;
+  text-align: center;
+}
+
+.review-player {
+  width: 100%;
+  max-width: 400px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
 }
