@@ -5,63 +5,28 @@ interface AlignStepProps {
   sessionId: string;
 }
 
-const CORRECTION_PROMPT = `# Task: Word-Level Transcription Alignment and Correction (Slovak)
-
-I have uploaded two files with this prompt:
-1. A **.md** file containing the master reference script. Note: This script is often written WITHOUT diacritics.
-2. A **.tsv** file containing a raw word-level transcription chunk (Format: \`Timestamp\` [TAB] \`Word/Phrase\`).
-
-### Your Role:
-Act as a professional Slovak editor. Your goal is to fetch and read both files, then correct the text in the **.tsv** file. Use the **.md** text as your definitive reference for structural accuracy, specialized names, and theology. However, rely on your advanced Slovak language skills to ensure the final output has flawless grammar and diacritics.
-
-### Strict Guidelines:
-1. **Maintain Format:** The output must remain a valid **.tsv**. Do not add headers, extra columns, or change the timestamps in the first column.
-2. **One-to-One Mapping:** Do NOT merge, split, or delete lines. Every row in the input must have exactly one corresponding row in the output to preserve video caption timing.
-3. **Punctuation & Capitalization:** Base all capitalization and punctuation on the .md reference text. Attach commas, periods, and other punctuation directly to the word immediately preceding them (e.g., \`slovo,\` not \`slovo ,\`).
-4. **Slovak Grammar & Diacritics (CRITICAL):** * The .md script is missing most diacritics. **Do not strip diacritics from the .tsv to match the .md.** * If the transcript finds words with diacritics and the script does not contain them, prefer the version with diacritics.
-   * Apply your native-level Slovak LLM skills to add missing accents (\`mäkčene\`, \`dĺžne\`), fix missing leading letters (e.g., \`akujem\` → \`Ďakujem\`), and correct noun/adjective declensions (\`pády\`).
-5. **Theological & Name Accuracy:** Ensure names and specialized terms match the .md reference text's intent perfectly, just properly formatted with diacritics.
-6. **Respect the Spoken Word:** If the host naturally deviated from the script but the spoken word is grammatically correct Slovak, keep it. Only fix AI hallucinations, misspellings, or mangled grammar.
-7. **Filler Words:** If the speaker uses filler words (*vlastne*, *akože*, *ehm*) not present in the .md script, correct their spelling and keep them in the .tsv on their original timestamps to preserve the flow.
-
-### Output:
-Provide the corrected **.tsv** content inside a single code block. Do not add any conversational text before or after the code block.`;
-
-const VIRAL_CLIP_PROMPT = `Based on the corrected transcript, identify 4-8 segments (15-60 seconds each) that would make the most viral short-form video clips. Look for:
-- Strong emotional hooks or controversial statements
-- Self-contained stories or arguments
-- Surprising facts or revelations
-- Moments with high energy or passion
-
-Pay CRITICAL attention to clip boundaries, especially the ENDINGS:
-1. **Start Strong:** Each clip must START at the beginning of a sentence or a clear thought. Never start mid-sentence.
-2. **Narrative Closure:** The end of the clip MUST resolve the premise introduced in the hook. Do not end the clip just because you reached the 40-second mark. If the current thought requires the next sentence to make sense, include it.
-3. **The "Mic-Drop" Rule:** The final sentence should feel like a natural, impactful conclusion, punchline, or thought-provoking statement. It should leave the viewer satisfied, not confused.
-4. **Avoid Cliffhangers:** Ensure the final sentence does not accidentally introduce a brand new idea that gets cut off. 
-
-For each clip, provide the output in EXACTLY this format:
-
-CLIP 1
-Title: [Short catchy title for the clip]
-Hook: [The opening hook text that grabs attention]
-Start: [Timestamp of the first word, copied exactly from the TSV]
-End: [Timestamp of the last word, copied exactly from the TSV]
-
-CLIP 2
-Title: ...
-Hook: ...
-Start: ...
-End: ...
-
-IMPORTANT: Verify that the exact text between your chosen Start and End timestamps forms a complete, logical, and satisfying narrative from start to finish. Use the exact timestamps from the TSV file. Do not approximate.`;
-
 export function AlignStep({ sessionId }: AlignStepProps) {
   const [correctionCopied, setCorrectionCopied] = useState(false);
   const [viralCopied, setViralCopied] = useState(false);
   const [correctedTsv, setCorrectedTsv] = useState("");
   const [viralText, setViralText] = useState("");
+  const [correctionPrompt, setCorrectionPrompt] = useState("");
+  const [viralClipPrompt, setViralClipPrompt] = useState("");
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [submitError, setSubmitError] = useState("");
+
+  // Fetch prompts on mount
+  useEffect(() => {
+    fetch("/prompts/correction.md")
+      .then((res) => res.text())
+      .then(setCorrectionPrompt)
+      .catch(() => {});
+      
+    fetch("/prompts/viral-clips.md")
+      .then((res) => res.text())
+      .then(setViralClipPrompt)
+      .catch(() => {});
+  }, []);
 
   // Prefill both textareas from session data
   useEffect(() => {
@@ -175,10 +140,10 @@ export function AlignStep({ sessionId }: AlignStepProps) {
         <p className="align-section-desc">
           Upload the TSV and your original script (markdown) to Gemini, then paste the prompt below.
         </p>
-        <pre className="align-prompt-box">{CORRECTION_PROMPT}</pre>
+        <pre className="align-prompt-box">{correctionPrompt}</pre>
         <button
           className="secondary"
-          onClick={() => handleCopyPrompt(CORRECTION_PROMPT, setCorrectionCopied)}
+          onClick={() => handleCopyPrompt(correctionPrompt, setCorrectionCopied)}
         >
           {correctionCopied ? "✓ Copied!" : "Copy Prompt"}
         </button>
@@ -211,10 +176,10 @@ export function AlignStep({ sessionId }: AlignStepProps) {
         <p className="align-section-desc">
           Paste this as your next message in the same Gemini chat.
         </p>
-        <pre className="align-prompt-box">{VIRAL_CLIP_PROMPT}</pre>
+        <pre className="align-prompt-box">{viralClipPrompt}</pre>
         <button
           className="secondary"
-          onClick={() => handleCopyPrompt(VIRAL_CLIP_PROMPT, setViralCopied)}
+          onClick={() => handleCopyPrompt(viralClipPrompt, setViralCopied)}
         >
           {viralCopied ? "✓ Copied!" : "Copy Prompt"}
         </button>
