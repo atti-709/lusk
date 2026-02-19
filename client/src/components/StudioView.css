@@ -161,3 +161,11 @@
   border-radius: 2px;
   transition: width 0.3s ease;
 }
+
+.trim-duration {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
