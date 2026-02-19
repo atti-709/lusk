@@ -87,6 +87,7 @@ export interface RenderRequest {
   sessionId: string;
   clip: ViralClip;
   offsetX: number;
+  captions?: CaptionWord[];
 }
 
 export interface SessionSummary {

@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import { tempManager } from "../services/TempManager.js";
 import { renderService } from "../services/RenderService.js";
-import type { RenderRequest, ErrorResponse } from "@lusk/shared";
+import type { RenderRequest, ErrorResponse, CaptionWord } from "@lusk/shared";
 
 function clipKey(clip: { startMs: number; endMs: number }): string {
   return `${clip.startMs}-${clip.endMs}`;
@@ -12,7 +12,8 @@ async function runRender(
   sessionId: string,
   clip: RenderRequest["clip"],
   offsetX: number,
-  log: FastifyInstance["log"]
+  log: FastifyInstance["log"],
+  preProcessedCaptions?: CaptionWord[] // Actually these match key props of Caption
 ): Promise<void> {
   const key = clipKey(clip);
   const session = orchestrator.getSession(sessionId)!;
@@ -42,7 +43,8 @@ async function runRender(
           outputUrl: null,
         });
       },
-      outputFileName
+      outputFileName,
+      preProcessedCaptions as any // Cast to Remotion Caption[] as they are compatible
     );
 
     const outputUrl = `/static/${sessionId}/${outputFileName}`;
@@ -72,7 +74,7 @@ export async function renderRoute(app: FastifyInstance) {
   app.post<{ Body: RenderRequest; Reply: { success: true } | ErrorResponse }>(
     "/api/render",
     async (request, reply) => {
-      const { sessionId, clip, offsetX } =
+      const { sessionId, clip, offsetX, captions } =
         (request.body ?? {}) as Partial<RenderRequest>;
 
       if (!sessionId || !clip) {
@@ -107,7 +109,7 @@ export async function renderRoute(app: FastifyInstance) {
       }
 
       // Fire-and-forget
-      runRender(sessionId, clip, offsetX ?? 0, app.log).catch((err) => {
+      runRender(sessionId, clip, offsetX ?? 0, app.log, captions).catch((err) => {
         app.log.error(err, "Render pipeline failed");
       });
 

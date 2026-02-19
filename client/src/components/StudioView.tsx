@@ -33,7 +33,7 @@ interface StudioViewProps {
   videoUrl: string;
   captions: CaptionWord[];
   clip: ViralClip;
-  onRender: (clip: ViralClip, offsetX: number) => void;
+  onRender: (clip: ViralClip, offsetX: number, captions: Caption[]) => void;
   onBack: () => void;
   renders: Record<string, ClipRenderState>;
 }
@@ -101,6 +101,9 @@ export function StudioView({
 
   // Per-caption text overrides (keyed by global index)
   const [captionEdits, setCaptionEdits] = useState<Record<number, string>>({});
+  
+  // Caption timing offset (in ms) to adjust sync
+  const [captionOffset, setCaptionOffset] = useState(0);
 
   // The editable text shown in the textarea
   const captionText = useMemo(
@@ -110,9 +113,10 @@ export function StudioView({
     [clipCaptionIndices, captionEdits]
   );
 
-  // Reset edits when clip changes
+  // Reset edits/offset when clip changes
   useEffect(() => {
     setCaptionEdits({});
+    setCaptionOffset(0);
   }, [clip.startMs, clip.endMs]);
 
   const handleCaptionTextChange = useCallback(
@@ -142,12 +146,12 @@ export function StudioView({
     () =>
       clipCaptionIndices.map(({ caption, globalIndex }) => ({
         text: captionEdits[globalIndex] ?? caption.text,
-        startMs: caption.startMs - actualStartMs,
-        endMs: caption.endMs - actualStartMs,
-        timestampMs: caption.timestampMs != null ? caption.timestampMs - actualStartMs : null,
+        startMs: caption.startMs - actualStartMs + captionOffset,
+        endMs: caption.endMs - actualStartMs + captionOffset,
+        timestampMs: caption.timestampMs != null ? caption.timestampMs - actualStartMs + captionOffset : null,
         confidence: caption.confidence,
       })),
-    [clipCaptionIndices, captionEdits, actualStartMs]
+    [clipCaptionIndices, captionEdits, actualStartMs, captionOffset]
   );
 
   // Max trim range: ±5 seconds from original boundaries
@@ -155,8 +159,8 @@ export function StudioView({
   const clipDurationSec = ((effectiveEndMs - effectiveStartMs) / 1000).toFixed(1);
 
   const handleRender = useCallback(() => {
-    onRender(trimmedClip, offsetX);
-  }, [onRender, trimmedClip, offsetX]);
+    onRender(trimmedClip, offsetX, remotionCaptions);
+  }, [onRender, trimmedClip, offsetX, remotionCaptions]);
 
   return (
     <div className="studio">
@@ -265,7 +269,24 @@ export function StudioView({
             />
           </div>
 
-          {/* Render progress */}
+          {/* Caption Offset */}
+        <div className="control-group">
+          <label className="control-label">
+            Caption sync
+            <span className="control-value">{captionOffset >= 0 ? "+" : ""}{captionOffset}ms</span>
+          </label>
+          <input
+            type="range"
+            min={-1000}
+            max={1000}
+            step={50}
+            value={captionOffset}
+            onChange={(e) => setCaptionOffset(Number(e.target.value))}
+            className="offset-slider"
+          />
+        </div>
+
+        {/* Render progress */}
           {isRendering && (
             <div className="render-progress">
               <div className="render-progress-header">

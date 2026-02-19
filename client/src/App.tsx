@@ -126,12 +126,12 @@ function App() {
 
 
   const handleRender = useCallback(
-    async (clip: ViralClip, offsetX: number) => {
+    async (clip: ViralClip, offsetX: number, captions: any[]) => {
       if (!sessionId) return;
       await fetch("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, clip, offsetX }),
+        body: JSON.stringify({ sessionId, clip, offsetX, captions }),
       });
     },
     [sessionId]
@@ -273,15 +273,11 @@ function App() {
         state.videoUrl &&
         viralClips.length > 0 && (
           <div className="pipeline-stage">
-            <div className="clips-header">
-              <button className="secondary" onClick={() => setReadySubView("review")}>
-                ← Back to Review
-              </button>
-            </div>
             <ClipSelector
               clips={viralClips}
               videoUrl={state.videoUrl}
               onSelect={handleSelectClip}
+              onBack={() => setReadySubView("review")}
             />
           </div>
         )}

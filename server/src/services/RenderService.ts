@@ -41,7 +41,8 @@ class RenderService {
     offsetX: number,
     captions: CaptionWord[],
     onProgress?: ProgressCallback,
-    outputFileName: string = "output.mp4"
+    outputFileName: string = "output.mp4",
+    preProcessedCaptions?: Caption[]
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress);
     // Remotion's bundler serves from a temp dir — absolute file paths don't work.
@@ -57,8 +58,8 @@ class RenderService {
       Math.ceil(((clip.endMs - actualStartMs) / 1000) * COMP_FPS)
     );
 
-    // Filter and shift captions to clip-relative timing
-    const remotionCaptions: Caption[] = captions
+    // Use pre-processed captions if available, otherwise filter and shift raw transcripts
+    const remotionCaptions: Caption[] = preProcessedCaptions ?? captions
       .filter((c) => c.endMs > clip.startMs && c.startMs < clip.endMs)
       .map((c) => ({
         text: c.text,

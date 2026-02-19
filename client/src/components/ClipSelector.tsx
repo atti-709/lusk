@@ -55,15 +55,26 @@ interface ClipSelectorProps {
   clips: ViralClip[];
   videoUrl: string;
   onSelect: (clip: ViralClip) => void;
+  onBack: () => void;
 }
 
-export function ClipSelector({ clips, videoUrl, onSelect }: ClipSelectorProps) {
+export function ClipSelector({ clips, videoUrl, onSelect, onBack }: ClipSelectorProps) {
   return (
     <div className="clip-selector">
-      <h2>Pick a clip to edit</h2>
-      <p className="subtitle">
-        {clips.length} viral moment{clips.length !== 1 ? "s" : ""} detected
-      </p>
+      <div className="clip-selector-header">
+        <button className="secondary studio-back" onClick={onBack}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Back to Review
+        </button>
+        <div className="clip-selector-title-group">
+          <h2>Pick a clip to edit</h2>
+          <p className="subtitle">
+            {clips.length} viral moment{clips.length !== 1 ? "s" : ""} detected
+          </p>
+        </div>
+      </div>
 
       <div className="clip-grid">
         {clips.map((clip, i) => (
