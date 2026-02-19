@@ -176,16 +176,24 @@ function App() {
     // If not in session, do nothing or just stay
     if (view === "upload" || view === "loading") return;
 
-    // If we have existing sessions, go to resume dialog.
-    // Otherwise go to upload.
-    if (existingSessions.length > 0) {
-      setView("resume");
-    } else {
-      setView("upload");
-    }
+    // Fetch latest sessions to decide where to go
+    fetch("/api/sessions")
+      .then((r) => r.json())
+      .then((sessions: SessionSummary[]) => {
+        setExistingSessions(sessions);
+        if (sessions.length > 0) {
+          setView("resume");
+        } else {
+          setView("upload");
+        }
+      })
+      .catch(() => {
+        setView("upload");
+      });
+      
     // Note: We don't clear sessionId here to allow "resuming" the current active session easily 
     // unless the user picks a different one or deletes it.
-  }, [view, existingSessions.length]);
+  }, [view]);
 
   return (
     <div className="app">
