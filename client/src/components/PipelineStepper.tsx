@@ -8,8 +8,6 @@ const STEPS: { state: PipelineState; label: string }[] = [
   { state: "ALIGNING", label: "Align" },
   { state: "ANALYZING", label: "Analyze" },
   { state: "READY", label: "Review" },
-  { state: "RENDERING", label: "Render" },
-  { state: "EXPORTED", label: "Export" },
 ];
 
 const STATE_ORDER: PipelineState[] = STEPS.map((s) => s.state);

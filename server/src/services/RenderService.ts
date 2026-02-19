@@ -40,13 +40,14 @@ class RenderService {
     clip: { startMs: number; endMs: number },
     offsetX: number,
     captions: CaptionWord[],
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    outputFileName: string = "output.mp4"
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress);
     // Remotion's bundler serves from a temp dir — absolute file paths don't work.
     // Point at the Lusk server's static endpoint instead.
     const videoUrl = `${LUSK_SERVER_ORIGIN}/static/${sessionId}/input.mp4`;
-    const outputPath = path.join(sessionDir, "output.mp4");
+    const outputPath = path.join(sessionDir, outputFileName);
 
     // Replicate the frame quantization from StudioView
     const startFrame = Math.round((clip.startMs / 1000) * COMP_FPS);

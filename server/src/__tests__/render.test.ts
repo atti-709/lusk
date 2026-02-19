@@ -31,7 +31,10 @@ describe("POST /api/render", () => {
       method: "POST",
       url: "/api/render",
       headers: { "content-type": "application/json" },
-      payload: { sessionId: "nonexistent" },
+      payload: {
+        sessionId: "nonexistent",
+        clip: { title: "Test", startMs: 0, endMs: 30000, hookText: "hook" },
+      },
     });
     expect(response.statusCode).toBe(404);
   });
@@ -43,7 +46,10 @@ describe("POST /api/render", () => {
       method: "POST",
       url: "/api/render",
       headers: { "content-type": "application/json" },
-      payload: { sessionId: "render-409" },
+      payload: {
+        sessionId: "render-409",
+        clip: { title: "Test", startMs: 0, endMs: 30000, hookText: "hook" },
+      },
     });
     expect(response.statusCode).toBe(409);
   });
@@ -60,7 +66,11 @@ describe("POST /api/render", () => {
       method: "POST",
       url: "/api/render",
       headers: { "content-type": "application/json" },
-      payload: { sessionId: "render-ok" },
+      payload: {
+        sessionId: "render-ok",
+        clip: { title: "Test", startMs: 0, endMs: 30000, hookText: "hook" },
+        offsetX: 0,
+      },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().success).toBe(true);

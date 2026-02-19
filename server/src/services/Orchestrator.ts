@@ -8,6 +8,7 @@ import type {
   TranscriptData,
   CaptionWord,
   ViralClip,
+  ClipRenderState,
 } from "@lusk/shared";
 import { tempManager } from "./TempManager.js";
 
@@ -17,9 +18,9 @@ const TRANSITIONS: Record<PipelineState, PipelineState[]> = {
   TRANSCRIBING: ["ALIGNING"],
   ALIGNING: ["ANALYZING"],
   ANALYZING: ["READY"],
-  READY: ["RENDERING"],
+  READY: [],
   RENDERING: ["EXPORTED", "READY"],
-  EXPORTED: [],
+  EXPORTED: ["READY"],
 };
 
 class Orchestrator extends EventEmitter {
@@ -38,6 +39,7 @@ class Orchestrator extends EventEmitter {
       captions: null,
       viralClips: null,
       outputUrl: null,
+      renders: {},
     };
     this.sessions.set(id, state);
     this.emitProgress(state);
@@ -98,9 +100,17 @@ class Orchestrator extends EventEmitter {
     this.persistSession(id);
   }
 
-  setOutputUrl(id: string, url: string): void {
+  setOutputUrl(id: string, url: string | null): void {
     const session = this.requireSession(id);
     session.outputUrl = url;
+    this.persistSession(id);
+  }
+
+  updateClipRender(id: string, clipKey: string, renderState: ClipRenderState): void {
+    const session = this.requireSession(id);
+    if (!session.renders) session.renders = {};
+    session.renders[clipKey] = renderState;
+    this.emitProgress(session);
     this.persistSession(id);
   }
 

@@ -18,6 +18,7 @@ describe("Orchestrator", () => {
     expect(state.transcript).toBeNull();
     expect(state.viralClips).toBeNull();
     expect(state.outputUrl).toBeNull();
+    expect(state.renders).toEqual({});
   });
 
   it("transition() follows valid state flow", () => {
@@ -30,9 +31,7 @@ describe("Orchestrator", () => {
 
     orc.transition("s1", "ANALYZING");
     orc.transition("s1", "READY");
-    orc.transition("s1", "RENDERING");
-    orc.transition("s1", "EXPORTED");
-    expect(orc.toProjectState("s1")!.state).toBe("EXPORTED");
+    expect(orc.toProjectState("s1")!.state).toBe("READY");
   });
 
   it("transition() throws on invalid transition", () => {
@@ -45,6 +44,17 @@ describe("Orchestrator", () => {
   it("transition() throws for unknown session", () => {
     expect(() => orc.transition("nope", "TRANSCRIBING")).toThrow(
       "Session not found: nope"
+    );
+  });
+
+  it("READY has no global transitions (rendering is per-clip)", () => {
+    orc.createSession("s1", "/v.mp4");
+    orc.transition("s1", "TRANSCRIBING");
+    orc.transition("s1", "ALIGNING");
+    orc.transition("s1", "ANALYZING");
+    orc.transition("s1", "READY");
+    expect(() => orc.transition("s1", "RENDERING")).toThrow(
+      "Invalid transition: READY → RENDERING"
     );
   });
 
@@ -94,6 +104,56 @@ describe("Orchestrator", () => {
     orc.createSession("s1", "/v.mp4");
     orc.setOutputUrl("s1", "/static/s1/output.mp4");
     expect(orc.toProjectState("s1")!.outputUrl).toBe("/static/s1/output.mp4");
+  });
+
+  it("updateClipRender() stores per-clip render state", () => {
+    orc.createSession("s1", "/v.mp4");
+    orc.updateClipRender("s1", "0-30000", {
+      status: "rendering",
+      progress: 50,
+      message: "Rendering...",
+      outputUrl: null,
+    });
+    const state = orc.toProjectState("s1")!;
+    expect(state.renders["0-30000"]).toEqual({
+      status: "rendering",
+      progress: 50,
+      message: "Rendering...",
+      outputUrl: null,
+    });
+  });
+
+  it("updateClipRender() tracks multiple clips independently", () => {
+    orc.createSession("s1", "/v.mp4");
+    orc.updateClipRender("s1", "0-30000", {
+      status: "exported",
+      progress: 100,
+      message: "Done",
+      outputUrl: "/static/s1/output_0-30000.mp4",
+    });
+    orc.updateClipRender("s1", "30000-60000", {
+      status: "rendering",
+      progress: 25,
+      message: "Rendering...",
+      outputUrl: null,
+    });
+    const state = orc.toProjectState("s1")!;
+    expect(state.renders["0-30000"].status).toBe("exported");
+    expect(state.renders["30000-60000"].status).toBe("rendering");
+  });
+
+  it("updateClipRender() emits progress event", () => {
+    const events: ProgressEvent[] = [];
+    orc.on("progress", (e: ProgressEvent) => events.push(e));
+    orc.createSession("s1", "/v.mp4");
+    const countBefore = events.length;
+    orc.updateClipRender("s1", "0-30000", {
+      status: "rendering",
+      progress: 10,
+      message: "Starting...",
+      outputUrl: null,
+    });
+    expect(events.length).toBe(countBefore + 1);
   });
 
   it("toProjectState() returns a copy, not a reference", () => {

@@ -4,17 +4,28 @@ import { tempManager } from "../services/TempManager.js";
 import { renderService } from "../services/RenderService.js";
 import type { RenderRequest, ErrorResponse } from "@lusk/shared";
 
+function clipKey(clip: { startMs: number; endMs: number }): string {
+  return `${clip.startMs}-${clip.endMs}`;
+}
+
 async function runRender(
   sessionId: string,
   clip: RenderRequest["clip"],
   offsetX: number,
   log: FastifyInstance["log"]
 ): Promise<void> {
-  orchestrator.transition(sessionId, "RENDERING");
-
+  const key = clipKey(clip);
   const session = orchestrator.getSession(sessionId)!;
   const sessionDir = tempManager.getSessionDir(sessionId);
   const captions = session.captions ?? [];
+  const outputFileName = `output_${key}.mp4`;
+
+  orchestrator.updateClipRender(sessionId, key, {
+    status: "rendering",
+    progress: 0,
+    message: "Starting render...",
+    outputUrl: null,
+  });
 
   try {
     await renderService.renderClip(
@@ -24,18 +35,36 @@ async function runRender(
       offsetX,
       captions,
       (percent, message) => {
-        orchestrator.updateProgress(sessionId, percent, message);
-      }
+        orchestrator.updateClipRender(sessionId, key, {
+          status: "rendering",
+          progress: percent,
+          message,
+          outputUrl: null,
+        });
+      },
+      outputFileName
     );
 
-    const outputUrl = `/static/${sessionId}/output.mp4`;
-    orchestrator.setOutputUrl(sessionId, outputUrl);
-    orchestrator.transition(sessionId, "EXPORTED");
-    orchestrator.updateProgress(sessionId, 100, "Export complete — ready to download");
+    const outputUrl = `/static/${sessionId}/${outputFileName}`;
+    orchestrator.updateClipRender(sessionId, key, {
+      status: "exported",
+      progress: 100,
+      message: "Export complete — ready to download",
+      outputUrl,
+    });
   } catch (err) {
     log.error(err, "Render failed");
-    orchestrator.updateProgress(sessionId, 0, "Render failed");
-    orchestrator.transition(sessionId, "READY");
+    // Remove failed render entry so user can retry
+    const s = orchestrator.getSession(sessionId);
+    if (s?.renders) {
+      delete s.renders[key];
+    }
+    orchestrator.updateClipRender(sessionId, key, {
+      status: "rendering",
+      progress: 0,
+      message: "Render failed — try again",
+      outputUrl: null,
+    });
   }
 }
 
@@ -66,6 +95,15 @@ export async function renderRoute(app: FastifyInstance) {
             success: false,
             error: `Cannot render in state: ${session.state}`,
           });
+      }
+
+      // Check if this clip is already being rendered
+      const key = clipKey(clip);
+      const existing = session.renders?.[key];
+      if (existing?.status === "rendering") {
+        return reply
+          .status(409)
+          .send({ success: false, error: "This clip is already rendering" });
       }
 
       // Fire-and-forget

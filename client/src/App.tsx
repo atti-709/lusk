@@ -233,8 +233,7 @@ function App() {
             clip={selectedClip}
             onRender={handleRender}
             onBack={handleBackToClips}
-            outputUrl={state.outputUrl}
-            isRendering={state.state === "RENDERING"}
+            renders={state.renders ?? {}}
           />
         </div>
       )}

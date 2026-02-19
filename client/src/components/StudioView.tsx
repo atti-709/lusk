@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Player } from "@remotion/player";
 import type { Caption } from "@remotion/captions";
-import type { CaptionWord, ViralClip } from "@lusk/shared";
+import type { CaptionWord, ViralClip, ClipRenderState } from "@lusk/shared";
 import {
   VideoComposition,
   COMP_WIDTH,
@@ -16,8 +16,11 @@ interface StudioViewProps {
   clip: ViralClip;
   onRender: (clip: ViralClip, offsetX: number) => void;
   onBack: () => void;
-  outputUrl: string | null;
-  isRendering: boolean;
+  renders: Record<string, ClipRenderState>;
+}
+
+function clipKey(clip: { startMs: number; endMs: number }): string {
+  return `${clip.startMs}-${clip.endMs}`;
 }
 
 export function StudioView({
@@ -26,11 +29,16 @@ export function StudioView({
   clip,
   onRender,
   onBack,
-  outputUrl,
-  isRendering,
+  renders,
 }: StudioViewProps) {
   const [offsetX, setOffsetX] = useState(0);
 
+  const key = clipKey(clip);
+  const renderState = renders[key] ?? null;
+  const isRendering = renderState?.status === "rendering";
+  const outputUrl = renderState?.outputUrl ?? null;
+  const renderProgress = renderState?.progress ?? 0;
+  const renderMessage = renderState?.message ?? "";
 
   const startFrame = Math.round((clip.startMs / 1000) * COMP_FPS);
   const actualStartMs = (startFrame / COMP_FPS) * 1000;
@@ -108,6 +116,22 @@ export function StudioView({
             className="offset-slider"
           />
         </div>
+
+        {/* Render progress */}
+        {isRendering && (
+          <div className="render-progress">
+            <div className="render-progress-header">
+              <span className="render-progress-message">{renderMessage}</span>
+              <span className="render-progress-pct">{renderProgress}%</span>
+            </div>
+            <div className="render-progress-track">
+              <div
+                className="render-progress-fill"
+                style={{ width: `${renderProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         <div className="studio-actions">
           {!outputUrl && !isRendering && (

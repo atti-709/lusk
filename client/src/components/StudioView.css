@@ -128,3 +128,36 @@
   cursor: not-allowed;
   transform: none;
 }
+
+.render-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.render-progress-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.render-progress-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.render-progress-track {
+  height: 4px;
+  background: var(--surface);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.render-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}

@@ -60,6 +60,13 @@ export interface CaptionWord {
   confidence: number | null;
 }
 
+export interface ClipRenderState {
+  status: 'rendering' | 'exported';
+  progress: number;
+  message: string;
+  outputUrl: string | null;
+}
+
 export interface ProjectState {
   sessionId: string;
   state: PipelineState;
@@ -71,6 +78,7 @@ export interface ProjectState {
   captions: CaptionWord[] | null;
   viralClips: ViralClip[] | null;
   outputUrl: string | null;
+  renders: Record<string, ClipRenderState>;
 }
 
 export interface TranscribeRequest {
