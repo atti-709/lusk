@@ -18,7 +18,6 @@
     "@remotion/install-whisper-cpp": "4.0.424",
     "@remotion/renderer": "^4.0.424",
     "fastify": "^5.2.1",
-    "node-llama-cpp": "^3.15.1",
     "remotion": "^4.0.424"
   },
   "devDependencies": {

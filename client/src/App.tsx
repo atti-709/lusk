@@ -97,17 +97,8 @@ function App() {
     setView("upload");
   }, []);
 
-  const handleTranscribe = useCallback(async (sourceScript?: string) => {
+  const handleTranscribe = useCallback(async () => {
     if (!sessionId) return;
-
-    // Upload source script if provided (for alignment step)
-    if (sourceScript) {
-      await fetch(`/api/project/${sessionId}/script`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: sourceScript }),
-      });
-    }
 
     await fetch("/api/transcribe", {
       method: "POST",
@@ -163,7 +154,7 @@ function App() {
         </div>
       )}
 
-      {/* Pipeline steps (uploading, transcribing, aligning, analyzing) */}
+      {/* Pipeline steps (uploading, transcribing, aligning) */}
       {view === "session" && sessionId && state && !isReady && (
         <div className="pipeline-stage">
           <PipelineStepper
@@ -171,6 +162,7 @@ function App() {
             progress={state.progress}
             message={state.message}
             videoUrl={state.videoUrl}
+            sessionId={sessionId}
             onTranscribe={handleTranscribe}
           />
         </div>

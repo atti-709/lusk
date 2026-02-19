@@ -188,48 +188,133 @@
   box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
 }
 
-/* ── Script upload section ── */
-.script-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+/* ── AlignStep ── */
+.align-step {
   width: 100%;
   max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
-.script-label {
-  font-size: 0.85rem;
+.align-step-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text);
+}
+
+.align-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.align-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.align-section-number {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.align-section-header h3 {
+  margin: 0;
+  font-size: 0.9rem;
   font-weight: 600;
   color: var(--text);
 }
 
-.script-label .optional {
-  font-weight: 400;
-  color: var(--text-dim);
+.align-section-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.4;
 }
 
-.script-textarea {
+.align-prompt-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-family: monospace;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+.align-textarea {
   width: 100%;
   padding: 0.75rem 1rem;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--bg);
   color: var(--text);
-  font-family: inherit;
-  font-size: 0.85rem;
+  font-family: monospace;
+  font-size: 0.8rem;
   line-height: 1.5;
   resize: vertical;
-  min-height: 80px;
+  min-height: 120px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.script-textarea::placeholder {
+.align-textarea::placeholder {
   color: var(--text-dim);
 }
 
-.script-textarea:focus {
+.align-textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+.align-status {
+  font-size: 0.8rem;
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.align-status.success {
+  color: var(--success);
+}
+
+.align-status.error {
+  color: #ef4444;
+}
+
+.file-upload-label {
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.file-upload-input {
+  display: none;
+}
+
+.file-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}

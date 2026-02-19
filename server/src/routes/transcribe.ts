@@ -2,15 +2,11 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
-import { alignTranscript } from "../services/AlignmentService.js";
-import { llmService } from "../services/LlmService.js";
 import type { TranscribeRequest, ErrorResponse } from "@lusk/shared";
 
 async function runTranscription(sessionId: string, log: FastifyInstance["log"]): Promise<void> {
   const sessionDir = tempManager.getSessionDir(sessionId);
-  const session = orchestrator.getSession(sessionId)!;
 
-  // Phase 1: Transcription via whisper.cpp
   orchestrator.transition(sessionId, "TRANSCRIBING");
 
   const { transcript, captions } = await whisperService.transcribe(
@@ -23,65 +19,8 @@ async function runTranscription(sessionId: string, log: FastifyInstance["log"]):
   orchestrator.setTranscript(sessionId, transcript);
   orchestrator.setCaptions(sessionId, captions);
 
-  // Phase 2: Alignment (optional)
-  // We must transition ensuring the orchestrator state machine is satisfied
   orchestrator.transition(sessionId, "ALIGNING");
-
-  if (session.sourceScript) {
-    orchestrator.updateProgress(sessionId, 0, "Aligning with source text...");
-
-    try {
-      const alignedTranscript = alignTranscript(
-        transcript,
-        session.sourceScript
-      );
-      
-      // Update transcript with aligned version
-      orchestrator.setTranscript(sessionId, alignedTranscript);
-      
-      // Update captions from aligned transcript
-      // We need to map TranscriptData back to CaptionWord[]
-      // For now, we reuse the timestamp structure but use corrected words
-      const alignedCaptions = alignedTranscript.words.map((w, i) => ({
-        text: i === 0 ? w.word : ` ${w.word}`,
-        startMs: w.startMs,
-        endMs: w.endMs,
-        timestampMs: w.startMs,
-        confidence: 1.0,
-      }));
-      
-      orchestrator.setCaptions(sessionId, alignedCaptions);
-      orchestrator.updateProgress(sessionId, 100, "Alignment complete");
-    } catch (err) {
-      log.error(err, "Alignment failed, proceeding with original transcript");
-    }
-  }
-
-  // Phase 3: Analysis (LLM)
-  orchestrator.transition(sessionId, "ANALYZING");
-  
-  // Use aligned transcript if available, otherwise original
-  const currentTranscript = session.sourceScript 
-    ? orchestrator.getSession(sessionId)?.transcript ?? transcript 
-    : transcript;
-
-  try {
-    const viralClips = await llmService.findViralClips(
-      currentTranscript,
-      sessionDir,
-      (percent, message) => {
-        orchestrator.updateProgress(sessionId, percent, message);
-      }
-    );
-    orchestrator.setViralClips(sessionId, viralClips);
-  } catch (err) {
-    log.error(err, "LLM analysis failed, proceeding without viral clips");
-    orchestrator.setViralClips(sessionId, []);
-  }
-
-  // Transition to READY
-  orchestrator.transition(sessionId, "READY");
-  orchestrator.updateProgress(sessionId, 100, "Ready to render");
+  orchestrator.updateProgress(sessionId, 100, "Transcript ready — download and correct with Gemini");
 }
 
 export async function transcribeRoute(app: FastifyInstance) {

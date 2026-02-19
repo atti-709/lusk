@@ -1,12 +1,11 @@
-import { useState } from "react";
 import type { PipelineState } from "@lusk/shared";
+import { AlignStep } from "./AlignStep";
 import "./PipelineStepper.css";
 
 const STEPS: { state: PipelineState; label: string }[] = [
   { state: "UPLOADING", label: "Upload" },
   { state: "TRANSCRIBING", label: "Transcribe" },
-  { state: "ALIGNING", label: "Align" },
-  { state: "ANALYZING", label: "Analyze" },
+  { state: "ALIGNING", label: "Align & Analyze" },
   { state: "READY", label: "Review" },
 ];
 
@@ -17,7 +16,8 @@ interface PipelineStepperProps {
   progress: number;
   message: string;
   videoUrl: string | null;
-  onTranscribe: (sourceScript?: string) => void;
+  sessionId: string;
+  onTranscribe: () => void;
 }
 
 function getStepStatus(
@@ -36,16 +36,15 @@ export function PipelineStepper({
   progress,
   message,
   videoUrl,
+  sessionId,
   onTranscribe,
 }: PipelineStepperProps) {
-  const [scriptText, setScriptText] = useState("");
+  const isProcessing =
+    (currentState === "TRANSCRIBING") ||
+    (currentState === "ALIGNING" && progress < 100) ||
+    (currentState === "RENDERING");
 
-  const isProcessing = [
-    "TRANSCRIBING",
-    "ALIGNING",
-    "ANALYZING",
-    "RENDERING",
-  ].includes(currentState);
+  const showAlignStep = currentState === "ALIGNING" && progress === 100;
 
   return (
     <div className="pipeline">
@@ -92,33 +91,22 @@ export function PipelineStepper({
         </div>
       )}
 
-      {/* Status message when not processing */}
-      {!isProcessing && message && (
+      {/* Status message when not processing and not in align step */}
+      {!isProcessing && !showAlignStep && message && (
         <p className="status-message">{message}</p>
+      )}
+
+      {/* AlignStep manual workflow */}
+      {showAlignStep && (
+        <AlignStep sessionId={sessionId} />
       )}
 
       {/* Action area */}
       <div className="actions">
         {currentState === "UPLOADING" && (
-          <div className="script-section">
-            <label className="script-label" htmlFor="source-script">
-              Original text <span className="optional">(optional)</span>
-            </label>
-            <textarea
-              id="source-script"
-              className="script-textarea"
-              placeholder="Paste the original script here to improve caption accuracy (diacritics, spelling)…"
-              value={scriptText}
-              onChange={(e) => setScriptText(e.target.value)}
-              rows={5}
-            />
-            <button
-              className="primary"
-              onClick={() => onTranscribe(scriptText.trim() || undefined)}
-            >
-              Start Transcription
-            </button>
-          </div>
+          <button className="primary" onClick={() => onTranscribe()}>
+            Start Transcription
+          </button>
         )}
       </div>
     </div>

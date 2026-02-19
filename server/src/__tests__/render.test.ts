@@ -59,7 +59,6 @@ describe("POST /api/render", () => {
     // Walk to READY state
     orchestrator.transition("render-ok", "TRANSCRIBING");
     orchestrator.transition("render-ok", "ALIGNING");
-    orchestrator.transition("render-ok", "ANALYZING");
     orchestrator.transition("render-ok", "READY");
 
     const response = await app.inject({

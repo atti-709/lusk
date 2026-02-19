@@ -22,7 +22,6 @@ export type PipelineState =
   | "UPLOADING"
   | "TRANSCRIBING"
   | "ALIGNING"
-  | "ANALYZING"
   | "READY"
   | "RENDERING"
   | "EXPORTED";
@@ -42,7 +41,6 @@ export interface TranscriptWord {
 
 export interface TranscriptData {
   words: TranscriptWord[];
-  text: string;
 }
 
 export interface ViralClip {
@@ -73,7 +71,7 @@ export interface ProjectState {
   progress: number;
   message: string;
   videoUrl: string | null;
-  sourceScript: string | null;
+
   transcript: TranscriptData | null;
   captions: CaptionWord[] | null;
   viralClips: ViralClip[] | null;

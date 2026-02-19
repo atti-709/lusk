@@ -29,7 +29,6 @@ describe("Orchestrator", () => {
     orc.transition("s1", "ALIGNING");
     expect(orc.toProjectState("s1")!.state).toBe("ALIGNING");
 
-    orc.transition("s1", "ANALYZING");
     orc.transition("s1", "READY");
     expect(orc.toProjectState("s1")!.state).toBe("READY");
   });
@@ -51,7 +50,6 @@ describe("Orchestrator", () => {
     orc.createSession("s1", "/v.mp4");
     orc.transition("s1", "TRANSCRIBING");
     orc.transition("s1", "ALIGNING");
-    orc.transition("s1", "ANALYZING");
     orc.transition("s1", "READY");
     expect(() => orc.transition("s1", "RENDERING")).toThrow(
       "Invalid transition: READY → RENDERING"
@@ -88,7 +86,7 @@ describe("Orchestrator", () => {
 
   it("setTranscript() stores transcript data", () => {
     orc.createSession("s1", "/v.mp4");
-    const transcript = { words: [{ word: "ahoj", startMs: 0, endMs: 500 }], text: "ahoj" };
+    const transcript = { words: [{ word: "ahoj", startMs: 0, endMs: 500 }] };
     orc.setTranscript("s1", transcript);
     expect(orc.toProjectState("s1")!.transcript).toEqual(transcript);
   });
