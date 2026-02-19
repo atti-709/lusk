@@ -28,12 +28,20 @@ export function AlignStep({ sessionId }: AlignStepProps) {
       .catch(() => {});
   }, []);
 
-  // Prefill viral clips text from stored clips
+  // Prefill data from session
   useEffect(() => {
     fetch(`/api/project/${sessionId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.viralClips?.length) {
+        if (!data) return;
+
+        // 1. Prefill corrected transcript from raw text if available
+        if (data.correctedTranscriptRaw) {
+          setCorrectedTsv(data.correctedTranscriptRaw);
+        }
+
+        // 2. Prefill viral clips
+        if (data.viralClips?.length) {
           const text = (data.viralClips as ViralClip[]).map((clip: ViralClip, i: number) => {
             const fmt = (ms: number) => {
               const h = Math.floor(ms / 3600000);

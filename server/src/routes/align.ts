@@ -175,6 +175,7 @@ export async function alignRoute(app: FastifyInstance) {
         };
 
         orchestrator.setTranscript(sessionId, correctedTranscript);
+        orchestrator.setCorrectedTranscriptRaw(sessionId, rawBody);
         orchestrator.setCaptions(sessionId, wordsToCaptions(correctedWords));
 
         return { success: true as const };

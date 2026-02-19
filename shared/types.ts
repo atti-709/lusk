@@ -40,6 +40,7 @@ export interface TranscriptWord {
 }
 
 export interface TranscriptData {
+  text?: string;
   words: TranscriptWord[];
 }
 
@@ -79,6 +80,7 @@ export interface ProjectState {
   videoUrl: string | null;
 
   transcript: TranscriptData | null;
+  correctedTranscriptRaw?: string | null;
   captions: CaptionWord[] | null;
   viralClips: ViralClip[] | null;
   outputUrl: string | null;
