@@ -46,10 +46,17 @@ describe("Orchestrator", () => {
     );
   });
 
-  it("READY has no global transitions (rendering is per-clip)", () => {
+  it("READY allows going back to ALIGNING but not RENDERING", () => {
     orc.createSession("s1", "/v.mp4");
     orc.transition("s1", "TRANSCRIBING");
     orc.transition("s1", "ALIGNING");
+    orc.transition("s1", "READY");
+
+    // Can go back to ALIGNING
+    orc.transition("s1", "ALIGNING");
+    expect(orc.toProjectState("s1")!.state).toBe("ALIGNING");
+
+    // Can go forward again
     orc.transition("s1", "READY");
     expect(() => orc.transition("s1", "RENDERING")).toThrow(
       "Invalid transition: READY → RENDERING"

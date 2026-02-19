@@ -55,9 +55,10 @@ interface ClipSelectorProps {
   clips: ViralClip[];
   videoUrl: string;
   onSelect: (clip: ViralClip) => void;
+  onBackToAlign: () => void;
 }
 
-export function ClipSelector({ clips, videoUrl, onSelect }: ClipSelectorProps) {
+export function ClipSelector({ clips, videoUrl, onSelect, onBackToAlign }: ClipSelectorProps) {
   return (
     <div className="clip-selector">
       <h2>Pick a clip to edit</h2>
@@ -75,6 +76,10 @@ export function ClipSelector({ clips, videoUrl, onSelect }: ClipSelectorProps) {
           />
         ))}
       </div>
+
+      <button className="secondary back-to-align-btn" onClick={onBackToAlign}>
+        ← Back to Align & Analyze
+      </button>
     </div>
   );
 }

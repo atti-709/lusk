@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import type { ViralClip } from "@lusk/shared";
 
 interface AlignStepProps {
   sessionId: string;
@@ -60,18 +61,36 @@ export function AlignStep({ sessionId }: AlignStepProps) {
   const [correctionCopied, setCorrectionCopied] = useState(false);
   const [viralCopied, setViralCopied] = useState(false);
   const [correctedTsv, setCorrectedTsv] = useState("");
-  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
-  const [uploadError, setUploadError] = useState("");
   const [viralText, setViralText] = useState("");
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [submitError, setSubmitError] = useState("");
 
-  // Prefill the corrected TSV textarea with the current transcript from the session
+  // Prefill both textareas from session data
   useEffect(() => {
+    // Prefill corrected TSV
     fetch(`/api/project/${sessionId}/transcript.tsv`)
       .then((res) => (res.ok ? res.text() : ""))
       .then((text) => {
         if (text) setCorrectedTsv(text);
+      })
+      .catch(() => {});
+
+    // Prefill viral clips text from stored clips
+    fetch(`/api/project/${sessionId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.viralClips?.length) {
+          const text = (data.viralClips as ViralClip[]).map((clip: ViralClip, i: number) => {
+            const fmt = (ms: number) => {
+              const h = Math.floor(ms / 3600000);
+              const m = Math.floor((ms % 3600000) / 60000);
+              const s = ((ms % 60000) / 1000).toFixed(3).padStart(6, "0");
+              return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${s}`;
+            };
+            return `CLIP ${i + 1}\nTitle: ${clip.title}\nHook: ${clip.hookText}\nStart: ${fmt(clip.startMs)}\nEnd: ${fmt(clip.endMs)}`;
+          }).join("\n\n");
+          setViralText(text);
+        }
       })
       .catch(() => {});
   }, [sessionId]);
@@ -94,31 +113,6 @@ export function AlignStep({ sessionId }: AlignStepProps) {
     setTimeout(() => setter(false), 2000);
   }, []);
 
-  const handleSubmitCorrectedTsv = useCallback(async () => {
-    if (!correctedTsv.trim()) return;
-
-    setUploadStatus("uploading");
-    setUploadError("");
-
-    try {
-      const res = await fetch(`/api/project/${sessionId}/corrected-transcript`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: correctedTsv }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Upload failed");
-      }
-
-      setUploadStatus("success");
-    } catch (err) {
-      setUploadStatus("error");
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
-    }
-  }, [sessionId, correctedTsv]);
-
   const handleSubmitClips = useCallback(async () => {
     if (!viralText.trim()) return;
 
@@ -126,6 +120,20 @@ export function AlignStep({ sessionId }: AlignStepProps) {
     setSubmitError("");
 
     try {
+      // Auto-save the corrected transcript first
+      if (correctedTsv.trim()) {
+        const tsvRes = await fetch(`/api/project/${sessionId}/corrected-transcript`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: correctedTsv }),
+        });
+        if (!tsvRes.ok) {
+          const err = await tsvRes.json();
+          throw new Error(err.error || "Failed to save transcript");
+        }
+      }
+
+      // Then submit viral clips
       const res = await fetch(`/api/project/${sessionId}/viral-clips`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -142,7 +150,7 @@ export function AlignStep({ sessionId }: AlignStepProps) {
       setSubmitStatus("error");
       setSubmitError(err instanceof Error ? err.message : "Submit failed");
     }
-  }, [sessionId, viralText]);
+  }, [sessionId, viralText, correctedTsv]);
 
   return (
     <div className="align-step">
@@ -185,28 +193,15 @@ export function AlignStep({ sessionId }: AlignStepProps) {
           <h3>Paste Corrected Transcript</h3>
         </div>
         <p className="align-section-desc">
-          Paste the corrected TSV from Gemini's output below and click Save.
+          Paste the corrected TSV from Gemini's output below. It will be saved automatically when you click Next.
         </p>
         <textarea
           className="align-textarea"
           placeholder={"00:00:01.234\tPrvé\n00:00:01.567\tslovo\n..."}
           value={correctedTsv}
-          onChange={(e) => {
-            setCorrectedTsv(e.target.value);
-            if (uploadStatus !== "idle") setUploadStatus("idle");
-          }}
+          onChange={(e) => setCorrectedTsv(e.target.value)}
           rows={10}
         />
-        {uploadStatus === "uploading" && <p className="align-status">Saving…</p>}
-        {uploadStatus === "success" && <p className="align-status success">✓ Transcript updated</p>}
-        {uploadStatus === "error" && <p className="align-status error">{uploadError}</p>}
-        <button
-          className="primary"
-          onClick={handleSubmitCorrectedTsv}
-          disabled={!correctedTsv.trim() || uploadStatus === "uploading"}
-        >
-          {uploadStatus === "uploading" ? "Saving…" : "Save Corrected Transcript"}
-        </button>
       </div>
 
       {/* Section 4: Copy Viral Clip Prompt */}

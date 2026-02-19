@@ -1,6 +1,6 @@
 import path from "node:path";
 import { execSync, spawn } from "node:child_process";
-import { access, writeFile, readFile } from "node:fs/promises";
+import { access, writeFile, readFile, unlink } from "node:fs/promises";
 import {
   installWhisperCpp,
   downloadWhisperModel,
@@ -265,15 +265,11 @@ class WhisperService {
       words,
     };
 
-    // Save processed outputs for debugging
-    await writeFile(
-      path.join(sessionDir, "transcript.json"),
-      JSON.stringify(transcript, null, 2)
+    // Clean up temp files no longer needed
+    const cleanupFiles = ["audio.wav", "whisper-raw.json"].map((f) =>
+      unlink(path.join(sessionDir, f)).catch(() => {})
     );
-    await writeFile(
-      path.join(sessionDir, "captions.json"),
-      JSON.stringify(captions, null, 2)
-    );
+    await Promise.all(cleanupFiles);
 
     onProgress?.(100, "Transcription complete");
 

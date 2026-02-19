@@ -115,6 +115,17 @@ function App() {
     setSelectedClip(null);
   }, []);
 
+  const handleBackToAlign = useCallback(async () => {
+    if (!sessionId) return;
+    const res = await fetch(`/api/project/${sessionId}/back-to-align`, {
+      method: "POST",
+    });
+    if (res.ok) {
+      setSelectedClip(null);
+      setViralClips([]);
+    }
+  }, [sessionId]);
+
   const handleRender = useCallback(
     async (clip: ViralClip, offsetX: number) => {
       if (!sessionId) return;
@@ -185,6 +196,7 @@ function App() {
               clips={viralClips}
               videoUrl={state.videoUrl}
               onSelect={handleSelectClip}
+              onBackToAlign={handleBackToAlign}
             />
           </div>
         )}

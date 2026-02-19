@@ -17,7 +17,7 @@ const TRANSITIONS: Record<PipelineState, PipelineState[]> = {
   UPLOADING: ["TRANSCRIBING"],
   TRANSCRIBING: ["ALIGNING"],
   ALIGNING: ["READY"],
-  READY: [],
+  READY: ["ALIGNING"],
   RENDERING: ["EXPORTED", "READY"],
   EXPORTED: ["READY"],
 };

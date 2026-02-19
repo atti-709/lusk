@@ -192,4 +192,31 @@ export async function alignRoute(app: FastifyInstance) {
       }
     }
   );
+
+  // 5d. Go back to align step from READY
+  app.post<{
+    Params: { sessionId: string };
+    Reply: { success: true } | ErrorResponse;
+  }>(
+    "/api/project/:sessionId/back-to-align",
+    async (request, reply) => {
+      const { sessionId } = request.params;
+      const session = orchestrator.getSession(sessionId);
+
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+
+      try {
+        orchestrator.transition(sessionId, "ALIGNING");
+        orchestrator.updateProgress(sessionId, 100, "Modify transcript or clips");
+        return { success: true as const };
+      } catch (err) {
+        return reply.status(409).send({
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  );
 }
