@@ -18,6 +18,7 @@ async function runRender(
 
   try {
     await renderService.renderClip(
+      sessionId,
       sessionDir,
       clip,
       offsetX,

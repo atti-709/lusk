@@ -6,6 +6,7 @@ import type { Caption } from "@remotion/captions";
 
 const COMP_FPS = 23.976;
 const COMPOSITION_ID = "LuskClip";
+const LUSK_SERVER_ORIGIN = "http://localhost:3000";
 
 type ProgressCallback = (percent: number, message: string) => void;
 
@@ -34,6 +35,7 @@ class RenderService {
   }
 
   async renderClip(
+    sessionId: string,
     sessionDir: string,
     clip: { startMs: number; endMs: number },
     offsetX: number,
@@ -41,7 +43,9 @@ class RenderService {
     onProgress?: ProgressCallback
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress);
-    const videoPath = path.join(sessionDir, "input.mp4");
+    // Remotion's bundler serves from a temp dir — absolute file paths don't work.
+    // Point at the Lusk server's static endpoint instead.
+    const videoUrl = `${LUSK_SERVER_ORIGIN}/static/${sessionId}/input.mp4`;
     const outputPath = path.join(sessionDir, "output.mp4");
 
     // Replicate the frame quantization from StudioView
@@ -65,7 +69,7 @@ class RenderService {
       }));
 
     const inputProps = {
-      videoUrl: videoPath,
+      videoUrl,
       captions: remotionCaptions,
       offsetX,
       startFrom: startFrame,
