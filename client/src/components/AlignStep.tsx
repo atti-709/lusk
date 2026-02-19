@@ -4,37 +4,41 @@ interface AlignStepProps {
   sessionId: string;
 }
 
-const CORRECTION_PROMPT = `# Task: Word-Level Transcription Correction (Slovak)
+const CORRECTION_PROMPT = `# Task: Word-Level Transcription Alignment and Correction (Slovak)
 
-I have uploaded two files for a Slovak apologetics podcast episode:
-1. **Source_Text.md**: The definitive reference for names, theology, and the script.
-2. **Transcription_Part.tsv**: A tab-separated file with \`Timestamp\` [TAB] \`Word/Phrase\`.
+I have uploaded two files with this prompt:
+1. A **.md** file containing the master reference script.
+2. A **.tsv** file containing a raw word-level transcription chunk (Format: \`Timestamp\` [TAB] \`Word/Phrase\`).
 
 ### Your Role:
-Act as a professional Slovak editor. Your goal is to correct the text in the **.tsv** file using the **Source_Text.md** as your master reference for accuracy.
+Act as a professional Slovak editor. Your goal is to fetch and read both files, then correct the text in the **.tsv** file using the **.md** text as your definitive master reference for accuracy, names, and theology.
 
 ### Strict Guidelines:
-* **Maintain Format:** The output must remain a valid **.tsv**. Do not add headers, extra columns, or change the timestamps in the first column.
-* **One-to-One Mapping:** Do NOT merge lines. Every row in the input must have a corresponding row in the output to preserve video caption timing.
-* **Slovak Grammar & Diacritics:** * Fix missing leading letters (e.g., \`akujem\` → \`Ďakujem\`).
-    * Add missing accents (\`mäkčene\`, \`dĺžne\`).
-    * Correct noun/adjective declensions (\`pády\`).
-* **Theological & Name Accuracy:** Ensure names (Disney, Tolkien, Lewis, etc.) and specialized terms (prozreteľnosť, transcendentno, etc.) match the Source Text.
-* **Respect the Spoken Word:** If the host naturally deviated from the script but the spoken word is grammatically correct Slovak, keep it. Only fix AI hallucinations, misspellings, or mangled grammar.
+1. **Maintain Format:** The output must remain a valid **.tsv**. Do not add headers, extra columns, or change the timestamps in the first column.
+2. **One-to-One Mapping:** Do NOT merge, split, or delete lines. Every row in the input must have exactly one corresponding row in the output to preserve video caption timing.
+3. **Punctuation & Capitalization:** Base all capitalization and punctuation strictly on the .md reference text. Attach commas, periods, and other punctuation directly to the word immediately preceding them (e.g., \`slovo,\` not \`slovo ,\`).
+4. **Slovak Grammar & Diacritics:**
+   * Fix missing leading letters (e.g., \`akujem\` → \`Ďakujem\`).
+   * Add missing accents (\`mäkčene\`, \`dĺžne\`).
+   * Correct noun/adjective declensions (\`pády\`).
+5. **Theological & Name Accuracy:** Ensure names and specialized terms match the .md reference text perfectly.
+6. **Respect the Spoken Word:** If the host naturally deviated from the script but the spoken word is grammatically correct Slovak, keep it. Only fix AI hallucinations, misspellings, or mangled grammar.
+7. **Filler Words:** If the speaker uses filler words (*vlastne*, *akože*, *ehm*) not present in the .md script, correct their spelling and keep them in the .tsv on their original timestamps to preserve the flow.
 
 ### Output:
-Provide the corrected **.tsv** content inside a single code block.`;
+Provide the corrected **.tsv** content inside a single code block. Do not add any conversational text before or after the code block.`;
 
-const VIRAL_CLIP_PROMPT = `Based on the corrected transcript above, identify 3-5 segments (10-40 seconds each) that would make the most viral short-form video clips. Look for:
+const VIRAL_CLIP_PROMPT = `Based on the corrected transcript, identify 3-5 segments (15-60 seconds each) that would make the most viral short-form video clips. Look for:
 - Strong emotional hooks or controversial statements
 - Self-contained stories or arguments
 - Surprising facts or revelations
 - Moments with high energy or passion
 
-Pay special attention to clip boundaries:
-- Each clip must START at the beginning of a sentence or a clear thought — never mid-sentence.
-- Each clip must END at a natural pause, completed sentence, or punchline — never cut off abruptly.
-- It's better to include a few extra words for a clean ending than to cut mid-thought.
+Pay CRITICAL attention to clip boundaries, especially the ENDINGS:
+1. **Start Strong:** Each clip must START at the beginning of a sentence or a clear thought. Never start mid-sentence.
+2. **Narrative Closure:** The end of the clip MUST resolve the premise introduced in the hook. Do not end the clip just because you reached the 40-second mark. If the current thought requires the next sentence to make sense, include it.
+3. **The "Mic-Drop" Rule:** The final sentence should feel like a natural, impactful conclusion, punchline, or thought-provoking statement. It should leave the viewer satisfied, not confused.
+4. **Avoid Cliffhangers:** Ensure the final sentence does not accidentally introduce a brand new idea that gets cut off. 
 
 For each clip, provide the output in EXACTLY this format:
 
@@ -50,7 +54,7 @@ Hook: ...
 Start: ...
 End: ...
 
-IMPORTANT: Use the exact timestamps from the TSV file. Do not approximate.`;
+IMPORTANT: Verify that the exact text between your chosen Start and End timestamps forms a complete, logical, and satisfying narrative from start to finish. Use the exact timestamps from the TSV file. Do not approximate.`;
 
 export function AlignStep({ sessionId }: AlignStepProps) {
   const [correctionCopied, setCorrectionCopied] = useState(false);
