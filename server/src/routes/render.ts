@@ -1,53 +1,75 @@
 import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
+import { tempManager } from "../services/TempManager.js";
+import { renderService } from "../services/RenderService.js";
 import type { RenderRequest, ErrorResponse } from "@lusk/shared";
 
-async function runMockRender(sessionId: string): Promise<void> {
+async function runRender(
+  sessionId: string,
+  clip: RenderRequest["clip"],
+  offsetX: number,
+  log: FastifyInstance["log"]
+): Promise<void> {
   orchestrator.transition(sessionId, "RENDERING");
-  orchestrator.updateProgress(sessionId, 10, "Preparing render...");
-  await delay(1000);
-  orchestrator.updateProgress(sessionId, 40, "Encoding video...");
-  await delay(1500);
-  orchestrator.updateProgress(sessionId, 80, "Finalizing...");
-  await delay(1000);
-  orchestrator.updateProgress(sessionId, 100, "Render complete");
-  await delay(500);
 
-  const outputUrl = `/static/${sessionId}/output.mp4`;
-  orchestrator.setOutputUrl(sessionId, outputUrl);
+  const session = orchestrator.getSession(sessionId)!;
+  const sessionDir = tempManager.getSessionDir(sessionId);
+  const captions = session.captions ?? [];
 
-  orchestrator.transition(sessionId, "EXPORTED");
-  orchestrator.updateProgress(sessionId, 100, "Export complete — ready to download");
-}
+  try {
+    await renderService.renderClip(
+      sessionDir,
+      clip,
+      offsetX,
+      captions,
+      (percent, message) => {
+        orchestrator.updateProgress(sessionId, percent, message);
+      }
+    );
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+    const outputUrl = `/static/${sessionId}/output.mp4`;
+    orchestrator.setOutputUrl(sessionId, outputUrl);
+    orchestrator.transition(sessionId, "EXPORTED");
+    orchestrator.updateProgress(sessionId, 100, "Export complete — ready to download");
+  } catch (err) {
+    log.error(err, "Render failed");
+    orchestrator.updateProgress(sessionId, 0, "Render failed");
+    orchestrator.transition(sessionId, "READY");
+  }
 }
 
 export async function renderRoute(app: FastifyInstance) {
   app.post<{ Body: RenderRequest; Reply: { success: true } | ErrorResponse }>(
     "/api/render",
     async (request, reply) => {
-      const { sessionId } = (request.body ?? {}) as Partial<RenderRequest>;
+      const { sessionId, clip, offsetX } =
+        (request.body ?? {}) as Partial<RenderRequest>;
 
-      if (!sessionId) {
-        return reply.status(400).send({ success: false, error: "sessionId is required" });
+      if (!sessionId || !clip) {
+        return reply
+          .status(400)
+          .send({ success: false, error: "sessionId and clip are required" });
       }
 
       const session = orchestrator.getSession(sessionId);
       if (!session) {
-        return reply.status(404).send({ success: false, error: "Session not found" });
+        return reply
+          .status(404)
+          .send({ success: false, error: "Session not found" });
       }
 
       if (session.state !== "READY") {
         return reply
           .status(409)
-          .send({ success: false, error: `Cannot render in state: ${session.state}` });
+          .send({
+            success: false,
+            error: `Cannot render in state: ${session.state}`,
+          });
       }
 
       // Fire-and-forget
-      runMockRender(sessionId).catch((err) => {
-        app.log.error(err, "Mock render failed");
+      runRender(sessionId, clip, offsetX ?? 0, app.log).catch((err) => {
+        app.log.error(err, "Render pipeline failed");
       });
 
       return { success: true as const };
