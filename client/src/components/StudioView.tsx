@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Player } from "@remotion/player";
 import type { Caption } from "@remotion/captions";
 import type { CaptionWord, ViralClip, ClipRenderState } from "@lusk/shared";
@@ -13,6 +13,21 @@ import "./StudioView.css";
 // Whisper timestamps tend to be slightly early; this offset ensures
 // the last caption has time to display before the clip cuts off.
 const CAPTION_DELAY_MS = 500;
+
+/**
+ * Split edited text back into N tokens matching the original caption structure.
+ * Each token in Remotion captions is typically " word" (leading space + word).
+ * We split the full text by whitespace boundaries and map back by position.
+ */
+function splitIntoTokens(text: string, count: number): string[] {
+  // Match tokens: optional leading whitespace + non-whitespace word
+  const matches = text.match(/\s*\S+/g) ?? [];
+  const result: string[] = [];
+  for (let i = 0; i < count; i++) {
+    result.push(matches[i] ?? "");
+  }
+  return result;
+}
 
 interface StudioViewProps {
   videoUrl: string;
@@ -76,19 +91,63 @@ export function StudioView({
   );
 
 
-  // Filter and shift captions to be relative to clip start based on actual frame start
+  // Clip captions (original, with global indices)
+  const clipCaptionIndices = useMemo(
+    () => captions
+      .map((c, i) => ({ caption: c, globalIndex: i }))
+      .filter(({ caption }) => caption.endMs > effectiveStartMs && caption.startMs < effectiveEndMs),
+    [captions, effectiveStartMs, effectiveEndMs]
+  );
+
+  // Per-caption text overrides (keyed by global index)
+  const [captionEdits, setCaptionEdits] = useState<Record<number, string>>({});
+
+  // The editable text shown in the textarea
+  const captionText = useMemo(
+    () => clipCaptionIndices
+      .map(({ caption, globalIndex }) => captionEdits[globalIndex] ?? caption.text)
+      .join(""),
+    [clipCaptionIndices, captionEdits]
+  );
+
+  // Reset edits when clip changes
+  useEffect(() => {
+    setCaptionEdits({});
+  }, [clip.startMs, clip.endMs]);
+
+  const handleCaptionTextChange = useCallback(
+    (newText: string) => {
+      // Split the edited text back into tokens matching the original word boundaries.
+      // Each original caption has leading whitespace + word, so we split on word boundaries
+      // and reconstruct.
+      const origTokens = clipCaptionIndices.map(({ caption }) => caption.text);
+      // Split the new text into tokens: preserve leading whitespace per token
+      const newTokens = splitIntoTokens(newText, origTokens.length);
+
+      const edits: Record<number, string> = {};
+      for (let i = 0; i < clipCaptionIndices.length; i++) {
+        const { globalIndex, caption } = clipCaptionIndices[i];
+        const newToken = newTokens[i] ?? "";
+        if (newToken !== caption.text) {
+          edits[globalIndex] = newToken;
+        }
+      }
+      setCaptionEdits(edits);
+    },
+    [clipCaptionIndices]
+  );
+
+  // Build remotion captions with edits applied
   const remotionCaptions: Caption[] = useMemo(
     () =>
-      captions
-        .filter((c) => c.endMs > effectiveStartMs && c.startMs < effectiveEndMs)
-        .map((c) => ({
-          text: c.text,
-          startMs: c.startMs - actualStartMs,
-          endMs: c.endMs - actualStartMs,
-          timestampMs: c.timestampMs != null ? c.timestampMs - actualStartMs : null,
-          confidence: c.confidence,
-        })),
-    [captions, effectiveStartMs, effectiveEndMs, actualStartMs]
+      clipCaptionIndices.map(({ caption, globalIndex }) => ({
+        text: captionEdits[globalIndex] ?? caption.text,
+        startMs: caption.startMs - actualStartMs,
+        endMs: caption.endMs - actualStartMs,
+        timestampMs: caption.timestampMs != null ? caption.timestampMs - actualStartMs : null,
+        confidence: caption.confidence,
+      })),
+    [clipCaptionIndices, captionEdits, actualStartMs]
   );
 
   // Max trim range: ±5 seconds from original boundaries
@@ -111,120 +170,134 @@ export function StudioView({
         <div className="studio-clip-title">{clip.title}</div>
       </div>
 
-      <div className="studio-player">
-        <Player
-          component={VideoComposition}
-          inputProps={{
-            videoUrl,
-            captions: remotionCaptions,
-            offsetX,
-            startFrom: startFrame,
-          }}
-          compositionWidth={COMP_WIDTH}
-          compositionHeight={COMP_HEIGHT}
-          durationInFrames={durationInFrames}
-          fps={COMP_FPS}
-          style={{
-            width: "100%",
-            maxHeight: "70vh",
-            borderRadius: 12,
-            overflow: "hidden",
-          }}
-          controls
-          autoPlay
-          loop
-        />
-      </div>
-
-      <div className="studio-controls">
-        {/* Trim Start */}
-        <div className="control-group">
-          <label className="control-label">
-            Trim start
-            <span className="control-value">{trimStartDelta >= 0 ? "+" : ""}{(trimStartDelta / 1000).toFixed(1)}s → {formatTimestamp(effectiveStartMs)}</span>
-          </label>
-          <input
-            type="range"
-            min={-maxTrimMs}
-            max={maxTrimMs}
-            step={100}
-            value={trimStartDelta}
-            onChange={(e) => setTrimStartDelta(Number(e.target.value))}
-            className="offset-slider"
-          />
-        </div>
-
-        {/* Trim End */}
-        <div className="control-group">
-          <label className="control-label">
-            Trim end
-            <span className="control-value">{trimEndDelta >= 0 ? "+" : ""}{(trimEndDelta / 1000).toFixed(1)}s → {formatTimestamp(effectiveEndMs)}</span>
-          </label>
-          <input
-            type="range"
-            min={-maxTrimMs}
-            max={maxTrimMs}
-            step={100}
-            value={trimEndDelta}
-            onChange={(e) => setTrimEndDelta(Number(e.target.value))}
-            className="offset-slider"
-          />
-        </div>
-
-        {/* Clip duration display */}
-        <div className="trim-duration">
-          Clip duration: {clipDurationSec}s
-        </div>
-
-        {/* Speaker position */}
-        <div className="control-group">
-          <label className="control-label">
-            Speaker position
-            <span className="control-value">{offsetX}px</span>
-          </label>
-          <input
-            type="range"
-            min={-300}
-            max={300}
-            step={5}
-            value={offsetX}
-            onChange={(e) => setOffsetX(Number(e.target.value))}
-            className="offset-slider"
-          />
-        </div>
-
-        {/* Render progress */}
-        {isRendering && (
-          <div className="render-progress">
-            <div className="render-progress-header">
-              <span className="render-progress-message">{renderMessage}</span>
-              <span className="render-progress-pct">{renderProgress}%</span>
-            </div>
-            <div className="render-progress-track">
-              <div
-                className="render-progress-fill"
-                style={{ width: `${renderProgress}%` }}
-              />
-            </div>
+      <div className="studio-body">
+        {/* Left column: video + captions editor */}
+        <div className="studio-left">
+          <div className="studio-player">
+            <Player
+              component={VideoComposition}
+              inputProps={{
+                videoUrl,
+                captions: remotionCaptions,
+                offsetX,
+                startFrom: startFrame,
+              }}
+              compositionWidth={COMP_WIDTH}
+              compositionHeight={COMP_HEIGHT}
+              durationInFrames={durationInFrames}
+              fps={COMP_FPS}
+              style={{
+                width: "100%",
+                borderRadius: 12,
+                overflow: "hidden",
+              }}
+              controls
+              autoPlay
+              loop
+            />
           </div>
-        )}
+        </div>
 
-        <div className="studio-actions">
-          {!outputUrl && !isRendering && (
-            <button className="primary" onClick={handleRender}>
-              Render Video
-            </button>
-          )}
+        {/* Right column: captions + controls */}
+        <div className="studio-right">
+          <div className="control-group">
+            <label className="control-label">Captions</label>
+            <textarea
+              className="caption-editor"
+              value={captionText}
+              onChange={(e) => handleCaptionTextChange(e.target.value)}
+              rows={6}
+            />
+          </div>
+          {/* Trim Start */}
+          <div className="control-group">
+            <label className="control-label">
+              Trim start
+              <span className="control-value">{trimStartDelta >= 0 ? "+" : ""}{(trimStartDelta / 1000).toFixed(1)}s → {formatTimestamp(effectiveStartMs)}</span>
+            </label>
+            <input
+              type="range"
+              min={-maxTrimMs}
+              max={maxTrimMs}
+              step={100}
+              value={trimStartDelta}
+              onChange={(e) => setTrimStartDelta(Number(e.target.value))}
+              className="offset-slider"
+            />
+          </div>
+
+          {/* Trim End */}
+          <div className="control-group">
+            <label className="control-label">
+              Trim end
+              <span className="control-value">{trimEndDelta >= 0 ? "+" : ""}{(trimEndDelta / 1000).toFixed(1)}s → {formatTimestamp(effectiveEndMs)}</span>
+            </label>
+            <input
+              type="range"
+              min={-maxTrimMs}
+              max={maxTrimMs}
+              step={100}
+              value={trimEndDelta}
+              onChange={(e) => setTrimEndDelta(Number(e.target.value))}
+              className="offset-slider"
+            />
+          </div>
+
+          {/* Clip duration display */}
+          <div className="trim-duration">
+            Clip duration: {clipDurationSec}s
+          </div>
+
+          {/* Speaker position */}
+          <div className="control-group">
+            <label className="control-label">
+              Speaker position
+              <span className="control-value">{offsetX}px</span>
+            </label>
+            <input
+              type="range"
+              min={-300}
+              max={300}
+              step={5}
+              value={offsetX}
+              onChange={(e) => setOffsetX(Number(e.target.value))}
+              className="offset-slider"
+            />
+          </div>
+
+          {/* Render progress */}
           {isRendering && (
-            <button className="primary" disabled>
-              Rendering...
-            </button>
+            <div className="render-progress">
+              <div className="render-progress-header">
+                <span className="render-progress-message">{renderMessage}</span>
+                <span className="render-progress-pct">{renderProgress}%</span>
+              </div>
+              <div className="render-progress-track">
+                <div
+                  className="render-progress-fill"
+                  style={{ width: `${renderProgress}%` }}
+                />
+              </div>
+            </div>
           )}
-          {outputUrl && (
-            <a href={outputUrl} download className="download-btn">
-              Download Video
-            </a>
-          )}
+
+          <div className="studio-actions">
+            {!outputUrl && !isRendering && (
+              <button className="primary" onClick={handleRender}>
+                Render Video
+              </button>
+            )}
+            {isRendering && (
+              <button className="primary" disabled>
+                Rendering...
+              </button>
+            )}
+            {outputUrl && (
+              <a href={outputUrl} download className="download-btn">
+                Download Video
+              </a>
+            )}
+          </div>
         </div>
       </div>
     </div>
