@@ -62,15 +62,11 @@
 
 ### **6. Export (Server Side)**
 
-* **Status:** Currently a **mock implementation** (`runMockRender` in /server/src/routes/render.ts) with simulated delays. Does not produce a real video file yet.
-* **Planned Engine:** @remotion/renderer.
-* **Planned Hardware Acceleration:**
-  codec: "h264",
-  encoderOptions: {
-    ffmpegOptions: ["-c:v", "h264_videotoolbox", "-b:v", "6000k"]
-  }
-
-* **Delivery:** Server will render the file to .lusk_temp/{sessionId}/output.mp4 and return the download URL.
+* **Engine:** @remotion/renderer via `RenderService` (`/server/src/services/RenderService.ts`).
+* **Bundling:** `@remotion/bundler` bundles `client/src/remotion/index.ts` once (cached in memory after first render).
+* **Rendering:** `renderMedia()` with `selectComposition()` to set per-clip duration and inputProps.
+* **Hardware Acceleration:** `hardwareAcceleration: 'if-possible'`, `videoBitrate: '6000k'`, codec `h264`. On Apple Silicon this uses VideoToolbox automatically.
+* **Delivery:** Server renders to `.lusk_temp/{sessionId}/output.mp4` and sets the download URL via orchestrator.
 
 ## **User Instructions**
 
