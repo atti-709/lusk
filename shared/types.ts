@@ -79,6 +79,8 @@ export interface TranscribeRequest {
 
 export interface RenderRequest {
   sessionId: string;
+  clip: ViralClip;
+  offsetX: number;
 }
 
 export interface SessionSummary {

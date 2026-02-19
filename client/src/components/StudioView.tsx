@@ -14,7 +14,7 @@ interface StudioViewProps {
   videoUrl: string;
   captions: CaptionWord[];
   clip: ViralClip;
-  onRender: (clip: ViralClip) => void;
+  onRender: (clip: ViralClip, offsetX: number) => void;
   onBack: () => void;
   outputUrl: string | null;
   isRendering: boolean;
@@ -111,7 +111,7 @@ export function StudioView({
 
         <div className="studio-actions">
           {!outputUrl && !isRendering && (
-            <button className="primary" onClick={() => onRender(clip)}>
+            <button className="primary" onClick={() => onRender(clip, offsetX)}>
               Render Video
             </button>
           )}

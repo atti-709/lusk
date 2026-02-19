@@ -125,16 +125,12 @@ function App() {
   }, []);
 
   const handleRender = useCallback(
-    async (clip: ViralClip) => {
+    async (clip: ViralClip, offsetX: number) => {
       if (!sessionId) return;
       await fetch("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId,
-          startMs: clip.startMs,
-          endMs: clip.endMs,
-        }),
+        body: JSON.stringify({ sessionId, clip, offsetX }),
       });
     },
     [sessionId]
