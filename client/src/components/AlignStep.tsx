@@ -29,7 +29,7 @@ Act as a professional Slovak editor. Your goal is to fetch and read both files, 
 ### Output:
 Provide the corrected **.tsv** content inside a single code block. Do not add any conversational text before or after the code block.`;
 
-const VIRAL_CLIP_PROMPT = `Based on the corrected transcript, identify 3-5 segments (15-60 seconds each) that would make the most viral short-form video clips. Look for:
+const VIRAL_CLIP_PROMPT = `Based on the corrected transcript, identify 4-8 segments (15-60 seconds each) that would make the most viral short-form video clips. Look for:
 - Strong emotional hooks or controversial statements
 - Self-contained stories or arguments
 - Surprising facts or revelations

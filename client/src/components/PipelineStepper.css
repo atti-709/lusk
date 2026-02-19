@@ -98,17 +98,6 @@
   color: var(--text-muted);
 }
 
-.step.clickable {
-  cursor: pointer;
-}
-
-.step.clickable:hover .step-dot {
-  box-shadow: 0 0 12px var(--accent-glow);
-}
-
-.step.clickable:hover .step-label {
-  color: var(--accent);
-}
 
 /* ── Video preview ── */
 .video-preview {
@@ -364,4 +353,17 @@
   border: 1px solid var(--border);
   background: var(--surface);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.review-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.clips-header {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto 0.5rem;
 }

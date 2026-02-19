@@ -21,7 +21,6 @@ interface PipelineStepperProps {
   sessionId: string;
   readySubView?: ReadySubView;
   onTranscribe: () => void;
-  onStepClick?: (stepId: string) => void;
 }
 
 function getActiveStepId(
@@ -53,7 +52,6 @@ export function PipelineStepper({
   sessionId,
   readySubView,
   onTranscribe,
-  onStepClick,
 }: PipelineStepperProps) {
   const isProcessing =
     (currentState === "TRANSCRIBING") ||
@@ -69,13 +67,8 @@ export function PipelineStepper({
       <div className="step-track">
         {STEPS.map(({ id, label }, i) => {
           const status = getStepStatus(id, activeStepId);
-          const isClickable = onStepClick && (status === "done" || status === "active");
           return (
-            <div
-              key={id}
-              className={`step ${status}${isClickable ? " clickable" : ""}`}
-              onClick={isClickable ? () => onStepClick(id) : undefined}
-            >
+            <div key={id} className={`step ${status}`}>
               <div className="step-dot">
                 {status === "done" && (
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">

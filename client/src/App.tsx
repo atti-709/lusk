@@ -124,27 +124,6 @@ function App() {
     }
   }, [sessionId]);
 
-  const handleStepClick = useCallback(
-    (stepId: string) => {
-      if (!sessionId || !state) return;
-
-      if (stepId === "ALIGNING") {
-        // Go back to align step
-        handleBackToAlign();
-      } else if (stepId === "REVIEW") {
-        if (state.state === "READY") {
-          setReadySubView("review");
-          setSelectedClip(null);
-        }
-      } else if (stepId === "CLIPS") {
-        if (state.state === "READY") {
-          setReadySubView("clips");
-          setSelectedClip(null);
-        }
-      }
-    },
-    [sessionId, state, handleBackToAlign]
-  );
 
   const handleRender = useCallback(
     async (clip: ViralClip, offsetX: number) => {
@@ -224,7 +203,6 @@ function App() {
             sessionId={sessionId}
             readySubView={readySubView}
             onTranscribe={handleTranscribe}
-            onStepClick={handleStepClick}
           />
         </div>
       )}
@@ -263,12 +241,20 @@ function App() {
                   loop
                 />
               </div>
-              <button
-                className="primary"
-                onClick={() => setReadySubView("clips")}
-              >
-                Next → Clip Selection
-              </button>
+              <div className="review-actions">
+                <button
+                  className="secondary"
+                  onClick={handleBackToAlign}
+                >
+                  ← Back to Align & Analyze
+                </button>
+                <button
+                  className="primary"
+                  onClick={() => setReadySubView("clips")}
+                >
+                  Next → Clip Selection
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -287,6 +273,11 @@ function App() {
         state.videoUrl &&
         viralClips.length > 0 && (
           <div className="pipeline-stage">
+            <div className="clips-header">
+              <button className="secondary" onClick={() => setReadySubView("review")}>
+                ← Back to Review
+              </button>
+            </div>
             <ClipSelector
               clips={viralClips}
               videoUrl={state.videoUrl}
