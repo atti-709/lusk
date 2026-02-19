@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
-import { Player } from "@remotion/player";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { Player, type PlayerRef } from "@remotion/player";
 import type { Caption } from "@remotion/captions";
 import type { CaptionWord, ViralClip, ClipRenderState } from "@lusk/shared";
 import {
@@ -36,6 +36,7 @@ interface StudioViewProps {
   onRender: (clip: ViralClip, offsetX: number, captions: Caption[]) => void;
   onBack: () => void;
   renders: Record<string, ClipRenderState>;
+  onClipUpdate: (clip: ViralClip) => void;
 }
 
 function clipKey(clip: { startMs: number; endMs: number }): string {
@@ -57,12 +58,16 @@ export function StudioView({
   onRender,
   onBack,
   renders,
+  onClipUpdate,
 }: StudioViewProps) {
-  const [offsetX, setOffsetX] = useState(0);
+  const playerRef = useRef<PlayerRef>(null);
+
+  // Initialize from clip state if available
+  const [offsetX, setOffsetX] = useState(clip.speakerOffsetX ?? 0);
 
   // Trim adjustments (in ms, relative to original clip boundaries)
-  const [trimStartDelta, setTrimStartDelta] = useState(0);
-  const [trimEndDelta, setTrimEndDelta] = useState(CAPTION_DELAY_MS); // default: add caption delay
+  const [trimStartDelta, setTrimStartDelta] = useState(clip.trimStartDelta ?? 0);
+  const [trimEndDelta, setTrimEndDelta] = useState(clip.trimEndDelta ?? CAPTION_DELAY_MS);
 
   // Effective clip boundaries after trim
   const effectiveStartMs = clip.startMs + trimStartDelta;
@@ -73,7 +78,15 @@ export function StudioView({
     ...clip,
     startMs: effectiveStartMs,
     endMs: effectiveEndMs,
-  }), [clip, effectiveStartMs, effectiveEndMs]);
+    // Persist UI state in the clip object we pass around
+    speakerOffsetX: offsetX,
+    trimStartDelta,
+    trimEndDelta,
+    captionEdits: clip.captionEdits, // Pass through, updated below
+    captionOffset: clip.captionOffset, // Pass through, updated below
+  }), [clip, effectiveStartMs, effectiveEndMs, offsetX, trimStartDelta, trimEndDelta]);
+
+
 
   const key = clipKey(trimmedClip);
   const renderState = renders[key] ?? null;
@@ -81,6 +94,20 @@ export function StudioView({
   const outputUrl = renderState?.outputUrl ?? null;
   const renderProgress = renderState?.progress ?? 0;
   const renderMessage = renderState?.message ?? "";
+
+  // Auto-download when render completes
+  const prevStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const status = renderState?.status;
+    const prev = prevStatusRef.current;
+    
+    if (prev === "rendering" && status === "exported" && outputUrl) {
+      const filename = `clip-${trimmedClip.title.replace(/[^a-z0-9]/gi, "_")}.mp4`;
+      triggerDownload(outputUrl, filename);
+    }
+    
+    prevStatusRef.current = status ?? null;
+  }, [renderState?.status, outputUrl, trimmedClip.title]);
 
   const startFrame = Math.round((effectiveStartMs / 1000) * COMP_FPS);
   const actualStartMs = (startFrame / COMP_FPS) * 1000;
@@ -100,11 +127,16 @@ export function StudioView({
   );
 
   // Per-caption text overrides (keyed by global index)
-  const [captionEdits, setCaptionEdits] = useState<Record<number, string>>({});
+  // Initialize from clip if available
+  const [captionEdits, setCaptionEdits] = useState<Record<number, string>>(clip.captionEdits ?? {});
   
   // Caption timing offset (in ms) to adjust sync
-  const [captionOffset, setCaptionOffset] = useState(0);
+  const [captionOffset, setCaptionOffset] = useState(clip.captionOffset ?? 0);
 
+  // Update local state when clip ID changes (switching clips)
+  // We identify clip switch by start/end/title change.
+ 
+  
   // The editable text shown in the textarea
   const captionText = useMemo(
     () => clipCaptionIndices
@@ -112,20 +144,76 @@ export function StudioView({
       .join(""),
     [clipCaptionIndices, captionEdits]
   );
+  // ^ WARNING: clip.startMs/endMs MIGHT change if we update them via onClipUpdate (if we stored "effective" start/end in clip)
+  // But `clip` prop coming in has `startMs` / `endMs` as the *original* clip boundaries? 
+  // In `App.tsx`: `setViralClips` updates the array. 
+  // The `clip` object in `shared/types.ts` has `startMs` / `endMs`. 
+  // Are those original or effective? 
+  // The `trimmedClip` calculation `effectiveStartMs = clip.startMs + trimStartDelta` implies `clip.startMs` is the base.
+  // We are NOT updating `clip.startMs` in `trimmedClip` to be the new effective one permanently, 
+  // we are just calculating effective for rendering. 
+  // Wait, `trimmedClip` memo:
+  // `startMs: effectiveStartMs` 
+  // If we pass `trimmedClip` to `onClipUpdate`, then `clip.startMs` in App state BECOMES `effectiveStartMs`.
+  // Then next render, `clip.startMs` is larger. `effectiveStartMs` = new `clip.startMs` + `trimStartDelta`. Double apply!
+  // 
+  // FIX: We must NOT mutate `startMs` / `endMs` in the persisted clip state if they represent the "base" clip.
+  // `ViralClip` definition: `startMs`, `endMs`. 
+  // If we want to persist "trim", we should store `trimStartDelta` and `trimEndDelta`, 
+  // and KEEP `startMs`/`endMs` as the ORIGINAL detection boundaries.
+  // 
+  // In `trimmedClip` memo above, I did:
+  // `startMs: effectiveStartMs`
+  // This is correct FOR RENDERING (the player needs to know where to start).
+  // But when saving back to `onClipUpdate`, we should probably save the *original* start/end + deltas, 
+  // OR we accept that `startMs` changes. 
+  // If `startMs` changes, `trimStartDelta` should probably reset to 0? 
+  // 
+  // Let's stick to: `ViralClip` in state tracks the ORIGINAL detection. 
+  // We store `trimStartDelta`. 
+  // `trimmedClip` (for render/player) has adjusted start/end.
+  // When calling `onClipUpdate`, we should pass the ORIGINAL start/end, but with updated metadata.
+  
+  const handlePersistState = useCallback((
+    updates: Partial<ViralClip>
+  ) => {
+    // We want to update the metadata, but keep the original start/end/title 
+    // so we don't drift or break identity.
+    onClipUpdate({
+      ...clip, // The current prop, which should be the source of truth
+      ...updates,
+    });
+  }, [clip, onClipUpdate]);
 
-  // Reset edits/offset when clip changes
-  useEffect(() => {
-    setCaptionEdits({});
-    setCaptionOffset(0);
-  }, [clip.startMs, clip.endMs]);
+  // Refactored state setters to also trigger persist
+  const updateOffsetX = useCallback((val: number) => {
+    setOffsetX(val);
+    handlePersistState({ speakerOffsetX: val });
+  }, [handlePersistState]);
+
+  const updateTrimStart = useCallback((val: number) => {
+    setTrimStartDelta(val);
+    handlePersistState({ trimStartDelta: val });
+  }, [handlePersistState]);
+
+  const updateTrimEnd = useCallback((val: number) => {
+    setTrimEndDelta(val);
+    handlePersistState({ trimEndDelta: val });
+  }, [handlePersistState]);
+
+  const updateCaptionOffset = useCallback((val: number) => {
+    setCaptionOffset(val);
+    handlePersistState({ captionOffset: val });
+  }, [handlePersistState]);
+
+  const updateCaptionEdits = useCallback((val: Record<number, string>) => {
+    setCaptionEdits(val);
+    handlePersistState({ captionEdits: val });
+  }, [handlePersistState]);
 
   const handleCaptionTextChange = useCallback(
     (newText: string) => {
-      // Split the edited text back into tokens matching the original word boundaries.
-      // Each original caption has leading whitespace + word, so we split on word boundaries
-      // and reconstruct.
       const origTokens = clipCaptionIndices.map(({ caption }) => caption.text);
-      // Split the new text into tokens: preserve leading whitespace per token
       const newTokens = splitIntoTokens(newText, origTokens.length);
 
       const edits: Record<number, string> = {};
@@ -136,10 +224,16 @@ export function StudioView({
           edits[globalIndex] = newToken;
         }
       }
-      setCaptionEdits(edits);
+      updateCaptionEdits(edits);
     },
-    [clipCaptionIndices]
+    [clipCaptionIndices, updateCaptionEdits]
   );
+  
+  const handleResetCaptions = useCallback(() => {
+    if (confirm("Discard all caption changes for this clip?")) {
+      updateCaptionEdits({});
+    }
+  }, [updateCaptionEdits]);
 
   // Build remotion captions with edits applied
   const remotionCaptions: Caption[] = useMemo(
@@ -159,6 +253,7 @@ export function StudioView({
   const clipDurationSec = ((effectiveEndMs - effectiveStartMs) / 1000).toFixed(1);
 
   const handleRender = useCallback(() => {
+    playerRef.current?.pause();
     onRender(trimmedClip, offsetX, remotionCaptions);
   }, [onRender, trimmedClip, offsetX, remotionCaptions]);
 
@@ -179,6 +274,7 @@ export function StudioView({
         <div className="studio-left">
           <div className="studio-player">
             <Player
+              ref={playerRef}
               component={VideoComposition}
               inputProps={{
                 videoUrl,
@@ -205,7 +301,19 @@ export function StudioView({
         {/* Right column: captions + controls */}
         <div className="studio-right">
           <div className="control-group">
-            <label className="control-label">Captions</label>
+            <div className="control-label-row">
+                <label className="control-label">Captions</label>
+                <button 
+                  className="reset-captions-btn" 
+                  onClick={handleResetCaptions}
+                  title="Reset to transcript"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2.5 2v6h6" />
+                    <path d="M2.66 15.57a10 10 0 1 0 .57-8.38" />
+                  </svg>
+                </button>
+            </div>
             <textarea
               className="caption-editor"
               value={captionText}
@@ -225,7 +333,7 @@ export function StudioView({
               max={maxTrimMs}
               step={100}
               value={trimStartDelta}
-              onChange={(e) => setTrimStartDelta(Number(e.target.value))}
+              onChange={(e) => updateTrimStart(Number(e.target.value))}
               className="offset-slider"
             />
           </div>
@@ -242,7 +350,7 @@ export function StudioView({
               max={maxTrimMs}
               step={100}
               value={trimEndDelta}
-              onChange={(e) => setTrimEndDelta(Number(e.target.value))}
+              onChange={(e) => updateTrimEnd(Number(e.target.value))}
               className="offset-slider"
             />
           </div>
@@ -264,7 +372,7 @@ export function StudioView({
               max={300}
               step={5}
               value={offsetX}
-              onChange={(e) => setOffsetX(Number(e.target.value))}
+              onChange={(e) => updateOffsetX(Number(e.target.value))}
               className="offset-slider"
             />
           </div>
@@ -281,7 +389,7 @@ export function StudioView({
             max={1000}
             step={50}
             value={captionOffset}
-            onChange={(e) => setCaptionOffset(Number(e.target.value))}
+            onChange={(e) => updateCaptionOffset(Number(e.target.value))}
             className="offset-slider"
           />
         </div>
@@ -303,24 +411,28 @@ export function StudioView({
           )}
 
           <div className="studio-actions">
-            {!outputUrl && !isRendering && (
-              <button className="primary" onClick={handleRender}>
-                Render Video
-              </button>
-            )}
-            {isRendering && (
+            {isRendering ? (
               <button className="primary" disabled>
                 Rendering...
               </button>
-            )}
-            {outputUrl && (
-              <a href={outputUrl} download className="download-btn">
-                Download Video
-              </a>
+            ) : (
+              <button className="primary" onClick={handleRender}>
+                Render Video
+              </button>
             )}
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+// Helper to trigger download
+function triggerDownload(url: string, filename: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }

@@ -47,7 +47,7 @@ async function runRender(
       preProcessedCaptions as any // Cast to Remotion Caption[] as they are compatible
     );
 
-    const outputUrl = `/static/${sessionId}/${outputFileName}`;
+    const outputUrl = `/static/${sessionId}/${outputFileName}?t=${Date.now()}`;
     orchestrator.updateClipRender(sessionId, key, {
       status: "exported",
       progress: 100,

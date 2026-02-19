@@ -12,6 +12,7 @@ import {
   COMP_HEIGHT,
   COMP_FPS,
 } from "./components/VideoComposition";
+import { Logo } from "./components/Logo";
 import { useSSE } from "./hooks/useSSE";
 import type {
   CaptionWord,
@@ -74,6 +75,12 @@ function App() {
   const handleUploadComplete = useCallback((id: string) => {
     setSessionId(id);
     setView("session");
+    // Start transcription automatically
+    fetch("/api/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: id }),
+    }).catch(() => {});
   }, []);
 
   const handleResume = useCallback((id: string) => {
@@ -165,11 +172,34 @@ function App() {
   // Show step track when in session (both pre-READY and READY states)
   const showStepper = view === "session" && sessionId && state;
 
+  const handleLogoClick = useCallback(() => {
+    // If not in session, do nothing or just stay
+    if (view === "upload" || view === "loading") return;
+
+    // If we have existing sessions, go to resume dialog.
+    // Otherwise go to upload.
+    if (existingSessions.length > 0) {
+      setView("resume");
+    } else {
+      setView("upload");
+    }
+    // Note: We don't clear sessionId here to allow "resuming" the current active session easily 
+    // unless the user picks a different one or deletes it.
+  }, [view, existingSessions.length]);
+
   return (
     <div className="app">
       <header className="app-header">
-        <div className="logo-mark">L</div>
-        <h1>Lusk</h1>
+        <div 
+          className="logo-container" 
+          onClick={handleLogoClick}
+          role="button"
+          tabIndex={0}
+          title="Go to Dashboard"
+        >
+          <div className="logo-mark"><Logo /></div>
+          <h1>Lusk</h1>
+        </div>
       </header>
 
       {view === "loading" && <div className="connecting">Loading</div>}
@@ -314,12 +344,34 @@ function App() {
       {view === "session" && isStudio && state.videoUrl && selectedClip && (
         <div className="pipeline-stage">
           <StudioView
+            key={`clip-${selectedClip.startMs}-${selectedClip.endMs}`}
             videoUrl={state.videoUrl}
             captions={captions}
             clip={selectedClip}
             onRender={handleRender}
             onBack={handleBackToClips}
             renders={state.renders ?? {}}
+            onClipUpdate={(updatedClip) => {
+              // Update local state for persistence
+              setViralClips((prev) =>
+                prev.map((c) => {
+                  // Match by reference or ID if available, but here we can match by original start/end?
+                  // Actually, since we update the object itself, we need a stable ID. 
+                  // Let's assume the clip object reference or title+start/end matches.
+                  if (c === selectedClip) return updatedClip;
+                   // Fallback: match by title/start/end if object ref doesn't work (e.g. from server refresh)
+                  if (
+                    c.title === selectedClip.title &&
+                    c.startMs === selectedClip.startMs &&
+                    c.endMs === selectedClip.endMs
+                  ) {
+                    return updatedClip;
+                  }
+                  return c;
+                })
+              );
+              setSelectedClip(updatedClip);
+            }}
           />
         </div>
       )}

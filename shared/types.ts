@@ -48,6 +48,12 @@ export interface ViralClip {
   startMs: number;
   endMs: number;
   hookText: string;
+  // UI State Persistence
+  captionEdits?: Record<number, string>;
+  captionOffset?: number;
+  trimStartDelta?: number;
+  trimEndDelta?: number;
+  speakerOffsetX?: number;
 }
 
 export interface CaptionWord {

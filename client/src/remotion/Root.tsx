@@ -5,11 +5,10 @@ import {
   COMP_HEIGHT,
   COMP_FPS,
 } from "../components/VideoComposition";
-import type { VideoCompositionProps } from "../components/VideoComposition";
 
 export function Root() {
   return (
-    <Composition<VideoCompositionProps>
+    <Composition
       id="LuskClip"
       component={VideoComposition}
       width={COMP_WIDTH}
