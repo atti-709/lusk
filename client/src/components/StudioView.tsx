@@ -385,8 +385,8 @@ export function StudioView({
           </label>
           <input
             type="range"
-            min={-1000}
-            max={1000}
+            min={-1500}
+            max={1500}
             step={50}
             value={captionOffset}
             onChange={(e) => updateCaptionOffset(Number(e.target.value))}
