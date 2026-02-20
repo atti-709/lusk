@@ -1,6 +1,8 @@
 import {
   useState,
   useCallback,
+  useEffect,
+  useRef,
   type DragEvent,
   type ChangeEvent,
 } from "react";
@@ -18,6 +20,22 @@ interface UploadZoneProps {
 
 export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   const [state, setState] = useState<UploadState>({ status: "idle" });
+  // Counts nested dragenter/dragleave pairs so child elements don't flicker the state.
+  const dragCounter = useRef(0);
+
+  // Prevent the browser from opening dropped files when the drop lands outside the zone.
+  useEffect(() => {
+    const stop = (e: globalThis.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    document.addEventListener("dragover", stop);
+    document.addEventListener("drop", stop);
+    return () => {
+      document.removeEventListener("dragover", stop);
+      document.removeEventListener("drop", stop);
+    };
+  }, []);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -49,9 +67,18 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
     [onUploadComplete]
   );
 
+  const onDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current += 1;
+    setState((s) => ({ ...s, status: "dragging" }));
+  }, []);
+
   const onDrop = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
       e.preventDefault();
+      e.stopPropagation();
+      dragCounter.current = 0;
       setState((s) => ({ ...s, status: "idle" }));
       const file = e.dataTransfer.files[0];
       if (file) handleUpload(file);
@@ -61,11 +88,16 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
 
   const onDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setState((s) => ({ ...s, status: "dragging" }));
+    e.stopPropagation();
   }, []);
 
-  const onDragLeave = useCallback(() => {
-    setState((s) => ({ ...s, status: "idle" }));
+  const onDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current -= 1;
+    if (dragCounter.current === 0) {
+      setState((s) => ({ ...s, status: "idle" }));
+    }
   }, []);
 
   const onFileSelect = useCallback(
@@ -79,6 +111,7 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   return (
     <div
       className={`upload-zone ${state.status}`}
+      onDragEnter={onDragEnter}
       onDrop={onDrop}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
