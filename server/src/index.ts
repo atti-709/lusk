@@ -11,7 +11,21 @@ import { sessionsRoute } from "./routes/sessions.js";
 import { tempManager } from "./services/TempManager.js";
 import { orchestrator } from "./services/Orchestrator.js";
 
-const server = Fastify({ logger: true });
+const server = Fastify({
+  logger:
+    process.env.NODE_ENV === "production"
+      ? true
+      : {
+          transport: {
+            target: "pino-pretty",
+            options: {
+              colorize: true,
+              translateTime: "SYS:HH:MM:ss",
+              ignore: "pid,hostname",
+            },
+          },
+        },
+});
 
 await server.register(cors, { origin: true });
 await server.register(uploadRoute);
