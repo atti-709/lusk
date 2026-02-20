@@ -17,24 +17,49 @@ export const COMP_FPS = 23.976;
 /** Frames by which the outro overlaps the end of the main clip. */
 export const OUTRO_OVERLAP_FRAMES = 4;
 
-function OutroVideo({
+function ClipVideo({
   src,
-  durationInFrames,
+  startFrom,
+  offsetX,
+  clipDurationInFrames,
 }: {
   src: string;
-  durationInFrames: number;
+  startFrom: number;
+  offsetX: number;
+  clipDurationInFrames: number;
 }) {
   const frame = useCurrentFrame();
-  const volume = interpolate(frame, [0, durationInFrames - 1], [1, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  const fadeStartFrame = clipDurationInFrames - Math.round(COMP_FPS);
+  const volume = interpolate(
+    frame,
+    [fadeStartFrame, clipDurationInFrames - 1],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
 
+  return (
+    <Sequence from={-startFrom}>
+      <Video
+        src={src}
+        volume={volume}
+        style={{
+          width: "177.78%",
+          height: "100%",
+          objectFit: "cover",
+          position: "absolute",
+          left: "50%",
+          transform: `translateX(calc(-50% + ${offsetX}px))`,
+        }}
+      />
+    </Sequence>
+  );
+}
+
+function OutroVideo({ src }: { src: string }) {
   return (
     <AbsoluteFill>
       <OffthreadVideo
         src={src}
-        volume={volume}
         style={{ width: "100%", height: "100%", objectFit: "cover" }}
       />
     </AbsoluteFill>
@@ -77,19 +102,12 @@ export function VideoComposition({
       <Sequence durationInFrames={clipDurationInFrames}>
         <AbsoluteFill>
           {videoUrl && (
-            <Sequence from={-startFrom}>
-              <Video
-                src={videoUrl}
-                style={{
-                  width: "177.78%",
-                  height: "100%",
-                  objectFit: "cover",
-                  position: "absolute",
-                  left: "50%",
-                  transform: `translateX(calc(-50% + ${offsetX}px))`,
-                }}
-              />
-            </Sequence>
+            <ClipVideo
+              src={videoUrl}
+              startFrom={startFrom}
+              offsetX={offsetX}
+              clipDurationInFrames={clipDurationInFrames}
+            />
           )}
         </AbsoluteFill>
         {captions.length > 0 && <CaptionOverlay captions={captions} />}
@@ -98,10 +116,7 @@ export function VideoComposition({
       {/* Outro video — starts OUTRO_OVERLAP_FRAMES before clip ends, audio fades out */}
       {hasOutro && (
         <Sequence from={outroFrom} durationInFrames={outroDurationInFrames}>
-          <OutroVideo
-            src={outroSrc!}
-            durationInFrames={outroDurationInFrames}
-          />
+          <OutroVideo src={outroSrc!} />
         </Sequence>
       )}
     </AbsoluteFill>
