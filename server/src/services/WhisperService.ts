@@ -1,6 +1,6 @@
 import path from "node:path";
 import { execSync, spawn } from "node:child_process";
-import { access, readFile, unlink, readdir } from "node:fs/promises";
+import { access, readFile, unlink } from "node:fs/promises";
 import type { TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
 
 const WHISPERX_MODEL = "large-v3-turbo";
@@ -14,7 +14,7 @@ type ProgressCallback = (percent: number, message: string) => void;
 
 interface WhisperXWord {
   word: string;
-  start?: number; // seconds — may be absent if alignment fails
+  start?: number;
   end?: number;
   score?: number;
 }
@@ -31,9 +31,6 @@ interface WhisperXOutput {
 }
 
 class WhisperService {
-  /**
-   * Verify that whisperx is reachable via `python3 -m whisperx`.
-   */
   private async ensureInstalled(onProgress?: ProgressCallback): Promise<void> {
     onProgress?.(2, "Checking WhisperX...");
 
@@ -85,33 +82,56 @@ class WhisperService {
         "--print_progress", "True",
       ];
 
-      const proc = spawn("python3", args, {
+      const proc = spawn("python3", ["-u", ...args], {
         stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, PYTHONUNBUFFERED: "1" },
       });
 
-      let stderr = "";
-      proc.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
-        // WhisperX logs progress as percentage lines
-        const lines = stderr.split("\n");
-        for (const line of lines) {
-          const match = /(\d+)%\|/.exec(line);
-          if (match) {
-            const pct = 10 + Math.round(parseInt(match[1]) * 0.8);
+      let partialErr = "";
+      let partialOut = "";
+      let lastStderr = "";
+
+      const parseProgress = (text: string, partial: string): string => {
+        const combined = partial + text;
+        const parts = combined.split(/[\r\n]/);
+        const remaining = parts.pop() ?? "";
+
+        for (const line of parts) {
+          const pctMatch = /(\d+)%\|/.exec(line);
+          if (pctMatch) {
+            const pct = 10 + Math.round(parseInt(pctMatch[1]) * 0.8);
             onProgress?.(pct, "Transcribing & aligning...");
           }
         }
+        return remaining;
+      };
+
+      proc.stderr.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        lastStderr = (lastStderr + text).slice(-500);
+        partialErr = parseProgress(text, partialErr);
+      });
+
+      proc.stdout.on("data", (chunk: Buffer) => {
+        partialOut = parseProgress(chunk.toString(), partialOut);
       });
 
       proc.on("close", async (code) => {
+        for (const buf of [partialErr, partialOut]) {
+          const m = /(\d+)%\|/.exec(buf);
+          if (m) {
+            const pct = 10 + Math.round(parseInt(m[1]) * 0.8);
+            onProgress?.(pct, "Transcribing & aligning...");
+          }
+        }
+
         if (code !== 0) {
           return reject(
-            new Error(`whisperx exited with code ${code}: ${stderr.slice(-500)}`)
+            new Error(`whisperx exited with code ${code}: ${lastStderr}`)
           );
         }
 
         try {
-          // WhisperX names the output after the input filename stem
           const stem = path.basename(audioPath, path.extname(audioPath));
           const jsonPath = path.join(outputDir, `${stem}.json`);
           const raw = await readFile(jsonPath, "utf-8");
@@ -146,8 +166,6 @@ class WhisperService {
     onProgress?.(96, "Processing results...");
 
     // Step 4: Extract word-level data from WhisperX segments.
-    // WhisperX uses wav2vec2 forced alignment — timestamps are tight and accurate.
-    // Words missing alignment data (start/end undefined) are interpolated.
     const words: TranscriptWord[] = [];
 
     for (const segment of whisperXOutput.segments) {
@@ -165,8 +183,6 @@ class WhisperService {
       }
     }
 
-    // Interpolate any words that fell back to segment boundaries
-    // (they'll have identical start/end as their segment, which looks wrong)
     this.interpolateMissingTimestamps(words);
 
     const captions: CaptionWord[] = words.map((w, i) => ({
@@ -197,13 +213,10 @@ class WhisperService {
 
   /**
    * Fill in timestamps for words where alignment failed.
-   * These words have start/end set to their segment boundaries.
-   * We distribute them evenly between their aligned neighbours.
    */
   private interpolateMissingTimestamps(words: TranscriptWord[]): void {
     for (let i = 0; i < words.length; i++) {
       if (words[i].startMs === words[i].endMs && i > 0) {
-        // Find next word with a real timestamp
         let nextAligned = i + 1;
         while (
           nextAligned < words.length &&
