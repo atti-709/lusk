@@ -7,7 +7,9 @@ import {
   COMP_WIDTH,
   COMP_HEIGHT,
   COMP_FPS,
+  OUTRO_OVERLAP_FRAMES,
 } from "./VideoComposition";
+import { useOutroConfig } from "../hooks/useOutroConfig";
 import "./StudioView.css";
 
 // Whisper timestamps tend to be slightly early; this offset ensures
@@ -61,6 +63,7 @@ export function StudioView({
   onClipUpdate,
 }: StudioViewProps) {
   const playerRef = useRef<PlayerRef>(null);
+  const outroConfig = useOutroConfig();
 
   // Initialize from clip state if available
   const [offsetX, setOffsetX] = useState(clip.speakerOffsetX ?? 0);
@@ -112,10 +115,14 @@ export function StudioView({
   const startFrame = Math.round((effectiveStartMs / 1000) * COMP_FPS);
   const actualStartMs = (startFrame / COMP_FPS) * 1000;
   
-  const durationInFrames = Math.max(
+  const clipDurationInFrames = Math.max(
     1,
     Math.ceil(((effectiveEndMs - actualStartMs) / 1000) * COMP_FPS)
   );
+
+  const outroDurationInFrames = outroConfig?.outroDurationInFrames ?? 0;
+  const overlap = outroDurationInFrames > 0 ? OUTRO_OVERLAP_FRAMES : 0;
+  const durationInFrames = clipDurationInFrames + outroDurationInFrames - overlap;
 
 
   // Clip captions (original, with global indices)
@@ -251,6 +258,7 @@ export function StudioView({
   // Max trim range: ±5 seconds from original boundaries
   const maxTrimMs = 5000;
   const clipDurationSec = ((effectiveEndMs - effectiveStartMs) / 1000).toFixed(1);
+  const totalDurationSec = (durationInFrames / COMP_FPS).toFixed(1);
 
   const handleRender = useCallback(() => {
     playerRef.current?.pause();
@@ -281,6 +289,8 @@ export function StudioView({
                 captions: remotionCaptions,
                 offsetX,
                 startFrom: startFrame,
+                outroSrc: outroConfig?.outroSrc ?? "",
+                outroDurationInFrames,
               }}
               compositionWidth={COMP_WIDTH}
               compositionHeight={COMP_HEIGHT}
@@ -357,7 +367,7 @@ export function StudioView({
 
           {/* Clip duration display */}
           <div className="trim-duration">
-            Clip duration: {clipDurationSec}s
+            Clip: {clipDurationSec}s{outroDurationInFrames > 0 && ` + outro = ${totalDurationSec}s`}
           </div>
 
           {/* Speaker position */}

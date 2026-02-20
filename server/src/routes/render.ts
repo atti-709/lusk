@@ -13,7 +13,7 @@ async function runRender(
   clip: RenderRequest["clip"],
   offsetX: number,
   log: FastifyInstance["log"],
-  preProcessedCaptions?: CaptionWord[] // Actually these match key props of Caption
+  preProcessedCaptions?: CaptionWord[]
 ): Promise<void> {
   const key = clipKey(clip);
   const session = orchestrator.getSession(sessionId)!;
@@ -29,6 +29,8 @@ async function runRender(
   });
 
   try {
+    const outroConfig = await renderService.detectOutroConfig();
+
     await renderService.renderClip(
       sessionId,
       sessionDir,
@@ -44,7 +46,8 @@ async function runRender(
         });
       },
       outputFileName,
-      preProcessedCaptions as any // Cast to Remotion Caption[] as they are compatible
+      preProcessedCaptions as any,
+      outroConfig
     );
 
     const outputUrl = `/static/${sessionId}/${outputFileName}?t=${Date.now()}`;
@@ -71,6 +74,12 @@ async function runRender(
 }
 
 export async function renderRoute(app: FastifyInstance) {
+  // Outro config endpoint: returns file paths + durations for client-side preview
+  app.get("/api/outro-config", async () => {
+    const config = await renderService.detectOutroConfig();
+    return config ?? { outroSrc: "", outroDurationInFrames: 0 };
+  });
+
   app.post<{ Body: RenderRequest; Reply: { success: true } | ErrorResponse }>(
     "/api/render",
     async (request, reply) => {
