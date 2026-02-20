@@ -126,3 +126,111 @@
   margin-top: 0.35rem;
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Add Clip Card ── */
+
+.clip-card-add {
+  border-style: dashed;
+  border-color: var(--border);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.clip-card-add:hover {
+  border-color: var(--accent);
+  background: rgba(139, 92, 246, 0.04);
+}
+
+.clip-card-add-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+}
+
+.clip-card-add-content span {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.clip-card-add:hover .clip-card-add-content {
+  color: var(--accent);
+}
+
+/* ── Add Clip Form (lives inside the grid, same position as the + card) ── */
+
+.add-clip-form {
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  /* Span two columns so the form has comfortable width */
+  grid-column: span 2;
+}
+
+.add-clip-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.add-clip-form label .optional {
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.add-clip-form input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.add-clip-form input:focus {
+  border-color: var(--accent);
+}
+
+.add-clip-form input::placeholder {
+  color: var(--text-dim);
+}
+
+.add-clip-form-row {
+  display: flex;
+  flex-direction: column;
+}
+
+.add-clip-form-times {
+  flex-direction: row;
+  gap: 0.75rem;
+}
+
+.add-clip-form-times label {
+  flex: 1;
+}
+
+.add-clip-form-error {
+  color: var(--error);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.add-clip-form-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+}

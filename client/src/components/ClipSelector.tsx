@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState, useCallback, type FormEvent } from "react";
 import type { ViralClip } from "@lusk/shared";
 import "./ClipSelector.css";
 
@@ -7,6 +7,26 @@ function formatMs(ms: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function parseTimeToMs(value: string): number | null {
+  const trimmed = value.trim();
+  // Accept M:SS, MM:SS, H:MM:SS, or HH:MM:SS
+  const parts = trimmed.split(":");
+  if (parts.length === 2) {
+    const m = parseInt(parts[0], 10);
+    const s = parseFloat(parts[1]);
+    if (isNaN(m) || isNaN(s) || m < 0 || s < 0 || s >= 60) return null;
+    return Math.round((m * 60 + s) * 1000);
+  }
+  if (parts.length === 3) {
+    const h = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const s = parseFloat(parts[2]);
+    if (isNaN(h) || isNaN(m) || isNaN(s) || h < 0 || m < 0 || m >= 60 || s < 0 || s >= 60) return null;
+    return Math.round((h * 3600 + m * 60 + s) * 1000);
+  }
+  return null;
 }
 
 function ClipCard({
@@ -51,14 +71,118 @@ function ClipCard({
   );
 }
 
+function AddClipForm({ onAdd, onCancel }: { onAdd: (clip: ViralClip) => void; onCancel: () => void }) {
+  const [title, setTitle] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [hookText, setHookText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const startRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    startRef.current?.focus();
+  }, []);
+
+  const handleSubmit = useCallback((e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    const startMs = parseTimeToMs(startTime);
+    const endMs = parseTimeToMs(endTime);
+
+    if (startMs === null) {
+      setError("Invalid start time. Use M:SS or H:MM:SS format.");
+      return;
+    }
+    if (endMs === null) {
+      setError("Invalid end time. Use M:SS or H:MM:SS format.");
+      return;
+    }
+    if (endMs <= startMs) {
+      setError("End time must be after start time.");
+      return;
+    }
+
+    onAdd({
+      title: title.trim() || "Custom Clip",
+      startMs,
+      endMs,
+      hookText: hookText.trim(),
+    });
+  }, [title, startTime, endTime, hookText, onAdd]);
+
+  return (
+    <form className="add-clip-form" onSubmit={handleSubmit}>
+      <div className="add-clip-form-row">
+        <label>
+          Title
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Custom Clip"
+          />
+        </label>
+      </div>
+      <div className="add-clip-form-row add-clip-form-times">
+        <label>
+          Start
+          <input
+            ref={startRef}
+            type="text"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            placeholder="0:00"
+            required
+          />
+        </label>
+        <label>
+          End
+          <input
+            type="text"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            placeholder="1:30"
+            required
+          />
+        </label>
+      </div>
+      <div className="add-clip-form-row">
+        <label>
+          Hook text <span className="optional">(optional)</span>
+          <input
+            type="text"
+            value={hookText}
+            onChange={(e) => setHookText(e.target.value)}
+            placeholder="Opening line..."
+          />
+        </label>
+      </div>
+      {error && <p className="add-clip-form-error">{error}</p>}
+      <div className="add-clip-form-actions">
+        <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
+        <button type="submit" className="primary">Add Clip</button>
+      </div>
+    </form>
+  );
+}
+
 interface ClipSelectorProps {
   clips: ViralClip[];
   videoUrl: string;
   onSelect: (clip: ViralClip) => void;
   onBack: () => void;
+  onAddClip: (clip: ViralClip) => void;
 }
 
-export function ClipSelector({ clips, videoUrl, onSelect, onBack }: ClipSelectorProps) {
+export function ClipSelector({ clips, videoUrl, onSelect, onBack, onAddClip }: ClipSelectorProps) {
+  const [showForm, setShowForm] = useState(false);
+
+  const handleAdd = useCallback((clip: ViralClip) => {
+    onAddClip(clip);
+    setShowForm(false);
+  }, [onAddClip]);
+
   return (
     <div className="clip-selector">
       <div className="clip-selector-header">
@@ -71,7 +195,7 @@ export function ClipSelector({ clips, videoUrl, onSelect, onBack }: ClipSelector
         <div className="clip-selector-title-group">
           <h2>Pick a clip to edit</h2>
           <p className="subtitle">
-            {clips.length} viral moment{clips.length !== 1 ? "s" : ""} detected
+            {clips.length} clip{clips.length !== 1 ? "s" : ""}
           </p>
         </div>
       </div>
@@ -85,6 +209,19 @@ export function ClipSelector({ clips, videoUrl, onSelect, onBack }: ClipSelector
             onClick={() => onSelect(clip)}
           />
         ))}
+        {showForm ? (
+          <AddClipForm onAdd={handleAdd} onCancel={() => setShowForm(false)} />
+        ) : (
+          <button className="clip-card clip-card-add" onClick={() => setShowForm(true)}>
+            <div className="clip-card-add-content">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              <span>Add Clip</span>
+            </div>
+          </button>
+        )}
       </div>
     </div>
   );

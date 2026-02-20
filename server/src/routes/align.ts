@@ -229,7 +229,35 @@ export async function alignRoute(app: FastifyInstance) {
     }
   );
 
-  // 5d. Go back to align step from READY
+  // 5d. Add a single clip manually
+  app.post<{
+    Params: { sessionId: string };
+    Body: ViralClip;
+    Reply: { success: true; clips: ViralClip[] } | ErrorResponse;
+  }>(
+    "/api/project/:sessionId/clips",
+    async (request, reply) => {
+      const { sessionId } = request.params;
+      const session = orchestrator.getSession(sessionId);
+
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+
+      const clip = request.body as ViralClip;
+      if (clip.startMs == null || clip.endMs == null || clip.endMs <= clip.startMs) {
+        return reply.status(400).send({ success: false, error: "Invalid start/end times" });
+      }
+
+      const existing = session.viralClips ?? [];
+      const updated = [...existing, clip];
+      orchestrator.setViralClips(sessionId, updated);
+
+      return { success: true as const, clips: updated };
+    }
+  );
+
+  // 5e. Go back to align step from READY
   app.post<{
     Params: { sessionId: string };
     Reply: { success: true } | ErrorResponse;
