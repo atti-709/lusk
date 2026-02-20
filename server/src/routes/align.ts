@@ -204,15 +204,10 @@ export async function alignRoute(app: FastifyInstance) {
       }
 
       const { text } = (request.body ?? {}) as Partial<{ text: string }>;
-      if (!text || typeof text !== "string") {
-        return reply.status(400).send({ success: false, error: "text is required" });
-      }
 
       try {
-        const clips = parseViralClipText(text);
-        if (clips.length === 0) {
-          return reply.status(400).send({ success: false, error: "No clips could be parsed from the text" });
-        }
+        // Empty text means "skip viral clip detection" — proceed to READY with 0 clips
+        const clips = text?.trim() ? parseViralClipText(text) : [];
 
         orchestrator.setViralClips(sessionId, clips);
 

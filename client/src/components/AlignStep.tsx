@@ -82,8 +82,6 @@ export function AlignStep({ sessionId }: AlignStepProps) {
   }, []);
 
   const handleSubmitClips = useCallback(async () => {
-    if (!viralText.trim()) return;
-
     setSubmitStatus("submitting");
     setSubmitError("");
 
@@ -210,7 +208,7 @@ export function AlignStep({ sessionId }: AlignStepProps) {
         <button
           className="primary"
           onClick={handleSubmitClips}
-          disabled={!viralText.trim() || submitStatus === "submitting"}
+          disabled={submitStatus === "submitting"}
         >
           {submitStatus === "submitting" ? "Processing…" : "Next →"}
         </button>

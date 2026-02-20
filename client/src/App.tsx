@@ -303,10 +303,16 @@ function App() {
                 <button
                   className="primary"
                   onClick={() => setReadySubView("clips")}
+                  disabled={viralClips.length === 0}
                 >
                   Next → Clip Selection
                 </button>
               </div>
+              {viralClips.length === 0 && (
+                <p className="review-no-clips-hint">
+                  Paste viral clips in Align &amp; Analyze to continue
+                </p>
+              )}
             </div>
           </div>
         )}
