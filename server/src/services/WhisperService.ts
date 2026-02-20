@@ -15,6 +15,13 @@ const MODEL = "large-v3-turbo";
 // the perceived moment the word is spoken.
 const TIMING_OFFSET_MS = 60;
 
+// Maximum plausible duration for a single word (ms).
+// Words exceeding this have their startMs snapped forward toward endMs.
+// Formula per word: min(BASE + charCount * PER_CHAR, CAP)
+const WORD_DUR_BASE_MS = 200;
+const WORD_DUR_PER_CHAR_MS = 60;
+const WORD_DUR_CAP_MS = 900;
+
 export interface TranscriptionResult {
   transcript: TranscriptData;
   captions: CaptionWord[];
@@ -247,7 +254,19 @@ class WhisperService {
       words.push(...this.segmentToWords(segment));
     }
 
-    // Compensate for Whisper's early-firing timestamps
+    // Clamp words whose duration is implausibly long (silence eaten by Whisper).
+    // Snap startMs forward so the word only spans a realistic duration.
+    for (const w of words) {
+      const maxDur = Math.min(
+        WORD_DUR_BASE_MS + w.word.length * WORD_DUR_PER_CHAR_MS,
+        WORD_DUR_CAP_MS,
+      );
+      if (w.endMs - w.startMs > maxDur) {
+        w.startMs = w.endMs - maxDur;
+      }
+    }
+
+    // Compensate for residual early-firing timestamps
     for (const w of words) {
       w.startMs += TIMING_OFFSET_MS;
       w.endMs += TIMING_OFFSET_MS;
