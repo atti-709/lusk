@@ -24,7 +24,7 @@
 
 * **Server:** Node.js + Fastify + TypeScript.
 * **Client:** React + Vite + TypeScript.
-* **AI:** @remotion/install-whisper-cpp, node-llama-cpp.
+* **AI:** WhisperX (Python, via `pip install whisperx`) for transcription and forced word alignment.
 * **Video:** Remotion (Player & Renderer).
 
 ## **Feature Implementation Details**
@@ -36,16 +36,17 @@
 
 ### **2. Transcription (Server Side)**
 
-* **Library:** @remotion/install-whisper-cpp (for install/download only). Transcription runs via whisper-cli directly.
-* **Flags:** `-ojf` (full JSON with per-token timestamps), `-l sk` (Slovak).
-* **Word Timing:** Segment-level timestamps are used as anchors (they accurately capture inter-sentence silence). Within a segment, BPE token offsets provide per-word timing. Segment `text` is used for word strings (correct UTF-8); token `text` is ignored (may corrupt multi-byte Slovak chars like ľ, ď, ň).
-* **Timing Offset:** A small forward offset (`TIMING_OFFSET_MS` in WhisperService.ts) is applied to all word timestamps to compensate for Whisper's early-firing cross-attention alignment.
+* **Tool:** WhisperX (`python3 -m whisperx`), called from `WhisperService.ts`.
+* **Model:** `large-v3-turbo`, language `sk`, compute type `int8`.
+* **Flow:** Server extracts audio to `audio.wav` (16kHz mono via ffmpeg), then runs WhisperX which performs transcription and forced word-level alignment in a single pass using wav2vec2.
+* **Output:** Per-word `start`/`end` timestamps in seconds. Words with missing alignment are interpolated linearly between their neighbours.
+* **First-run model download:** WhisperX automatically downloads its models (~3-4 GB: `large-v3-turbo` + Slovak wav2vec2 alignment model) on first use.
+* **Note:** `server/whisper.cpp/` and `server/scripts/whisperx_align.py` are legacy artifacts — they are not used.
 
 ### **3. Viral Clip Detection (Server Side)**
 
-* **Library:** node-llama-cpp.
-* **Model:** Llama-3-8B-Instruct.Q4_K_M.gguf.
-* **Process:** Server runs inference on the transcript logic to find "Viral Hooks" and returns JSON to the client.
+* **Status:** The LLM service has been removed. Viral clip suggestions are no longer generated automatically; clips are added manually by the user via the UI.
+* **Legacy:** `server/models/meta-llama-3-8b-instruct.Q4_K_M.gguf` is a leftover and is not loaded.
 
 ### **4. Text Correction (Server Side)**
 
@@ -75,6 +76,40 @@
 * **Client Preview:** `useOutroConfig` hook (`client/src/hooks/useOutroConfig.ts`) fetches `GET /api/outro-config` on mount and injects the outro props into the Remotion Player in `StudioView`. The preview shows the full clip + outro before export.
 * **Composition:** A single `VideoComposition` handles both clip and outro via Remotion `Sequence` layering. `OUTRO_OVERLAP_FRAMES = 4` (defined in `VideoComposition.tsx`) controls how many frames the outro overlaps the end of the main clip. Total composition duration = `clipDuration + outroDuration - OUTRO_OVERLAP_FRAMES`.
 * **Remotion Studio:** Run `cd client && npm run studio` to open the Remotion Studio for visual inspection. The default `videoUrl` prop is empty (renders black + outro); set it to `http://localhost:3000/static/{sessionId}/input.mp4` in the props panel to preview with a real video.
+
+## **Setup (New Machine)**
+
+### Prerequisites
+
+Install these once via Homebrew:
+
+```bash
+brew install node ffmpeg
+```
+
+Install WhisperX via pip (requires Python 3):
+
+```bash
+pip3 install whisperx
+```
+
+> WhisperX downloads its models (~3-4 GB: `large-v3-turbo` + Slovak wav2vec2 alignment model) automatically on the first transcription run.
+
+### Install & Run
+
+```bash
+# From the repo root:
+npm install          # installs all workspaces (server, client, shared)
+npm run dev          # starts server (port 3000) + client (port 5173) concurrently
+```
+
+### Runtime Dependencies Summary
+
+| Dependency | Purpose | How to get |
+|---|---|---|
+| Node.js ≥ 20 | Server + client build | `brew install node` |
+| ffmpeg | Audio extraction, video probing | `brew install ffmpeg` |
+| Python 3 + WhisperX | Transcription + word alignment | `pip3 install whisperx` |
 
 ## **User Instructions**
 
