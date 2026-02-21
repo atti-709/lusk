@@ -26,13 +26,14 @@ class Orchestrator extends EventEmitter {
   private sessions = new Map<string, ProjectState>();
   private writeQueue = new Map<string, Promise<void>>();
 
-  createSession(id: string, videoUrl: string): ProjectState {
+  createSession(id: string, videoUrl: string, videoName: string | null = null): ProjectState {
     const state: ProjectState = {
       sessionId: id,
       state: "UPLOADING",
       progress: 100,
       message: "Upload complete",
       videoUrl,
+      videoName,
 
       transcript: null,
       correctedTranscriptRaw: null,
@@ -154,6 +155,7 @@ class Orchestrator extends EventEmitter {
         sessionId: session.sessionId,
         state: session.state,
         videoUrl: session.videoUrl,
+        videoName: session.videoName ?? null,
       });
       await writeFile(join(dir, "session.json"), data);
       await writeFile(join(dir, "session-meta.json"), meta);

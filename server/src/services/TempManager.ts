@@ -62,6 +62,7 @@ class TempManager {
             sessionId: data.sessionId,
             state: data.state,
             videoUrl: data.videoUrl,
+            videoName: data.videoName ?? null,
             createdAt: stats.mtime.toISOString(),
           });
           break;

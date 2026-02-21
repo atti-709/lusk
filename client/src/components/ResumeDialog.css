@@ -144,11 +144,13 @@
 
 /* ── Card text ── */
 
-.project-card-id {
+.project-card-name {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--text);
-  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .project-card-time {
