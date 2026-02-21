@@ -14,7 +14,7 @@ import "./StudioView.css";
 
 // Whisper timestamps tend to be slightly early; this offset ensures
 // the last caption has time to display before the clip cuts off.
-const CAPTION_DELAY_MS = 500;
+const CAPTION_DELAY_MS = 900;
 
 /**
  * Split edited text back into N tokens matching the original caption structure.
