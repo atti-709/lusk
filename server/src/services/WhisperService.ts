@@ -1,6 +1,6 @@
 import path from "node:path";
 import { execSync, spawn } from "node:child_process";
-import { access, writeFile, readFile } from "node:fs/promises";
+import { access, writeFile, readFile, unlink } from "node:fs/promises";
 import {
   installWhisperCpp,
   downloadWhisperModel,
@@ -14,6 +14,13 @@ const MODEL = "large-v3-turbo";
 // This offset (ms) shifts all word timestamps forward to better match
 // the perceived moment the word is spoken.
 const TIMING_OFFSET_MS = 60;
+
+// Maximum plausible duration for a single word (ms).
+// Words exceeding this have their startMs snapped forward toward endMs.
+// Formula per word: min(BASE + charCount * PER_CHAR, CAP)
+const WORD_DUR_BASE_MS = 200;
+const WORD_DUR_PER_CHAR_MS = 60;
+const WORD_DUR_CAP_MS = 900;
 
 export interface TranscriptionResult {
   transcript: TranscriptData;
@@ -247,7 +254,19 @@ class WhisperService {
       words.push(...this.segmentToWords(segment));
     }
 
-    // Compensate for Whisper's early-firing timestamps
+    // Clamp words whose duration is implausibly long (silence eaten by Whisper).
+    // Snap startMs forward so the word only spans a realistic duration.
+    for (const w of words) {
+      const maxDur = Math.min(
+        WORD_DUR_BASE_MS + w.word.length * WORD_DUR_PER_CHAR_MS,
+        WORD_DUR_CAP_MS,
+      );
+      if (w.endMs - w.startMs > maxDur) {
+        w.startMs = w.endMs - maxDur;
+      }
+    }
+
+    // Compensate for residual early-firing timestamps
     for (const w of words) {
       w.startMs += TIMING_OFFSET_MS;
       w.endMs += TIMING_OFFSET_MS;
@@ -262,19 +281,15 @@ class WhisperService {
     }));
 
     const transcript: TranscriptData = {
+      text: words.map((w) => w.word).join(""),
       words,
-      text: words.map((w) => w.word).join(" "),
     };
 
-    // Save processed outputs for debugging
-    await writeFile(
-      path.join(sessionDir, "transcript.json"),
-      JSON.stringify(transcript, null, 2)
+    // Clean up temp files no longer needed
+    const cleanupFiles = ["audio.wav", "whisper-raw.json"].map((f) =>
+      unlink(path.join(sessionDir, f)).catch(() => {})
     );
-    await writeFile(
-      path.join(sessionDir, "captions.json"),
-      JSON.stringify(captions, null, 2)
-    );
+    await Promise.all(cleanupFiles);
 
     onProgress?.(100, "Transcription complete");
 

@@ -57,10 +57,19 @@ button.primary {
   box-shadow: 0 0 20px var(--accent-glow);
 }
 
-button.primary:hover {
+button.primary:hover:not(:disabled) {
   background: var(--accent-hover);
   box-shadow: 0 0 30px var(--accent-glow-strong);
   transform: translateY(-1px);
+}
+
+button:disabled {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.3);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 button.secondary {

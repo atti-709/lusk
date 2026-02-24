@@ -16,9 +16,8 @@ const TRANSITIONS: Record<PipelineState, PipelineState[]> = {
   IDLE: ["UPLOADING"],
   UPLOADING: ["TRANSCRIBING"],
   TRANSCRIBING: ["ALIGNING"],
-  ALIGNING: ["ANALYZING"],
-  ANALYZING: ["READY"],
-  READY: [],
+  ALIGNING: ["READY"],
+  READY: ["ALIGNING"],
   RENDERING: ["EXPORTED", "READY"],
   EXPORTED: ["READY"],
 };
@@ -34,8 +33,9 @@ class Orchestrator extends EventEmitter {
       progress: 100,
       message: "Upload complete",
       videoUrl,
-      sourceScript: null,
+
       transcript: null,
+      correctedTranscriptRaw: null,
       captions: null,
       viralClips: null,
       outputUrl: null,
@@ -77,14 +77,17 @@ class Orchestrator extends EventEmitter {
     this.emitProgress(session);
   }
 
-  setSourceScript(id: string, script: string): void {
-    const session = this.requireSession(id);
-    session.sourceScript = script;
-  }
+
 
   setTranscript(id: string, transcript: TranscriptData): void {
     const session = this.requireSession(id);
     session.transcript = transcript;
+    this.persistSession(id);
+  }
+
+  setCorrectedTranscriptRaw(id: string, text: string): void {
+    const session = this.requireSession(id);
+    session.correctedTranscriptRaw = text;
     this.persistSession(id);
   }
 

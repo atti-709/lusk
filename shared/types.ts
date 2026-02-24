@@ -22,7 +22,6 @@ export type PipelineState =
   | "UPLOADING"
   | "TRANSCRIBING"
   | "ALIGNING"
-  | "ANALYZING"
   | "READY"
   | "RENDERING"
   | "EXPORTED";
@@ -41,8 +40,8 @@ export interface TranscriptWord {
 }
 
 export interface TranscriptData {
+  text?: string;
   words: TranscriptWord[];
-  text: string;
 }
 
 export interface ViralClip {
@@ -50,6 +49,12 @@ export interface ViralClip {
   startMs: number;
   endMs: number;
   hookText: string;
+  // UI State Persistence
+  captionEdits?: Record<number, string>;
+  captionOffset?: number;
+  trimStartDelta?: number;
+  trimEndDelta?: number;
+  speakerOffsetX?: number;
 }
 
 export interface CaptionWord {
@@ -73,8 +78,9 @@ export interface ProjectState {
   progress: number;
   message: string;
   videoUrl: string | null;
-  sourceScript: string | null;
+
   transcript: TranscriptData | null;
+  correctedTranscriptRaw?: string | null;
   captions: CaptionWord[] | null;
   viralClips: ViralClip[] | null;
   outputUrl: string | null;
@@ -89,6 +95,7 @@ export interface RenderRequest {
   sessionId: string;
   clip: ViralClip;
   offsetX: number;
+  captions?: CaptionWord[];
 }
 
 export interface SessionSummary {

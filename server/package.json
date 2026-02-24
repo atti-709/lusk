@@ -17,11 +17,12 @@
     "@remotion/bundler": "^4.0.424",
     "@remotion/install-whisper-cpp": "4.0.424",
     "@remotion/renderer": "^4.0.424",
+    "archiver": "^7.0.1",
     "fastify": "^5.2.1",
-    "node-llama-cpp": "^3.15.1",
     "remotion": "^4.0.424"
   },
   "devDependencies": {
+    "@types/archiver": "^7.0.0",
     "@types/node": "^22.13.4",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",

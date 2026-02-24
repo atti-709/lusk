@@ -80,6 +80,56 @@ export type CaptionOverlayProps = {
   captions: Caption[];
 };
 
+/**
+ * Split pages at sentence boundaries so the last word of a sentence
+ * and the first word of the next never appear on screen together.
+ */
+function splitAtSentenceBoundaries(pages: TikTokPage[]): TikTokPage[] {
+  const result: TikTokPage[] = [];
+
+  for (const page of pages) {
+    const { tokens } = page;
+    if (tokens.length <= 1) {
+      result.push(page);
+      continue;
+    }
+
+    // Find split points: after tokens whose text ends with sentence punctuation
+    let chunkStart = 0;
+    for (let i = 0; i < tokens.length; i++) {
+      const endsWithPunctuation = /[.!?]$/.test(tokens[i].text.trim());
+      const isLastToken = i === tokens.length - 1;
+
+      if (endsWithPunctuation && !isLastToken) {
+        // Split here: tokens[chunkStart..i] become one page
+        const chunk = tokens.slice(chunkStart, i + 1);
+        const lastChunkToken = chunk[chunk.length - 1];
+        result.push({
+          startMs: chunk[0].fromMs,
+          tokens: chunk,
+          text: chunk.map((t) => t.text).join(""),
+          durationMs: lastChunkToken.toMs - chunk[0].fromMs,
+        });
+        chunkStart = i + 1;
+      }
+    }
+
+    // Push remaining tokens as the last chunk
+    if (chunkStart < tokens.length) {
+      const chunk = tokens.slice(chunkStart);
+      const lastChunkToken = chunk[chunk.length - 1];
+      result.push({
+        startMs: chunk[0].fromMs,
+        tokens: chunk,
+        text: chunk.map((t) => t.text).join(""),
+        durationMs: lastChunkToken.toMs - chunk[0].fromMs,
+      });
+    }
+  }
+
+  return result;
+}
+
 export function CaptionOverlay({ captions }: CaptionOverlayProps) {
   const { fps } = useVideoConfig();
 
@@ -88,7 +138,7 @@ export function CaptionOverlay({ captions }: CaptionOverlayProps) {
       captions,
       combineTokensWithinMilliseconds: SWITCH_CAPTIONS_EVERY_MS,
     });
-    return pages;
+    return splitAtSentenceBoundaries(pages);
   }, [captions]);
 
   return (

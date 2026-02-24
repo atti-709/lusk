@@ -1,33 +1,46 @@
-import { useState } from "react";
 import type { PipelineState } from "@lusk/shared";
+import { AlignStep } from "./AlignStep";
 import "./PipelineStepper.css";
 
-const STEPS: { state: PipelineState; label: string }[] = [
-  { state: "UPLOADING", label: "Upload" },
-  { state: "TRANSCRIBING", label: "Transcribe" },
-  { state: "ALIGNING", label: "Align" },
-  { state: "ANALYZING", label: "Analyze" },
-  { state: "READY", label: "Review" },
-];
+export type ReadySubView = "review" | "clips";
 
-const STATE_ORDER: PipelineState[] = STEPS.map((s) => s.state);
+// Steps now include both pipeline states and ready sub-views
+const STEPS: { id: string; label: string }[] = [
+  { id: "UPLOADING", label: "Upload" },
+  { id: "TRANSCRIBING", label: "Transcribe" },
+  { id: "ALIGNING", label: "Align & Analyze" },
+  { id: "REVIEW", label: "Review" },
+  { id: "CLIPS", label: "Clips" },
+];
 
 interface PipelineStepperProps {
   currentState: PipelineState;
   progress: number;
   message: string;
   videoUrl: string | null;
-  onTranscribe: (sourceScript?: string) => void;
+  sessionId: string;
+  readySubView?: ReadySubView;
+  onTranscribe: () => void;
+}
+
+function getActiveStepId(
+  state: PipelineState,
+  subView?: ReadySubView
+): string {
+  if (state === "READY") {
+    return subView === "clips" ? "CLIPS" : "REVIEW";
+  }
+  return state;
 }
 
 function getStepStatus(
-  stepState: PipelineState,
-  currentState: PipelineState
+  stepId: string,
+  activeStepId: string
 ): "done" | "active" | "pending" {
-  const stepIdx = STATE_ORDER.indexOf(stepState);
-  const currentIdx = STATE_ORDER.indexOf(currentState);
-  if (stepIdx < currentIdx) return "done";
-  if (stepIdx === currentIdx) return "active";
+  const stepIdx = STEPS.findIndex((s) => s.id === stepId);
+  const activeIdx = STEPS.findIndex((s) => s.id === activeStepId);
+  if (stepIdx < activeIdx) return "done";
+  if (stepIdx === activeIdx) return "active";
   return "pending";
 }
 
@@ -36,25 +49,26 @@ export function PipelineStepper({
   progress,
   message,
   videoUrl,
+  sessionId,
+  readySubView,
   onTranscribe,
 }: PipelineStepperProps) {
-  const [scriptText, setScriptText] = useState("");
+  const isProcessing =
+    (currentState === "TRANSCRIBING") ||
+    (currentState === "ALIGNING" && progress < 100) ||
+    (currentState === "RENDERING");
 
-  const isProcessing = [
-    "TRANSCRIBING",
-    "ALIGNING",
-    "ANALYZING",
-    "RENDERING",
-  ].includes(currentState);
+  const showAlignStep = currentState === "ALIGNING" && progress === 100;
+  const activeStepId = getActiveStepId(currentState, readySubView);
 
   return (
     <div className="pipeline">
       {/* Step track */}
       <div className="step-track">
-        {STEPS.map(({ state, label }, i) => {
-          const status = getStepStatus(state, currentState);
+        {STEPS.map(({ id, label }, i) => {
+          const status = getStepStatus(id, activeStepId);
           return (
-            <div key={state} className={`step ${status}`}>
+            <div key={id} className={`step ${status}`}>
               <div className="step-dot">
                 {status === "done" && (
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -69,8 +83,8 @@ export function PipelineStepper({
         })}
       </div>
 
-      {/* Video preview */}
-      {videoUrl && (
+      {/* Video preview (only during pre-READY pipeline) */}
+      {videoUrl && !showAlignStep && currentState !== "READY" && (
         <div className="video-preview">
           <video src={videoUrl} controls />
         </div>
@@ -92,33 +106,22 @@ export function PipelineStepper({
         </div>
       )}
 
-      {/* Status message when not processing */}
-      {!isProcessing && message && (
+      {/* Status message when not processing and not in align step */}
+      {!isProcessing && !showAlignStep && currentState !== "READY" && message && (
         <p className="status-message">{message}</p>
+      )}
+
+      {/* AlignStep manual workflow */}
+      {showAlignStep && (
+        <AlignStep sessionId={sessionId} />
       )}
 
       {/* Action area */}
       <div className="actions">
         {currentState === "UPLOADING" && (
-          <div className="script-section">
-            <label className="script-label" htmlFor="source-script">
-              Original text <span className="optional">(optional)</span>
-            </label>
-            <textarea
-              id="source-script"
-              className="script-textarea"
-              placeholder="Paste the original script here to improve caption accuracy (diacritics, spelling)…"
-              value={scriptText}
-              onChange={(e) => setScriptText(e.target.value)}
-              rows={5}
-            />
-            <button
-              className="primary"
-              onClick={() => onTranscribe(scriptText.trim() || undefined)}
-            >
-              Start Transcription
-            </button>
-          </div>
+          <button className="primary" onClick={() => onTranscribe()}>
+            Start Transcription
+          </button>
         )}
       </div>
     </div>

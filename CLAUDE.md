@@ -63,10 +63,18 @@
 ### **6. Export (Server Side)**
 
 * **Engine:** @remotion/renderer via `RenderService` (`/server/src/services/RenderService.ts`).
-* **Bundling:** `@remotion/bundler` bundles `client/src/remotion/index.ts` once (cached in memory after first render).
+* **Bundling:** `@remotion/bundler` bundles `client/src/remotion/index.ts` once (cached in memory after first render). The `publicDir` is set to `client/public/` so static assets (outro, etc.) are included.
 * **Rendering:** `renderMedia()` with `selectComposition()` to set per-clip duration and inputProps.
 * **Hardware Acceleration:** `hardwareAcceleration: 'if-possible'`, `videoBitrate: '6000k'`, codec `h264`. On Apple Silicon this uses VideoToolbox automatically.
-* **Delivery:** Server renders to `.lusk_temp/{sessionId}/output.mp4` and sets the download URL via orchestrator.
+* **Delivery:** Server renders to `.lusk_temp/{sessionId}/output_{startMs}-{endMs}.mp4` and sets the download URL via orchestrator.
+
+### **7. Outro (Client + Server)**
+
+* **Asset:** Place `client/public/outro.mp4` (9:16 vertical video) to enable the outro feature.
+* **Detection:** `RenderService.detectOutroConfig()` probes `client/public/outro.mp4` with ffprobe to get its duration in frames. Returns `null` if the file is absent (outro is silently skipped).
+* **Client Preview:** `useOutroConfig` hook (`client/src/hooks/useOutroConfig.ts`) fetches `GET /api/outro-config` on mount and injects the outro props into the Remotion Player in `StudioView`. The preview shows the full clip + outro before export.
+* **Composition:** A single `VideoComposition` handles both clip and outro via Remotion `Sequence` layering. `OUTRO_OVERLAP_FRAMES = 4` (defined in `VideoComposition.tsx`) controls how many frames the outro overlaps the end of the main clip. Total composition duration = `clipDuration + outroDuration - OUTRO_OVERLAP_FRAMES`.
+* **Remotion Studio:** Run `cd client && npm run studio` to open the Remotion Studio for visual inspection. The default `videoUrl` prop is empty (renders black + outro); set it to `http://localhost:3000/static/{sessionId}/input.mp4` in the props panel to preview with a real video.
 
 ## **User Instructions**
 

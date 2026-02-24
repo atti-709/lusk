@@ -2,7 +2,6 @@
   width: 100%;
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 1.5rem;
 }
 
@@ -16,7 +15,31 @@
 .clip-selector .subtitle {
   color: var(--text-muted);
   font-size: 0.85rem;
-  margin: -0.75rem 0 0;
+  margin: 0;
+}
+
+.clip-selector-header {
+  width: 100%;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  min-height: 3rem; /* Ensure height for absolute button */
+}
+
+/* Override back button positioning inside this specific header */
+.clip-selector-header .studio-back {
+  position: absolute;
+  left: 0;
+}
+
+.clip-selector-title-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.25rem;
 }
 
 .clip-grid {

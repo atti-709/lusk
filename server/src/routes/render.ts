@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import { tempManager } from "../services/TempManager.js";
 import { renderService } from "../services/RenderService.js";
-import type { RenderRequest, ErrorResponse } from "@lusk/shared";
+import type { RenderRequest, ErrorResponse, CaptionWord } from "@lusk/shared";
 
 function clipKey(clip: { startMs: number; endMs: number }): string {
   return `${clip.startMs}-${clip.endMs}`;
@@ -12,7 +12,8 @@ async function runRender(
   sessionId: string,
   clip: RenderRequest["clip"],
   offsetX: number,
-  log: FastifyInstance["log"]
+  log: FastifyInstance["log"],
+  preProcessedCaptions?: CaptionWord[]
 ): Promise<void> {
   const key = clipKey(clip);
   const session = orchestrator.getSession(sessionId)!;
@@ -28,6 +29,8 @@ async function runRender(
   });
 
   try {
+    const outroConfig = await renderService.detectOutroConfig();
+
     await renderService.renderClip(
       sessionId,
       sessionDir,
@@ -42,10 +45,12 @@ async function runRender(
           outputUrl: null,
         });
       },
-      outputFileName
+      outputFileName,
+      preProcessedCaptions as any,
+      outroConfig
     );
 
-    const outputUrl = `/static/${sessionId}/${outputFileName}`;
+    const outputUrl = `/static/${sessionId}/${outputFileName}?t=${Date.now()}`;
     orchestrator.updateClipRender(sessionId, key, {
       status: "exported",
       progress: 100,
@@ -69,11 +74,17 @@ async function runRender(
 }
 
 export async function renderRoute(app: FastifyInstance) {
+  // Outro config endpoint: returns file paths + durations for client-side preview
+  app.get("/api/outro-config", async () => {
+    const config = await renderService.detectOutroConfig();
+    return config ?? { outroSrc: "", outroDurationInFrames: 0 };
+  });
+
   app.post<{ Body: RenderRequest; Reply: { success: true } | ErrorResponse }>(
     "/api/render",
     async (request, reply) => {
-      const { sessionId, clip, offsetX } =
-        (request.body ?? {}) as Partial<RenderRequest>;
+      const body = (request.body ?? {}) as any;
+      const { sessionId, clip, offsetX, captions } = body;
 
       if (!sessionId || !clip) {
         return reply
@@ -107,7 +118,7 @@ export async function renderRoute(app: FastifyInstance) {
       }
 
       // Fire-and-forget
-      runRender(sessionId, clip, offsetX ?? 0, app.log).catch((err) => {
+      runRender(sessionId, clip, offsetX ?? 0, app.log, captions).catch((err) => {
         app.log.error(err, "Render pipeline failed");
       });
 

@@ -6,7 +6,7 @@ import { eventsRoute } from "./routes/events.js";
 import { projectRoute } from "./routes/project.js";
 import { transcribeRoute } from "./routes/transcribe.js";
 import { renderRoute } from "./routes/render.js";
-import { scriptRoute } from "./routes/script.js";
+import { alignRoute } from "./routes/align.js";
 import { sessionsRoute } from "./routes/sessions.js";
 import { tempManager } from "./services/TempManager.js";
 import { orchestrator } from "./services/Orchestrator.js";
@@ -20,7 +20,7 @@ await server.register(eventsRoute);
 await server.register(projectRoute);
 await server.register(transcribeRoute);
 await server.register(renderRoute);
-await server.register(scriptRoute);
+await server.register(alignRoute);
 await server.register(sessionsRoute);
 
 server.get("/api/health", async () => {
