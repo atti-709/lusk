@@ -35,8 +35,13 @@ export async function uploadRoute(app: FastifyInstance) {
       await pipeline(data.file, createWriteStream(savePath));
 
       const videoUrl = `/static/${sessionId}/input.mp4`;
+      // Strip extension for display; fall back to null if filename unavailable
+      const rawName = data.filename ?? null;
+      const videoName = rawName
+        ? rawName.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ").trim()
+        : null;
 
-      orchestrator.createSession(sessionId, videoUrl);
+      orchestrator.createSession(sessionId, videoUrl, videoName);
 
       return {
         success: true as const,

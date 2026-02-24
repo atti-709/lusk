@@ -44,6 +44,14 @@ export interface TranscriptData {
   words: TranscriptWord[];
 }
 
+export interface SessionSummary {
+  sessionId: string;
+  state: PipelineState;
+  videoUrl: string | null;
+  videoName: string | null;
+  createdAt: string;
+}
+
 export interface ViralClip {
   title: string;
   startMs: number;
@@ -78,6 +86,7 @@ export interface ProjectState {
   progress: number;
   message: string;
   videoUrl: string | null;
+  videoName: string | null;
 
   transcript: TranscriptData | null;
   correctedTranscriptRaw?: string | null;
@@ -98,9 +107,3 @@ export interface RenderRequest {
   captions?: CaptionWord[];
 }
 
-export interface SessionSummary {
-  sessionId: string;
-  state: PipelineState;
-  videoUrl: string | null;
-  createdAt: string;
-}

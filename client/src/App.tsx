@@ -119,6 +119,21 @@ function App() {
     setSelectedClip(null);
   }, []);
 
+  const handleAddClip = useCallback(async (clip: ViralClip) => {
+    if (!sessionId) return;
+    try {
+      const res = await fetch(`/api/project/${sessionId}/clips`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(clip),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.clips) setViralClips(data.clips);
+      }
+    } catch {}
+  }, [sessionId]);
+
   const handleBackToAlign = useCallback(async () => {
     if (!sessionId) return;
     const res = await fetch(`/api/project/${sessionId}/back-to-align`, {
@@ -303,16 +318,10 @@ function App() {
                 <button
                   className="primary"
                   onClick={() => setReadySubView("clips")}
-                  disabled={viralClips.length === 0}
                 >
                   Next → Clip Selection
                 </button>
               </div>
-              {viralClips.length === 0 && (
-                <p className="review-no-clips-hint">
-                  Paste viral clips in Align &amp; Analyze to continue
-                </p>
-              )}
             </div>
           </div>
         )}
@@ -328,43 +337,15 @@ function App() {
         !isStudio &&
         readySubView === "clips" &&
         !projectLoading &&
-        state.videoUrl &&
-        viralClips.length > 0 && (
+        state.videoUrl && (
           <div className="pipeline-stage">
             <ClipSelector
               clips={viralClips}
               videoUrl={state.videoUrl}
               onSelect={handleSelectClip}
               onBack={() => setReadySubView("review")}
+              onAddClip={handleAddClip}
             />
-          </div>
-        )}
-
-      {/* Fallback: no clips detected */}
-      {view === "session" &&
-        isReady &&
-        !isStudio &&
-        readySubView === "clips" &&
-        !projectLoading &&
-        state.videoUrl &&
-        viralClips.length === 0 && (
-          <div className="pipeline-stage">
-            <div className="no-clips">
-              <p>No viral clips were detected.</p>
-              <button
-                className="primary"
-                onClick={() =>
-                  handleSelectClip({
-                    title: "Full video",
-                    hookText: "",
-                    startMs: 0,
-                    endMs: (captions.at(-1)?.endMs ?? 0) + 1000 || 600000,
-                  } as ViralClip)
-                }
-              >
-                Open in studio
-              </button>
-            </div>
           </div>
         )}
 

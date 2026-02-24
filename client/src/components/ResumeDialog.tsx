@@ -99,7 +99,7 @@ function ProjectCard({ session: s, onOpen, onDelete }: ProjectCardProps) {
           </button>
         </div>
 
-        <div className="project-card-id">{s.sessionId.slice(0, 8)}</div>
+        <div className="project-card-name">{s.videoName ?? s.sessionId.slice(0, 8)}</div>
         <div className="project-card-time">{formatTime(s.createdAt)}</div>
       </div>
     </div>

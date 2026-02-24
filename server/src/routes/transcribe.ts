@@ -4,10 +4,17 @@ import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
 import type { TranscribeRequest, ErrorResponse } from "@lusk/shared";
 
-async function runTranscription(sessionId: string, log: FastifyInstance["log"]): Promise<void> {
+type Logger = Pick<FastifyInstance["log"], "error">;
+
+/**
+ * Core transcription work — does not perform the UPLOADING→TRANSCRIBING
+ * transition so it can be called both from the HTTP handler (which does the
+ * transition first) and from server startup (session already in TRANSCRIBING).
+ */
+export async function doTranscribe(sessionId: string, log: Logger): Promise<void> {
   const sessionDir = tempManager.getSessionDir(sessionId);
 
-  orchestrator.transition(sessionId, "TRANSCRIBING");
+  orchestrator.updateProgress(sessionId, 0, "Starting transcription...");
 
   const { transcript, captions } = await whisperService.transcribe(
     sessionDir,
@@ -21,6 +28,11 @@ async function runTranscription(sessionId: string, log: FastifyInstance["log"]):
 
   orchestrator.transition(sessionId, "ALIGNING");
   orchestrator.updateProgress(sessionId, 100, "Transcript ready — download and correct with Gemini");
+}
+
+async function runTranscription(sessionId: string, log: Logger): Promise<void> {
+  orchestrator.transition(sessionId, "TRANSCRIBING");
+  await doTranscribe(sessionId, log);
 }
 
 export async function transcribeRoute(app: FastifyInstance) {
