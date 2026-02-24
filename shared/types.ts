@@ -107,3 +107,9 @@ export interface RenderRequest {
   captions?: CaptionWord[];
 }
 
+export interface ImportResponse {
+  success: boolean;
+  sessionId: string;
+  videoName: string | null;
+}
+
