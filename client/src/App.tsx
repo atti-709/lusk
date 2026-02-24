@@ -101,6 +101,16 @@ function App() {
     setView("upload");
   }, []);
 
+  const handleImport = useCallback(async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/import", { method: "POST", body: formData });
+    if (!res.ok) throw new Error("Import failed");
+    const data = await res.json();
+    setSessionId(data.sessionId);
+    setView("session");
+  }, []);
+
   const handleTranscribe = useCallback(async () => {
     if (!sessionId) return;
 
@@ -233,6 +243,7 @@ function App() {
           onResume={handleResume}
           onDelete={handleDeleteSession}
           onNew={handleNew}
+          onImport={handleImport}
         />
       )}
 
@@ -241,7 +252,7 @@ function App() {
           <p className="tagline">
             Create viral shorts from Slovak video podcasts
           </p>
-          <UploadZone onUploadComplete={handleUploadComplete} />
+          <UploadZone onUploadComplete={handleUploadComplete} onImport={handleImport} />
         </div>
       )}
 
@@ -342,6 +353,8 @@ function App() {
             <ClipSelector
               clips={viralClips}
               videoUrl={state.videoUrl}
+              sessionId={sessionId}
+              videoName={state.videoName}
               onSelect={handleSelectClip}
               onBack={() => setReadySubView("review")}
               onAddClip={handleAddClip}

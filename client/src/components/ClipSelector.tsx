@@ -167,16 +167,64 @@ function AddClipForm({ onAdd, onCancel }: { onAdd: (clip: ViralClip) => void; on
   );
 }
 
+async function handleExport(sessionId: string, videoName: string | null, includeVideo: boolean) {
+  const fileName = `${videoName || "project"}.lusk`;
+  const url = `/api/project/${sessionId}/export?includeVideo=${includeVideo}`;
+
+  if ("showSaveFilePicker" in window) {
+    try {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: fileName,
+        types: [{
+          description: "Lusk Project",
+          accept: { "application/zip": [".lusk"] },
+        }],
+      });
+      const writable = await handle.createWritable();
+      const response = await fetch(url);
+      await response.body!.pipeTo(writable);
+      return;
+    } catch (err: any) {
+      if (err.name === "AbortError") return; // User cancelled
+    }
+  }
+
+  // Fallback: standard download
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 interface ClipSelectorProps {
   clips: ViralClip[];
   videoUrl: string;
+  sessionId: string;
+  videoName: string | null;
   onSelect: (clip: ViralClip) => void;
   onBack: () => void;
   onAddClip: (clip: ViralClip) => void;
 }
 
-export function ClipSelector({ clips, videoUrl, onSelect, onBack, onAddClip }: ClipSelectorProps) {
+export function ClipSelector({ clips, videoUrl, sessionId, videoName, onSelect, onBack, onAddClip }: ClipSelectorProps) {
   const [showForm, setShowForm] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [includeVideo, setIncludeVideo] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handleClickOutside = (e: globalThis.MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showExportMenu]);
 
   const handleAdd = useCallback((clip: ViralClip) => {
     onAddClip(clip);
@@ -197,6 +245,35 @@ export function ClipSelector({ clips, videoUrl, onSelect, onBack, onAddClip }: C
           <p className="subtitle">
             {clips.length} clip{clips.length !== 1 ? "s" : ""}
           </p>
+        </div>
+        <div className="export-wrapper" ref={exportRef}>
+          <button
+            className="secondary"
+            onClick={() => setShowExportMenu((v) => !v)}
+          >
+            Export Project
+          </button>
+          {showExportMenu && (
+            <div className="export-dropdown">
+              <label className="export-checkbox">
+                <input
+                  type="checkbox"
+                  checked={includeVideo}
+                  onChange={(e) => setIncludeVideo(e.target.checked)}
+                />
+                Include source video
+              </label>
+              <button
+                className="primary export-confirm"
+                onClick={() => {
+                  setShowExportMenu(false);
+                  handleExport(sessionId, videoName, includeVideo);
+                }}
+              >
+                Export
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

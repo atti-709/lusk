@@ -234,3 +234,47 @@
   justify-content: flex-end;
   margin-top: 0.25rem;
 }
+
+/* ── Export Dropdown ── */
+
+.export-wrapper {
+  position: absolute;
+  right: 0;
+}
+
+.export-dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 200px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 10;
+}
+
+.export-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.export-checkbox input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+}
+
+.export-confirm {
+  width: 100%;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.75rem;
+}

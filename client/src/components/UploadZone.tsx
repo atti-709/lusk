@@ -16,9 +16,10 @@ interface UploadState {
 
 interface UploadZoneProps {
   onUploadComplete: (sessionId: string) => void;
+  onImport?: (file: File) => void;
 }
 
-export function UploadZone({ onUploadComplete }: UploadZoneProps) {
+export function UploadZone({ onUploadComplete, onImport }: UploadZoneProps) {
   const [state, setState] = useState<UploadState>({ status: "idle" });
   // Counts nested dragenter/dragleave pairs so child elements don't flicker the state.
   const dragCounter = useRef(0);
@@ -81,9 +82,15 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
       dragCounter.current = 0;
       setState((s) => ({ ...s, status: "idle" }));
       const file = e.dataTransfer.files[0];
-      if (file) handleUpload(file);
+      if (file) {
+        if (file.name.endsWith(".lusk") && onImport) {
+          onImport(file);
+        } else {
+          handleUpload(file);
+        }
+      }
     },
-    [handleUpload]
+    [handleUpload, onImport]
   );
 
   const onDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -103,9 +110,15 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   const onFileSelect = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) handleUpload(file);
+      if (file) {
+        if (file.name.endsWith(".lusk") && onImport) {
+          onImport(file);
+        } else {
+          handleUpload(file);
+        }
+      }
     },
-    [handleUpload]
+    [handleUpload, onImport]
   );
 
   return (
@@ -131,12 +144,12 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
             Browse files
             <input
               type="file"
-              accept="video/*"
+              accept="video/*,.lusk"
               onChange={onFileSelect}
               hidden
             />
           </label>
-          <p className="upload-formats">MP4, MOV, WEBM up to 2 GB</p>
+          <p className="upload-formats">MP4, MOV, WEBM up to 2 GB — or .lusk project file</p>
         </>
       )}
 
