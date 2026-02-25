@@ -214,8 +214,23 @@ export async function exportImportRoute(app: FastifyInstance) {
       // Check if video is in the archive
       const hasVideo = entries.some((e) => e.entryName === "input.mp4");
 
+      // Build a unique name by comparing against all existing sessions
+      const existingNames = new Set(
+        [...orchestrator["sessions"].values()]
+          .map((s) => s.videoName)
+          .filter(Boolean) as string[]
+      );
+
+      const rawName = sessionData.videoName ?? null;
+      let uniqueName = rawName;
+      if (rawName && existingNames.has(rawName)) {
+        let n = 2;
+        while (existingNames.has(`${rawName} (${n})`)) n++;
+        uniqueName = `${rawName} (${n})`;
+      }
+
       // Rewrite session data with new session identity
-      const videoName = sessionData.videoName ?? null;
+      const videoName = uniqueName;
       sessionData.sessionId = newSessionId;
       sessionData.videoUrl = hasVideo ? `/static/${newSessionId}/input.mp4` : null;
       sessionData.renders = {};
