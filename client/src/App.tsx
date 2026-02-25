@@ -83,6 +83,36 @@ function App() {
     }).catch(() => {});
   }, []);
 
+  // Upload video to an existing IDLE session (imported without video)
+  const [idleUploadError, setIdleUploadError] = useState<string | null>(null);
+  const handleIdleVideoSelect = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !sessionId) return;
+      setIdleUploadError(null);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const response = await fetch(`/api/sessions/${sessionId}/upload-video`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: "Upload failed" }));
+          setIdleUploadError(err.error ?? "Upload failed");
+          return;
+        }
+        // Server verifies duration and transitions straight to READY —
+        // SSE will push the new state automatically, no transcription needed.
+      } catch {
+        setIdleUploadError("Upload failed");
+      }
+    },
+    [sessionId]
+  );
+
   const handleResume = useCallback((id: string) => {
     setCaptions([]);
     setViralClips([]);
@@ -290,8 +320,8 @@ function App() {
         </div>
       )}
 
-      {/* Always show stepper when in session */}
-      {showStepper && !isStudio && (
+      {/* Always show stepper when in session (skip IDLE — has no pipeline steps) */}
+      {showStepper && !isStudio && state.state !== "IDLE" && (
         <div className="pipeline-stage">
           <PipelineStepper
             currentState={state.state}
@@ -302,6 +332,35 @@ function App() {
             readySubView={readySubView}
             onTranscribe={handleTranscribe}
           />
+        </div>
+      )}
+
+      {/* IDLE state: imported without video — show upload prompt */}
+      {view === "session" && state && state.state === "IDLE" && (
+        <div className="pipeline-stage">
+          <div className="idle-notice">
+            <div className="upload-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </div>
+            <h2>Add a source video</h2>
+            <p>This project was imported without a video file. Upload one to continue.</p>
+            <label className="primary browse-btn">
+              Choose video
+              <input
+                type="file"
+                accept="video/*"
+                onChange={handleIdleVideoSelect}
+                hidden
+              />
+            </label>
+            {idleUploadError && (
+              <p className="idle-error">{idleUploadError}</p>
+            )}
+          </div>
         </div>
       )}
 

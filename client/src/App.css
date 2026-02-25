@@ -101,3 +101,58 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ── Idle notice (imported without video) ── */
+.idle-notice {
+  text-align: center;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
+}
+
+.idle-notice .upload-icon {
+  color: var(--text-dim);
+  margin-bottom: 0.5rem;
+}
+
+.idle-notice h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.idle-notice p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.idle-notice .browse-btn {
+  display: inline-block;
+  padding: 0.6em 1.4em;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.idle-notice .browse-btn:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 0 30px var(--accent-glow-strong);
+  transform: translateY(-1px);
+}
+
+.idle-error {
+  color: var(--error);
+  font-size: 0.8rem;
+  margin: 0;
+}

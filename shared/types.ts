@@ -87,6 +87,7 @@ export interface ProjectState {
   message: string;
   videoUrl: string | null;
   videoName: string | null;
+  videoDurationMs: number | null;
 
   transcript: TranscriptData | null;
   correctedTranscriptRaw?: string | null;
