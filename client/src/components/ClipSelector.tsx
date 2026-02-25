@@ -167,9 +167,25 @@ function AddClipForm({ onAdd, onCancel }: { onAdd: (clip: ViralClip) => void; on
   );
 }
 
-async function handleExport(sessionId: string, videoName: string | null, includeVideo: boolean) {
+async function streamExport(
+  sessionId: string,
+  videoName: string | null,
+  includeVideo: boolean,
+  onProgress: (pct: number) => void,
+) {
   const fileName = `${videoName || "project"}.lusk`;
   const url = `/api/project/${sessionId}/export?includeVideo=${includeVideo}`;
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Export failed");
+
+  const contentLength = Number(response.headers.get("Content-Length") || 0);
+  const reader = response.body!.getReader();
+
+  // Try File System Access API first
+  let writableStream: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  let closeWritable: (() => Promise<void>) | null = null;
+  let blobChunks: Uint8Array[] | null = null;
 
   if ("showSaveFilePicker" in window) {
     try {
@@ -181,21 +197,50 @@ async function handleExport(sessionId: string, videoName: string | null, include
         }],
       });
       const writable = await handle.createWritable();
-      const response = await fetch(url);
-      await response.body!.pipeTo(writable);
-      return;
+      writableStream = writable.getWriter();
+      closeWritable = async () => {
+        writableStream!.releaseLock();
+        await writable.close();
+      };
     } catch (err: any) {
-      if (err.name === "AbortError") return; // User cancelled
+      if (err.name === "AbortError") return;
     }
   }
 
-  // Fallback: standard download
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  if (!writableStream) {
+    blobChunks = [];
+  }
+
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (contentLength > 0) {
+      onProgress(Math.min(99, Math.round((received / contentLength) * 100)));
+    }
+    if (writableStream) {
+      await writableStream.write(value);
+    } else {
+      blobChunks!.push(value);
+    }
+  }
+
+  if (writableStream && closeWritable) {
+    await closeWritable();
+  } else if (blobChunks) {
+    const blob = new Blob(blobChunks, { type: "application/zip" });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  }
+
+  onProgress(100);
 }
 
 interface ClipSelectorProps {
@@ -212,11 +257,14 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, onSelect, 
   const [showForm, setShowForm] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [includeVideo, setIncludeVideo] = useState(false);
+  const [exportProgress, setExportProgress] = useState<number | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
-  // Close export menu when clicking outside
+  const isExporting = exportProgress !== null && exportProgress < 100;
+
+  // Close export menu when clicking outside (but not during export)
   useEffect(() => {
-    if (!showExportMenu) return;
+    if (!showExportMenu || isExporting) return;
     const handleClickOutside = (e: globalThis.MouseEvent) => {
       if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
         setShowExportMenu(false);
@@ -224,12 +272,30 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, onSelect, 
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showExportMenu]);
+  }, [showExportMenu, isExporting]);
+
+  // Auto-hide dropdown after export completes
+  useEffect(() => {
+    if (exportProgress !== 100) return;
+    const t = setTimeout(() => {
+      setShowExportMenu(false);
+      setExportProgress(null);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [exportProgress]);
 
   const handleAdd = useCallback((clip: ViralClip) => {
     onAddClip(clip);
     setShowForm(false);
   }, [onAddClip]);
+
+  const startExport = useCallback(() => {
+    setExportProgress(0);
+    streamExport(sessionId, videoName, includeVideo, setExportProgress)
+      .catch(() => {
+        setExportProgress(null);
+      });
+  }, [sessionId, videoName, includeVideo]);
 
   return (
     <div className="clip-selector">
@@ -255,23 +321,39 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, onSelect, 
           </button>
           {showExportMenu && (
             <div className="export-dropdown">
-              <label className="export-checkbox">
-                <input
-                  type="checkbox"
-                  checked={includeVideo}
-                  onChange={(e) => setIncludeVideo(e.target.checked)}
-                />
-                Include source video
-              </label>
-              <button
-                className="primary export-confirm"
-                onClick={() => {
-                  setShowExportMenu(false);
-                  handleExport(sessionId, videoName, includeVideo);
-                }}
-              >
-                Export
-              </button>
+              {isExporting ? (
+                <>
+                  <div className="export-progress-header">
+                    <span>Exporting...</span>
+                    <span className="export-progress-pct">{exportProgress}%</span>
+                  </div>
+                  <div className="export-progress-track">
+                    <div
+                      className="export-progress-fill"
+                      style={{ width: `${exportProgress}%` }}
+                    />
+                  </div>
+                </>
+              ) : exportProgress === 100 ? (
+                <div className="export-done">Done!</div>
+              ) : (
+                <>
+                  <label className="export-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={includeVideo}
+                      onChange={(e) => setIncludeVideo(e.target.checked)}
+                    />
+                    Include source video
+                  </label>
+                  <button
+                    className="primary export-confirm"
+                    onClick={startExport}
+                  >
+                    Export
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

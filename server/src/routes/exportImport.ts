@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import multipart from "@fastify/multipart";
-import { access } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import archiver from "archiver";
@@ -37,42 +37,43 @@ export async function exportImportRoute(app: FastifyInstance) {
       const videoName = session.videoName ?? sessionId;
       const filename = `${videoName}.lusk`;
 
+      // Collect files to archive and pre-calculate total size for Content-Length
+      const filesToArchive: { path: string; name: string }[] = [];
+
+      const sessionJsonPath = join(sessionDir, "session.json");
+      try { await access(sessionJsonPath); filesToArchive.push({ path: sessionJsonPath, name: "session.json" }); } catch {}
+
+      const metaPath = join(sessionDir, "session-meta.json");
+      try { await access(metaPath); filesToArchive.push({ path: metaPath, name: "session-meta.json" }); } catch {}
+
+      if (includeVideo) {
+        const videoPath = join(sessionDir, "input.mp4");
+        try { await access(videoPath); filesToArchive.push({ path: videoPath, name: "input.mp4" }); } catch {}
+      }
+
+      // Estimate zip size: with zlib level 1 on already-compressed video,
+      // the output is roughly the sum of file sizes + zip overhead per entry.
+      // We use archiver in "store" mode (level 0) for video to make Content-Length predictable.
+      let estimatedSize = 22; // End-of-central-directory record
+      for (const f of filesToArchive) {
+        const s = await stat(f.path);
+        // Local file header (30) + name + data descriptor (16) + central dir entry (46) + name
+        estimatedSize += 30 + f.name.length + s.size + 16 + 46 + f.name.length;
+      }
+
       reply.raw.setHeader("Content-Type", "application/zip");
       reply.raw.setHeader(
         "Content-Disposition",
         `attachment; filename="${encodeURIComponent(filename)}"`
       );
 
-      const archive = archiver("zip", { zlib: { level: 1 } });
+      // Use store (no compression) so Content-Length is predictable
+      const archive = archiver("zip", { store: true });
+      reply.raw.setHeader("Content-Length", estimatedSize);
       archive.pipe(reply.raw);
 
-      // Always include session.json
-      const sessionJsonPath = join(sessionDir, "session.json");
-      try {
-        await access(sessionJsonPath);
-        archive.file(sessionJsonPath, { name: "session.json" });
-      } catch {
-        // session.json should always exist, but guard anyway
-      }
-
-      // Include session-meta.json if it exists
-      const metaPath = join(sessionDir, "session-meta.json");
-      try {
-        await access(metaPath);
-        archive.file(metaPath, { name: "session-meta.json" });
-      } catch {
-        // Optional file, skip if missing
-      }
-
-      // Include input.mp4 if requested and exists
-      if (includeVideo) {
-        const videoPath = join(sessionDir, "input.mp4");
-        try {
-          await access(videoPath);
-          archive.file(videoPath, { name: "input.mp4" });
-        } catch {
-          // Video file missing, skip
-        }
+      for (const f of filesToArchive) {
+        archive.file(f.path, { name: f.name });
       }
 
       await archive.finalize();
