@@ -84,6 +84,10 @@ function App() {
   }, []);
 
   const handleResume = useCallback((id: string) => {
+    setCaptions([]);
+    setViralClips([]);
+    setSelectedClip(null);
+    setReadySubView("review");
     setSessionId(id);
     setView("session");
   }, []);
@@ -119,6 +123,11 @@ function App() {
       if (xhr.status >= 200 && xhr.status < 300) {
         const data = JSON.parse(xhr.responseText);
         setImportProgress(null);
+        // Reset UI state for the new session
+        setCaptions([]);
+        setViralClips([]);
+        setSelectedClip(null);
+        setReadySubView("review");
         setSessionId(data.sessionId);
         setView("session");
       } else {
