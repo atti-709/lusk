@@ -348,6 +348,11 @@ function App() {
             </div>
             <h2>Add a source video</h2>
             <p>This project was imported without a video file. Upload one to continue.</p>
+            {state.videoName && (
+              <p className="idle-filename-hint">
+                Looking for: <code>{state.videoName}.mp4</code>
+              </p>
+            )}
             <label className="primary browse-btn">
               Choose video
               <input
