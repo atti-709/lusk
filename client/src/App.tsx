@@ -448,6 +448,8 @@ function App() {
               videoUrl={state.videoUrl}
               sessionId={sessionId}
               videoName={state.videoName}
+              renders={state.renders ?? {}}
+              captions={captions}
               onSelect={handleSelectClip}
               onBack={() => setReadySubView("review")}
               onAddClip={handleAddClip}

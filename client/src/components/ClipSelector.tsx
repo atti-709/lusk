@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from "react";
-import type { ViralClip } from "@lusk/shared";
+import type { ViralClip, ClipRenderState, CaptionWord } from "@lusk/shared";
 import "./ClipSelector.css";
 
 function formatMs(ms: number): string {
@@ -248,12 +248,14 @@ interface ClipSelectorProps {
   videoUrl: string;
   sessionId: string;
   videoName: string | null;
+  renders: Record<string, ClipRenderState>;
+  captions: CaptionWord[];
   onSelect: (clip: ViralClip) => void;
   onBack: () => void;
   onAddClip: (clip: ViralClip) => void;
 }
 
-export function ClipSelector({ clips, videoUrl, sessionId, videoName, onSelect, onBack, onAddClip }: ClipSelectorProps) {
+export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, captions, onSelect, onBack, onAddClip }: ClipSelectorProps) {
   const [showForm, setShowForm] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [includeVideo, setIncludeVideo] = useState(false);
