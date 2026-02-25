@@ -23,6 +23,7 @@ export interface OutroConfig {
 
 class RenderService {
   private bundlePath: string | null = null;
+  private bundledWithOutro: boolean | null = null; // tracks public dir state at bundle time
 
   private get entryPoint(): string {
     return path.resolve(
@@ -66,14 +67,20 @@ class RenderService {
     if (outroDuration <= 0) return null;
 
     return {
-      outroSrc: "/outro.mp4",
+      outroSrc: `${LUSK_SERVER_ORIGIN}/public/outro.mp4`,
       outroDurationInFrames: Math.ceil(outroDuration * COMP_FPS),
     };
   }
 
-  async ensureBundled(onProgress?: ProgressCallback): Promise<string> {
+  async ensureBundled(onProgress?: ProgressCallback, outroPresent?: boolean): Promise<string> {
+    // Invalidate the cached bundle if the outro presence changed since last bundle
+    if (this.bundlePath && outroPresent !== undefined && outroPresent !== this.bundledWithOutro) {
+      this.bundlePath = null;
+    }
+
     if (this.bundlePath) return this.bundlePath;
 
+    this.bundledWithOutro = outroPresent ?? false;
     onProgress?.(5, "Bundling composition...");
     this.bundlePath = await bundle({
       entryPoint: this.entryPoint,
@@ -91,6 +98,7 @@ class RenderService {
    */
   invalidateBundle(): void {
     this.bundlePath = null;
+    this.bundledWithOutro = null;
   }
 
   async renderClip(
@@ -104,7 +112,7 @@ class RenderService {
     preProcessedCaptions?: Caption[],
     outroConfig?: OutroConfig | null
   ): Promise<string> {
-    const serveUrl = await this.ensureBundled(onProgress);
+    const serveUrl = await this.ensureBundled(onProgress, outroConfig != null);
     const videoUrl = `${LUSK_SERVER_ORIGIN}/static/${sessionId}/input.mp4`;
     const outputPath = path.join(sessionDir, outputFileName);
 
