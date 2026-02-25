@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import multipart from "@fastify/multipart";
-import { access, stat } from "node:fs/promises";
+import { access, stat, readdir } from "node:fs/promises";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import archiver from "archiver";
@@ -70,6 +70,88 @@ export async function exportImportRoute(app: FastifyInstance) {
       // Use store (no compression) so Content-Length is predictable
       const archive = archiver("zip", { store: true });
       reply.raw.setHeader("Content-Length", estimatedSize);
+      archive.pipe(reply.raw);
+
+      for (const f of filesToArchive) {
+        archive.file(f.path, { name: f.name });
+      }
+
+      await archive.finalize();
+      return reply.hijack();
+    }
+  );
+
+  // ── Clips ZIP ───────────────────────────────────────────────────────────
+  app.get<{
+    Params: { sessionId: string };
+    Reply: ErrorResponse | void;
+  }>(
+    "/api/sessions/:sessionId/clips-zip",
+    async (request, reply) => {
+      const { sessionId } = request.params;
+
+      const session = orchestrator.getSession(sessionId);
+      if (!session) {
+        return reply.status(400).send({ success: false, error: "Session not found" });
+      }
+
+      const sessionDir = tempManager.getSessionDir(sessionId);
+
+      // Find all rendered clip files in session dir
+      let allFiles: string[];
+      try {
+        allFiles = await readdir(sessionDir);
+      } catch {
+        return reply.status(404).send({ success: false, error: "No rendered clips found" });
+      }
+
+      const clipFiles = allFiles.filter(
+        (f) => f.startsWith("output_") && f.endsWith(".mp4")
+      );
+
+      if (clipFiles.length === 0) {
+        return reply.status(404).send({ success: false, error: "No rendered clips found" });
+      }
+
+      // Build a map from effective render key → clip title
+      // The render key = `${trimmedStartMs}-${trimmedEndMs}` where:
+      //   trimmedStartMs = clip.startMs + (clip.trimStartDelta ?? 0)
+      //   trimmedEndMs   = clip.endMs   + (clip.trimEndDelta  ?? 900)
+      const CAPTION_DELAY_MS = 900;
+      const nameMap = new Map<string, string>();
+      for (const clip of session.viralClips ?? []) {
+        const effectiveStart = clip.startMs + (clip.trimStartDelta ?? 0);
+        const effectiveEnd = clip.endMs + (clip.trimEndDelta ?? CAPTION_DELAY_MS);
+        const key = `${effectiveStart}-${effectiveEnd}`;
+        // Sanitize title for use as a filename
+        const safeName = clip.title.replace(/[^\w\s\-]/g, "_").trim().slice(0, 60) || key;
+        nameMap.set(key, safeName);
+      }
+
+      // Build file list with friendly names
+      const filesToArchive: { path: string; name: string }[] = [];
+      for (const filename of clipFiles) {
+        // filename = output_${key}.mp4  →  key = everything between "output_" and ".mp4"
+        const key = filename.slice("output_".length, -".mp4".length);
+        const title = nameMap.get(key) ?? key;
+        filesToArchive.push({
+          path: join(sessionDir, filename),
+          name: `${title}.mp4`,
+        });
+      }
+
+      // Pre-calculate Content-Length (store mode = no compression, predictable size)
+      let estimatedSize = 22; // end-of-central-directory record
+      for (const f of filesToArchive) {
+        const s = await stat(f.path);
+        estimatedSize += 30 + f.name.length + s.size + 16 + 46 + f.name.length;
+      }
+
+      reply.raw.setHeader("Content-Type", "application/zip");
+      reply.raw.setHeader("Content-Disposition", `attachment; filename="clips.zip"`);
+      reply.raw.setHeader("Content-Length", estimatedSize);
+
+      const archive = archiver("zip", { store: true });
       archive.pipe(reply.raw);
 
       for (const f of filesToArchive) {
