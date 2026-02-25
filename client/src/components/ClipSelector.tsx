@@ -585,22 +585,49 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
         {clips.length > 0 && (
           <div className="render-all-wrapper">
             <button
-              className="secondary render-all-btn"
+              className="render-all-btn"
               onClick={handleRenderAll}
               disabled={batchState === "rendering" || batchState === "zipping"}
               title={batchError ?? undefined}
             >
-              {batchState === "done" ? "Done!" : "Render All & Download ZIP"}
+              {/* Film strip + download icon */}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                <line x1="7" y1="2" x2="7" y2="22" />
+                <line x1="17" y1="2" x2="17" y2="22" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <line x1="2" y1="7" x2="7" y2="7" />
+                <line x1="2" y1="17" x2="7" y2="17" />
+                <line x1="17" y1="17" x2="22" y2="17" />
+                <line x1="17" y1="7" x2="22" y2="7" />
+              </svg>
+              {batchState === "done" ? "Done!" : "Render All"}
+              {batchState === "idle" && (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              )}
             </button>
             {batchError && <p className="render-all-error">{batchError}</p>}
           </div>
         )}
         <div className="export-wrapper" ref={exportRef}>
           <button
-            className="secondary"
+            className="secondary export-trigger-btn"
             onClick={() => setShowExportMenu((v) => !v)}
           >
-            Export Project
+            {/* Package/box icon */}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+              <line x1="12" y1="22.08" x2="12" y2="12" />
+            </svg>
+            Export
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
           </button>
           {showExportMenu && (
             <div className="export-dropdown">

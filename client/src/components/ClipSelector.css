@@ -318,7 +318,7 @@
 
 .render-all-wrapper {
   position: absolute;
-  right: 160px; /* Offset left of the export button (~150px wide + gap) */
+  right: 148px; /* Offset left of the export button */
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -326,14 +326,46 @@
 }
 
 .render-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 1rem;
   font-size: 0.82rem;
-  padding: 0.4rem 0.75rem;
+  font-weight: 600;
   white-space: nowrap;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(139, 92, 246, 0.35);
+  transition: opacity 0.15s, box-shadow 0.15s, transform 0.1s;
+  letter-spacing: 0.01em;
+}
+
+.render-all-btn:hover:not(:disabled) {
+  opacity: 0.92;
+  box-shadow: 0 4px 18px rgba(139, 92, 246, 0.5);
+  transform: translateY(-1px);
+}
+
+.render-all-btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .render-all-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Export trigger button — icon + text + chevron layout */
+.export-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.85rem;
 }
 
 .render-all-error {
