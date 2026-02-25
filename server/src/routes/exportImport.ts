@@ -232,6 +232,7 @@ export async function exportImportRoute(app: FastifyInstance) {
       // Rewrite session data with new session identity
       const videoName = uniqueName;
       sessionData.sessionId = newSessionId;
+      sessionData.videoName = videoName; // write back the deduplicated name
       sessionData.videoUrl = hasVideo ? `/static/${newSessionId}/input.mp4` : null;
       sessionData.renders = {};
       sessionData.outputUrl = null;
