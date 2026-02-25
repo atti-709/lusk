@@ -67,6 +67,24 @@ export function AlignStep({ sessionId }: AlignStepProps) {
     const filename = isZip ? "transcription.zip" : "transcription.tsv";
 
     const blob = await res.blob();
+
+    if ("showSaveFilePicker" in window) {
+      try {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: filename,
+          types: isZip 
+            ? [{ description: "ZIP Archive", accept: { "application/zip": [".zip"] } }]
+            : [{ description: "TSV File", accept: { "text/tab-separated-values": [".tsv"] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return;
+      } catch (err: any) {
+        if (err.name === "AbortError") return;
+      }
+    }
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
