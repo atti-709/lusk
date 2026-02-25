@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import fs from "node:fs";
 import { uploadRoute } from "./routes/upload.js";
 import { staticPlugin } from "./plugins/static.js";
 import { eventsRoute } from "./routes/events.js";
@@ -50,11 +51,20 @@ const sessions = await tempManager.listSessions();
 for (const summary of sessions) {
   const state = await tempManager.restoreSession(summary.sessionId);
   if (state) {
-    // Clear any renders stuck "rendering" — they can't be in-progress after restart
+    // Clear any renders stuck "rendering" — they can't be in-progress after restart.
+    // Also clear "exported" entries whose file was manually deleted from disk,
+    // so Render All will correctly re-render them.
     if (state.renders) {
+      const sessionDir = tempManager.getSessionDir(state.sessionId);
       for (const key of Object.keys(state.renders)) {
-        if (state.renders[key].status === "rendering") {
+        const r = state.renders[key];
+        if (r.status === "rendering") {
           delete state.renders[key];
+        } else if (r.status === "exported") {
+          const filePath = `${sessionDir}/output_${key}.mp4`;
+          if (!fs.existsSync(filePath)) {
+            delete state.renders[key];
+          }
         }
       }
     }
