@@ -101,14 +101,38 @@ function App() {
     setView("upload");
   }, []);
 
-  const handleImport = useCallback(async (file: File) => {
+  const [importProgress, setImportProgress] = useState<number | null>(null);
+
+  const handleImport = useCallback((file: File) => {
+    setImportProgress(0);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/import");
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        setImportProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const data = JSON.parse(xhr.responseText);
+        setImportProgress(null);
+        setSessionId(data.sessionId);
+        setView("session");
+      } else {
+        setImportProgress(null);
+      }
+    };
+
+    xhr.onerror = () => {
+      setImportProgress(null);
+    };
+
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch("/api/import", { method: "POST", body: formData });
-    if (!res.ok) throw new Error("Import failed");
-    const data = await res.json();
-    setSessionId(data.sessionId);
-    setView("session");
+    xhr.send(formData);
   }, []);
 
   const handleTranscribe = useCallback(async () => {
@@ -244,6 +268,7 @@ function App() {
           onDelete={handleDeleteSession}
           onNew={handleNew}
           onImport={handleImport}
+          importProgress={importProgress}
         />
       )}
 
@@ -252,7 +277,7 @@ function App() {
           <p className="tagline">
             Create viral shorts from Slovak video podcasts
           </p>
-          <UploadZone onUploadComplete={handleUploadComplete} onImport={handleImport} />
+          <UploadZone onUploadComplete={handleUploadComplete} onImport={handleImport} importProgress={importProgress} />
         </div>
       )}
 

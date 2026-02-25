@@ -17,9 +17,10 @@ interface UploadState {
 interface UploadZoneProps {
   onUploadComplete: (sessionId: string) => void;
   onImport?: (file: File) => void;
+  importProgress?: number | null;
 }
 
-export function UploadZone({ onUploadComplete, onImport }: UploadZoneProps) {
+export function UploadZone({ onUploadComplete, onImport, importProgress }: UploadZoneProps) {
   const [state, setState] = useState<UploadState>({ status: "idle" });
   // Counts nested dragenter/dragleave pairs so child elements don't flicker the state.
   const dragCounter = useRef(0);
@@ -129,7 +130,20 @@ export function UploadZone({ onUploadComplete, onImport }: UploadZoneProps) {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
     >
-      {state.status === "idle" && (
+      {importProgress !== null && importProgress !== undefined && (
+        <div className="uploading-state">
+          <p className="upload-title">Importing project...</p>
+          <div className="import-progress-track">
+            <div
+              className="import-progress-fill"
+              style={{ width: `${importProgress}%` }}
+            />
+          </div>
+          <p className="upload-hint">{importProgress}%</p>
+        </div>
+      )}
+
+      {importProgress === null && state.status === "idle" && (
         <>
           <div className="upload-icon">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
