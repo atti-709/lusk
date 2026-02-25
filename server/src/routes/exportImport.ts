@@ -92,7 +92,7 @@ export async function exportImportRoute(app: FastifyInstance) {
 
       const session = orchestrator.getSession(sessionId);
       if (!session) {
-        return reply.status(400).send({ success: false, error: "Session not found" });
+        return reply.status(404).send({ success: false, error: "Session not found" });
       }
 
       const sessionDir = tempManager.getSessionDir(sessionId);
@@ -144,7 +144,8 @@ export async function exportImportRoute(app: FastifyInstance) {
       let estimatedSize = 22; // end-of-central-directory record
       for (const f of filesToArchive) {
         const s = await stat(f.path);
-        estimatedSize += 30 + f.name.length + s.size + 16 + 46 + f.name.length;
+        const nameBytes = Buffer.byteLength(f.name, "utf8");
+        estimatedSize += 30 + nameBytes + s.size + 16 + 46 + nameBytes;
       }
 
       reply.raw.setHeader("Content-Type", "application/zip");
