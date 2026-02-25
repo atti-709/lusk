@@ -81,12 +81,12 @@ export async function exportImportRoute(app: FastifyInstance) {
     }
   );
 
-  // ── Clips ZIP ───────────────────────────────────────────────────────────
+  // ── Rendered Clips List ──────────────────────────────────────────────────
   app.get<{
     Params: { sessionId: string };
-    Reply: ErrorResponse | void;
+    Reply: ErrorResponse | { success: true; clips: { url: string; filename: string }[] };
   }>(
-    "/api/sessions/:sessionId/clips-zip",
+    "/api/sessions/:sessionId/rendered-clips",
     async (request, reply) => {
       const { sessionId } = request.params;
 
@@ -114,9 +114,6 @@ export async function exportImportRoute(app: FastifyInstance) {
       }
 
       // Build a map from effective render key → clip title
-      // The render key = `${trimmedStartMs}-${trimmedEndMs}` where:
-      //   trimmedStartMs = clip.startMs + (clip.trimStartDelta ?? 0)
-      //   trimmedEndMs   = clip.endMs   + (clip.trimEndDelta  ?? 900)
       const CAPTION_DELAY_MS = 900;
       const nameMap = new Map<string, string>();
       for (const clip of session.viralClips ?? []) {
@@ -128,39 +125,18 @@ export async function exportImportRoute(app: FastifyInstance) {
         nameMap.set(key, safeName);
       }
 
-      // Build file list with friendly names
-      const filesToArchive: { path: string; name: string }[] = [];
+      // Return URLs and friendly names for each rendered clip
+      const clips: { url: string; filename: string }[] = [];
       for (const filename of clipFiles) {
-        // filename = output_${key}.mp4  →  key = everything between "output_" and ".mp4"
         const key = filename.slice("output_".length, -".mp4".length);
         const title = nameMap.get(key) ?? key;
-        filesToArchive.push({
-          path: join(sessionDir, filename),
-          name: `${title}.mp4`,
+        clips.push({
+          url: `/static/${sessionId}/${filename}`,
+          filename: `${title}.mp4`,
         });
       }
 
-      // Pre-calculate Content-Length (store mode = no compression, predictable size)
-      let estimatedSize = 22; // end-of-central-directory record
-      for (const f of filesToArchive) {
-        const s = await stat(f.path);
-        const nameBytes = Buffer.byteLength(f.name, "utf8");
-        estimatedSize += 30 + nameBytes + s.size + 16 + 46 + nameBytes;
-      }
-
-      reply.raw.setHeader("Content-Type", "application/zip");
-      reply.raw.setHeader("Content-Disposition", `attachment; filename="clips.zip"`);
-      reply.raw.setHeader("Content-Length", estimatedSize);
-
-      const archive = archiver("zip", { store: true });
-      archive.pipe(reply.raw);
-
-      for (const f of filesToArchive) {
-        archive.file(f.path, { name: f.name });
-      }
-
-      await archive.finalize();
-      return reply.hijack();
+      return reply.send({ success: true, clips });
     }
   );
 

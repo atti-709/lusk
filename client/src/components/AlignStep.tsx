@@ -75,6 +75,7 @@ export function AlignStep({ sessionId }: AlignStepProps) {
 
     if ("showSaveFilePicker" in window) {
       try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const handle = await (window as any).showSaveFilePicker({
           suggestedName: filename,
           types: isZip 
@@ -85,6 +86,7 @@ export function AlignStep({ sessionId }: AlignStepProps) {
         await writable.write(blob);
         await writable.close();
         return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         if (err.name === "AbortError") return;
       }

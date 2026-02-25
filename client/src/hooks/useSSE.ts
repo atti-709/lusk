@@ -15,16 +15,20 @@ export function useSSE(sessionId: string | null): UseSSEResult {
 
   useEffect(() => {
     if (!sessionId) {
-      setState(null);
-      setIsConnected(false);
-      setError(null);
+      setTimeout(() => {
+        setState(null);
+        setIsConnected(false);
+        setError(null);
+      }, 0);
       return;
     }
 
-    // Clear stale state from previous session immediately
-    setState(null);
-    setIsConnected(false);
-    setError(null);
+    // Clear stale state from previous session immediately but asyncly
+    setTimeout(() => {
+      setState(null);
+      setIsConnected(false);
+      setError(null);
+    }, 0);
 
     const es = new EventSource(`/api/events/${sessionId}`);
     eventSourceRef.current = es;
