@@ -6,7 +6,6 @@ import {
   useCurrentFrame,
   interpolate,
 } from "remotion";
-import { Video } from "@remotion/media";
 import type { Caption } from "@remotion/captions";
 import { CaptionOverlay } from "./CaptionOverlay";
 
@@ -39,7 +38,7 @@ function ClipVideo({
 
   return (
     <Sequence from={-startFrom}>
-      <Video
+      <OffthreadVideo
         src={src}
         volume={volume}
         style={{
