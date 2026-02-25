@@ -35,6 +35,7 @@ interface StudioViewProps {
   videoUrl: string;
   captions: CaptionWord[];
   clip: ViralClip;
+  videoName: string | null;
   onRender: (clip: ViralClip, offsetX: number, captions: Caption[]) => void;
   onBack: () => void;
   renders: Record<string, ClipRenderState>;
@@ -57,6 +58,7 @@ export function StudioView({
   videoUrl,
   captions,
   clip,
+  videoName,
   onRender,
   onBack,
   renders,
@@ -105,12 +107,12 @@ export function StudioView({
     const prev = prevStatusRef.current;
     
     if (prev === "rendering" && status === "exported" && outputUrl) {
-      const filename = `clip-${trimmedClip.title.replace(/[^a-z0-9]/gi, "_")}.mp4`;
+      const filename = `${videoName || "project"}_clip-${trimmedClip.title.replace(/[^a-z0-9]/gi, "_")}.mp4`;
       triggerDownload(outputUrl, filename);
     }
     
     prevStatusRef.current = status ?? null;
-  }, [renderState?.status, outputUrl, trimmedClip.title]);
+  }, [renderState?.status, outputUrl, trimmedClip.title, videoName]);
 
   const startFrame = Math.round((effectiveStartMs / 1000) * COMP_FPS);
   const actualStartMs = (startFrame / COMP_FPS) * 1000;

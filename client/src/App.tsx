@@ -61,15 +61,24 @@ function App() {
   useEffect(() => {
     if (!sessionId || !isReady) return;
 
-    setProjectLoading(true);
-    fetch(`/api/project/${sessionId}`)
-      .then((r) => r.json())
-      .then((data: ProjectState) => {
+    let isMounted = true;
+    const fetchProject = async () => {
+      setProjectLoading(true);
+      try {
+        const r = await fetch(`/api/project/${sessionId}`);
+        const data: ProjectState = await r.json();
+        if (!isMounted) return;
         if (data.captions) setCaptions(data.captions);
         if (data.viralClips) setViralClips(data.viralClips);
-      })
-      .catch(() => {})
-      .finally(() => setProjectLoading(false));
+      } catch {
+        // ignore errors
+      } finally {
+        if (isMounted) setProjectLoading(false);
+      }
+    };
+    fetchProject();
+
+    return () => { isMounted = false; };
   }, [sessionId, isReady]);
 
   const handleUploadComplete = useCallback((id: string) => {
@@ -204,7 +213,9 @@ function App() {
         const data = await res.json();
         if (data.clips) setViralClips(data.clips);
       }
-    } catch {}
+    } catch {
+      // ignore
+    }
   }, [sessionId]);
 
   const handleBackToAlign = useCallback(async () => {
@@ -221,7 +232,7 @@ function App() {
 
 
   const handleRender = useCallback(
-    async (clip: ViralClip, offsetX: number, captions: any[]) => {
+    async (clip: ViralClip, offsetX: number, captions: Caption[]) => {
       if (!sessionId) return;
       await fetch("/api/render", {
         method: "POST",
@@ -412,11 +423,33 @@ function App() {
                 </button>
                 <button
                   className="secondary"
-                  onClick={() => {
+                  onClick={async () => {
                     const url = `/api/project/${sessionId}/captions.srt`;
+                    const filename = `${state.videoName || "project"}_captions.srt`;
+
+                    if ("showSaveFilePicker" in window) {
+                      try {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const handle = await (window as any).showSaveFilePicker({
+                          suggestedName: filename,
+                          types: [{ description: "SRT File", accept: { "application/x-subrip": [".srt"] } }],
+                        });
+                        const res = await fetch(url);
+                        if (!res.ok) return;
+                        const blob = await res.blob();
+                        const writable = await handle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+                        return;
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      } catch (err: any) {
+                        if (err.name === "AbortError") return;
+                      }
+                    }
+
                     const a = document.createElement("a");
                     a.href = url;
-                    a.download = "captions.srt";
+                    a.download = filename;
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
@@ -470,6 +503,7 @@ function App() {
             videoUrl={state.videoUrl}
             captions={captions}
             clip={selectedClip}
+            videoName={state.videoName ?? null}
             onRender={handleRender}
             onBack={handleBackToClips}
             renders={state.renders ?? {}}

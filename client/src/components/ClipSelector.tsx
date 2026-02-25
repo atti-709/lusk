@@ -304,6 +304,7 @@ function clipRenderKey(clip: ViralClip): string {
 async function downloadClipsZip(
   sessionId: string,
   fileHandle: FileSystemFileHandle | null,
+  videoName: string | null
 ): Promise<void> {
   const response = await fetch(`/api/sessions/${sessionId}/clips-zip`);
   if (!response.ok) throw new Error("ZIP download failed");
@@ -339,7 +340,7 @@ async function downloadClipsZip(
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = blobUrl;
-    a.download = "clips.zip";
+    a.download = `${videoName || "project"}_clips.zip`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -433,7 +434,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
       const handle = batch.fileHandle;
       batchRef.current = null;
       setBatchState("zipping");
-      downloadClipsZip(sessionId, handle)
+      downloadClipsZip(sessionId, handle, videoName)
         .then(() => {
           setBatchState("done");
           setTimeout(() => setBatchState("idle"), 2000);
@@ -465,7 +466,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
         if (batchRef.current) batchRef.current.currentWasRendering = true;
       }
     }).catch(() => {/* network error — watcher will time out and advance */});
-  }, [renders, batchState, sessionId, captions]);
+  }, [renders, batchState, sessionId, captions, videoName]);
 
   const handleRenderAll = useCallback(async () => {
     setBatchError(null);
@@ -497,7 +498,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
     if ("showSaveFilePicker" in window) {
       try {
         fileHandle = await (window as any).showSaveFilePicker({
-          suggestedName: "clips.zip",
+          suggestedName: `${videoName || "project"}_clips.zip`,
           types: [{ description: "ZIP archive", accept: { "application/zip": [".zip"] } }],
         });
       } catch (err: any) {
@@ -510,7 +511,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
       setBatchState("zipping");
       setBatchTotal(clips.length);
       setBatchDone(clips.length);
-      downloadClipsZip(sessionId, fileHandle)
+      downloadClipsZip(sessionId, fileHandle, videoName)
         .then(() => {
           setBatchState("done");
           setTimeout(() => setBatchState("idle"), 2000);
@@ -553,7 +554,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
         if (batchRef.current) batchRef.current.currentWasRendering = true;
       }
     }).catch(() => {/* network error ignored — watcher handles stall */});
-  }, [clips, renders, sessionId, captions]);
+  }, [clips, renders, sessionId, captions, videoName]);
 
   const handleAdd = useCallback((clip: ViralClip) => {
     onAddClip(clip);
