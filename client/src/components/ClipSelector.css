@@ -313,3 +313,33 @@
   color: var(--accent);
   padding: 0.25rem 0;
 }
+
+/* ── Render All Button ── */
+
+.render-all-wrapper {
+  position: absolute;
+  right: 160px; /* Offset left of the export button (~150px wide + gap) */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.render-all-btn {
+  font-size: 0.82rem;
+  padding: 0.4rem 0.75rem;
+  white-space: nowrap;
+}
+
+.render-all-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.render-all-error {
+  font-size: 0.75rem;
+  color: var(--error);
+  margin: 0;
+  max-width: 180px;
+  text-align: right;
+}

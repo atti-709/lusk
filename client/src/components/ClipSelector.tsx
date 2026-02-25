@@ -549,6 +549,25 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
             {clips.length} clip{clips.length !== 1 ? "s" : ""}
           </p>
         </div>
+        {clips.length > 0 && (
+          <div className="render-all-wrapper">
+            <button
+              className="secondary render-all-btn"
+              onClick={handleRenderAll}
+              disabled={batchState === "rendering" || batchState === "zipping"}
+              title={batchError ?? undefined}
+            >
+              {batchState === "rendering"
+                ? `Rendering ${batchDone + 1} / ${batchTotal}…`
+                : batchState === "zipping"
+                ? "Saving ZIP…"
+                : batchState === "done"
+                ? "Done!"
+                : "Render All & Download ZIP"}
+            </button>
+            {batchError && <p className="render-all-error">{batchError}</p>}
+          </div>
+        )}
         <div className="export-wrapper" ref={exportRef}>
           <button
             className="secondary"
