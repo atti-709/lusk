@@ -87,6 +87,7 @@ export interface ProjectState {
   message: string;
   videoUrl: string | null;
   videoName: string | null;
+  videoDurationMs: number | null;
 
   transcript: TranscriptData | null;
   correctedTranscriptRaw?: string | null;
@@ -105,5 +106,11 @@ export interface RenderRequest {
   clip: ViralClip;
   offsetX: number;
   captions?: CaptionWord[];
+}
+
+export interface ImportResponse {
+  success: boolean;
+  sessionId: string;
+  videoName: string | null;
 }
 

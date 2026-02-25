@@ -111,16 +111,38 @@ interface ResumeDialogProps {
   onResume: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
   onNew: () => void;
+  onImport: (file: File) => void;
+  importProgress?: number | null;
 }
 
-export function ResumeDialog({ sessions, onResume, onDelete, onNew }: ResumeDialogProps) {
+export function ResumeDialog({ sessions, onResume, onDelete, onNew, onImport, importProgress }: ResumeDialogProps) {
+  const isImporting = importProgress !== null && importProgress !== undefined;
+
   return (
     <div className="resume-page">
       <div className="resume-header">
         <h2>Projects</h2>
-        <button className="primary" onClick={onNew}>
-          + New project
-        </button>
+        <div className="resume-header-actions">
+          {isImporting ? (
+            <div className="import-progress-inline">
+              <span className="import-progress-label">Importing... {importProgress}%</span>
+              <div className="import-progress-track">
+                <div className="import-progress-fill" style={{ width: `${importProgress}%` }} />
+              </div>
+            </div>
+          ) : (
+            <label className="secondary import-btn">
+              Import project
+              <input type="file" accept=".lusk" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) onImport(file);
+              }} hidden />
+            </label>
+          )}
+          <button className="primary" onClick={onNew}>
+            + New project
+          </button>
+        </div>
       </div>
 
       <div className="project-grid">

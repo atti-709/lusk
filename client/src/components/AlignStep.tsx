@@ -14,6 +14,7 @@ export function AlignStep({ sessionId }: AlignStepProps) {
   const [viralClipPrompt, setViralClipPrompt] = useState("");
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [submitError, setSubmitError] = useState("");
+  const [videoName, setVideoName] = useState("project");
 
   // Fetch prompts on mount
   useEffect(() => {
@@ -40,6 +41,10 @@ export function AlignStep({ sessionId }: AlignStepProps) {
           setCorrectedTsv(data.correctedTranscriptRaw);
         }
 
+        if (data.videoName) {
+          setVideoName(data.videoName);
+        }
+
         // 2. Prefill viral clips
         if (data.viralClips?.length) {
           const text = (data.viralClips as ViralClip[]).map((clip: ViralClip, i: number) => {
@@ -64,16 +69,36 @@ export function AlignStep({ sessionId }: AlignStepProps) {
     // Check content type to determine extension (zip vs tsv)
     const contentType = res.headers.get("Content-Type") || "";
     const isZip = contentType.includes("zip");
-    const filename = isZip ? "transcription.zip" : "transcription.tsv";
+    const filename = isZip ? `${videoName}_transcription.zip` : `${videoName}_transcription.tsv`;
 
     const blob = await res.blob();
+
+    if ("showSaveFilePicker" in window) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: filename,
+          types: isZip 
+            ? [{ description: "ZIP Archive", accept: { "application/zip": [".zip"] } }]
+            : [{ description: "TSV File", accept: { "text/tab-separated-values": [".tsv"] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        if (err.name === "AbortError") return;
+      }
+    }
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-  }, [sessionId]);
+  }, [sessionId, videoName]);
 
   const handleCopyPrompt = useCallback(async (text: string, setter: (v: boolean) => void) => {
     await navigator.clipboard.writeText(text);

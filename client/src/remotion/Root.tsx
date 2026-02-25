@@ -1,4 +1,4 @@
-import { Composition, staticFile } from "remotion";
+import { Composition } from "remotion";
 import {
   VideoComposition,
   COMP_WIDTH,
@@ -23,7 +23,7 @@ export function Root() {
         captions: [],
         offsetX: 0,
         startFrom: 0,
-        outroSrc: staticFile("outro.mp4"),
+        outroSrc: "", // real URL injected by server at render time
         outroDurationInFrames: OUTRO_DURATION_FRAMES,
       }}
     />

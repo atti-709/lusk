@@ -61,15 +61,24 @@ function App() {
   useEffect(() => {
     if (!sessionId || !isReady) return;
 
-    setProjectLoading(true);
-    fetch(`/api/project/${sessionId}`)
-      .then((r) => r.json())
-      .then((data: ProjectState) => {
+    let isMounted = true;
+    const fetchProject = async () => {
+      setProjectLoading(true);
+      try {
+        const r = await fetch(`/api/project/${sessionId}`);
+        const data: ProjectState = await r.json();
+        if (!isMounted) return;
         if (data.captions) setCaptions(data.captions);
         if (data.viralClips) setViralClips(data.viralClips);
-      })
-      .catch(() => {})
-      .finally(() => setProjectLoading(false));
+      } catch {
+        // ignore errors
+      } finally {
+        if (isMounted) setProjectLoading(false);
+      }
+    };
+    fetchProject();
+
+    return () => { isMounted = false; };
   }, [sessionId, isReady]);
 
   const handleUploadComplete = useCallback((id: string) => {
@@ -83,7 +92,41 @@ function App() {
     }).catch(() => {});
   }, []);
 
+  // Upload video to an existing IDLE session (imported without video)
+  const [idleUploadError, setIdleUploadError] = useState<string | null>(null);
+  const handleIdleVideoSelect = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !sessionId) return;
+      setIdleUploadError(null);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const response = await fetch(`/api/sessions/${sessionId}/upload-video`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: "Upload failed" }));
+          setIdleUploadError(err.error ?? "Upload failed");
+          return;
+        }
+        // Server verifies duration and transitions straight to READY —
+        // SSE will push the new state automatically, no transcription needed.
+      } catch {
+        setIdleUploadError("Upload failed");
+      }
+    },
+    [sessionId]
+  );
+
   const handleResume = useCallback((id: string) => {
+    setCaptions([]);
+    setViralClips([]);
+    setSelectedClip(null);
+    setReadySubView("review");
     setSessionId(id);
     setView("session");
   }, []);
@@ -99,6 +142,45 @@ function App() {
 
   const handleNew = useCallback(() => {
     setView("upload");
+  }, []);
+
+  const [importProgress, setImportProgress] = useState<number | null>(null);
+
+  const handleImport = useCallback((file: File) => {
+    setImportProgress(0);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/import");
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        setImportProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const data = JSON.parse(xhr.responseText);
+        setImportProgress(null);
+        // Reset UI state for the new session
+        setCaptions([]);
+        setViralClips([]);
+        setSelectedClip(null);
+        setReadySubView("review");
+        setSessionId(data.sessionId);
+        setView("session");
+      } else {
+        setImportProgress(null);
+      }
+    };
+
+    xhr.onerror = () => {
+      setImportProgress(null);
+    };
+
+    const formData = new FormData();
+    formData.append("file", file);
+    xhr.send(formData);
   }, []);
 
   const handleTranscribe = useCallback(async () => {
@@ -131,7 +213,9 @@ function App() {
         const data = await res.json();
         if (data.clips) setViralClips(data.clips);
       }
-    } catch {}
+    } catch {
+      // ignore
+    }
   }, [sessionId]);
 
   const handleBackToAlign = useCallback(async () => {
@@ -148,7 +232,7 @@ function App() {
 
 
   const handleRender = useCallback(
-    async (clip: ViralClip, offsetX: number, captions: any[]) => {
+    async (clip: ViralClip, offsetX: number, captions: Caption[]) => {
       if (!sessionId) return;
       await fetch("/api/render", {
         method: "POST",
@@ -233,6 +317,8 @@ function App() {
           onResume={handleResume}
           onDelete={handleDeleteSession}
           onNew={handleNew}
+          onImport={handleImport}
+          importProgress={importProgress}
         />
       )}
 
@@ -241,12 +327,12 @@ function App() {
           <p className="tagline">
             Create viral shorts from Slovak video podcasts
           </p>
-          <UploadZone onUploadComplete={handleUploadComplete} />
+          <UploadZone onUploadComplete={handleUploadComplete} onImport={handleImport} importProgress={importProgress} />
         </div>
       )}
 
-      {/* Always show stepper when in session */}
-      {showStepper && !isStudio && (
+      {/* Always show stepper when in session (skip IDLE — has no pipeline steps) */}
+      {showStepper && !isStudio && state.state !== "IDLE" && (
         <div className="pipeline-stage">
           <PipelineStepper
             currentState={state.state}
@@ -257,6 +343,40 @@ function App() {
             readySubView={readySubView}
             onTranscribe={handleTranscribe}
           />
+        </div>
+      )}
+
+      {/* IDLE state: imported without video — show upload prompt */}
+      {view === "session" && state && state.state === "IDLE" && (
+        <div className="pipeline-stage">
+          <div className="idle-notice">
+            <div className="upload-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </div>
+            <h2>Add a source video</h2>
+            <p>This project was imported without a video file. Upload one to continue.</p>
+            {state.videoName && (
+              <p className="idle-filename-hint">
+                Looking for: <code>{state.videoName}.mp4</code>
+              </p>
+            )}
+            <label className="primary browse-btn">
+              Choose video
+              <input
+                type="file"
+                accept="video/*"
+                onChange={handleIdleVideoSelect}
+                hidden
+              />
+            </label>
+            {idleUploadError && (
+              <p className="idle-error">{idleUploadError}</p>
+            )}
+          </div>
         </div>
       )}
 
@@ -303,11 +423,33 @@ function App() {
                 </button>
                 <button
                   className="secondary"
-                  onClick={() => {
+                  onClick={async () => {
                     const url = `/api/project/${sessionId}/captions.srt`;
+                    const filename = `${state.videoName || "project"}_captions.srt`;
+
+                    if ("showSaveFilePicker" in window) {
+                      try {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const handle = await (window as any).showSaveFilePicker({
+                          suggestedName: filename,
+                          types: [{ description: "SRT File", accept: { "application/x-subrip": [".srt"] } }],
+                        });
+                        const res = await fetch(url);
+                        if (!res.ok) return;
+                        const blob = await res.blob();
+                        const writable = await handle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+                        return;
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      } catch (err: any) {
+                        if (err.name === "AbortError") return;
+                      }
+                    }
+
                     const a = document.createElement("a");
                     a.href = url;
-                    a.download = "captions.srt";
+                    a.download = filename;
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
@@ -342,6 +484,10 @@ function App() {
             <ClipSelector
               clips={viralClips}
               videoUrl={state.videoUrl}
+              sessionId={sessionId}
+              videoName={state.videoName}
+              renders={state.renders ?? {}}
+              captions={captions}
               onSelect={handleSelectClip}
               onBack={() => setReadySubView("review")}
               onAddClip={handleAddClip}
@@ -357,6 +503,7 @@ function App() {
             videoUrl={state.videoUrl}
             captions={captions}
             clip={selectedClip}
+            videoName={state.videoName ?? null}
             onRender={handleRender}
             onBack={handleBackToClips}
             renders={state.renders ?? {}}

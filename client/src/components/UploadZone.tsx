@@ -16,9 +16,11 @@ interface UploadState {
 
 interface UploadZoneProps {
   onUploadComplete: (sessionId: string) => void;
+  onImport?: (file: File) => void;
+  importProgress?: number | null;
 }
 
-export function UploadZone({ onUploadComplete }: UploadZoneProps) {
+export function UploadZone({ onUploadComplete, onImport, importProgress }: UploadZoneProps) {
   const [state, setState] = useState<UploadState>({ status: "idle" });
   // Counts nested dragenter/dragleave pairs so child elements don't flicker the state.
   const dragCounter = useRef(0);
@@ -81,9 +83,15 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
       dragCounter.current = 0;
       setState((s) => ({ ...s, status: "idle" }));
       const file = e.dataTransfer.files[0];
-      if (file) handleUpload(file);
+      if (file) {
+        if (file.name.endsWith(".lusk") && onImport) {
+          onImport(file);
+        } else {
+          handleUpload(file);
+        }
+      }
     },
-    [handleUpload]
+    [handleUpload, onImport]
   );
 
   const onDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -103,9 +111,15 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
   const onFileSelect = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) handleUpload(file);
+      if (file) {
+        if (file.name.endsWith(".lusk") && onImport) {
+          onImport(file);
+        } else {
+          handleUpload(file);
+        }
+      }
     },
-    [handleUpload]
+    [handleUpload, onImport]
   );
 
   return (
@@ -116,7 +130,20 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
     >
-      {state.status === "idle" && (
+      {importProgress !== null && importProgress !== undefined && (
+        <div className="uploading-state">
+          <p className="upload-title">Importing project...</p>
+          <div className="import-progress-track">
+            <div
+              className="import-progress-fill"
+              style={{ width: `${importProgress}%` }}
+            />
+          </div>
+          <p className="upload-hint">{importProgress}%</p>
+        </div>
+      )}
+
+      {importProgress === null && state.status === "idle" && (
         <>
           <div className="upload-icon">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -131,12 +158,12 @@ export function UploadZone({ onUploadComplete }: UploadZoneProps) {
             Browse files
             <input
               type="file"
-              accept="video/*"
+              accept="video/*,.lusk"
               onChange={onFileSelect}
               hidden
             />
           </label>
-          <p className="upload-formats">MP4, MOV, WEBM up to 2 GB</p>
+          <p className="upload-formats">MP4, MOV, WEBM up to 2 GB — or .lusk project file</p>
         </>
       )}
 

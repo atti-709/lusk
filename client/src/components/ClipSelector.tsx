@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from "react";
-import type { ViralClip } from "@lusk/shared";
+import type { ViralClip, ClipRenderState, CaptionWord } from "@lusk/shared";
+import type { Caption } from "@remotion/captions";
 import "./ClipSelector.css";
 
 function formatMs(ms: number): string {
@@ -32,10 +33,12 @@ function parseTimeToMs(value: string): number | null {
 function ClipCard({
   clip,
   videoUrl,
+  disabled,
   onClick,
 }: {
   clip: ViralClip;
   videoUrl: string;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -49,7 +52,12 @@ function ClipCard({
   const durationSec = Math.round((clip.endMs - clip.startMs) / 1000);
 
   return (
-    <button className="clip-card" onClick={onClick}>
+    <button
+      className="clip-card"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      style={disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+    >
       <div className="clip-card-preview">
         <video
           ref={videoRef}
@@ -167,21 +175,395 @@ function AddClipForm({ onAdd, onCancel }: { onAdd: (clip: ViralClip) => void; on
   );
 }
 
+async function streamExport(
+  sessionId: string,
+  videoName: string | null,
+  includeVideo: boolean,
+  onProgress: (pct: number) => void,
+) {
+  const fileName = `${videoName || "project"}.lusk`;
+  const url = `/api/project/${sessionId}/export?includeVideo=${includeVideo}`;
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Export failed");
+
+  const contentLength = Number(response.headers.get("Content-Length") || 0);
+  const reader = response.body!.getReader();
+
+  // Try File System Access API first
+  let writableStream: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  let closeWritable: (() => Promise<void>) | null = null;
+  let blobChunks: Uint8Array[] | null = null;
+
+  if ("showSaveFilePicker" in window) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: fileName,
+        types: [{
+          description: "Lusk Project",
+          accept: { "application/zip": [".lusk"] },
+        }],
+      });
+      const writable = await handle.createWritable();
+      writableStream = writable.getWriter();
+      closeWritable = async () => {
+        writableStream!.releaseLock();
+        await writable.close();
+      };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      if (err.name === "AbortError") return;
+    }
+  }
+
+  if (!writableStream) {
+    blobChunks = [];
+  }
+
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (contentLength > 0) {
+      onProgress(Math.min(99, Math.round((received / contentLength) * 100)));
+    }
+    if (writableStream) {
+      await writableStream.write(value);
+    } else {
+      blobChunks!.push(value);
+    }
+  }
+
+  if (writableStream && closeWritable) {
+    await closeWritable();
+  } else if (blobChunks) {
+    const blob = new Blob(blobChunks, { type: "application/zip" });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  }
+
+  onProgress(100);
+}
+
+// ── Batch render helpers ─────────────────────────────────────────────────
+
+const CAPTION_DELAY_MS_BATCH = 900; // matches StudioView's CAPTION_DELAY_MS
+const COMP_FPS_BATCH = 23.976;      // matches VideoComposition's COMP_FPS
+
+/** Compute Remotion-format captions for a clip, applying stored edits and offset. */
+function buildRemotionCaptions(clip: ViralClip, allCaptions: CaptionWord[]): Caption[] {
+  const trimStartDelta = clip.trimStartDelta ?? 0;
+  const trimEndDelta = clip.trimEndDelta ?? CAPTION_DELAY_MS_BATCH;
+  const captionOffset = clip.captionOffset ?? 0;
+  const captionEdits = clip.captionEdits ?? {};
+
+  const effectiveStartMs = clip.startMs + trimStartDelta;
+  const effectiveEndMs = clip.endMs + trimEndDelta;
+
+  // Frame-align the start (matches RenderService logic)
+  const startFrame = Math.round((effectiveStartMs / 1000) * COMP_FPS_BATCH);
+  const actualStartMs = (startFrame / COMP_FPS_BATCH) * 1000;
+
+  return allCaptions
+    .map((c, globalIndex) => ({ c, globalIndex }))
+    .filter(({ c }) => c.endMs > effectiveStartMs && c.startMs < effectiveEndMs)
+    .map(({ c, globalIndex }) => ({
+      text: captionEdits[globalIndex] ?? c.text,
+      startMs: c.startMs - actualStartMs + captionOffset,
+      endMs: c.endMs - actualStartMs + captionOffset,
+      timestampMs: c.timestampMs != null ? c.timestampMs - actualStartMs + captionOffset : null,
+      confidence: c.confidence,
+    }));
+}
+
+/** Build the trimmed clip object sent to /api/render. */
+function buildTrimmedClip(clip: ViralClip): ViralClip {
+  const trimStartDelta = clip.trimStartDelta ?? 0;
+  const trimEndDelta = clip.trimEndDelta ?? CAPTION_DELAY_MS_BATCH;
+  return {
+    ...clip,
+    startMs: clip.startMs + trimStartDelta,
+    endMs: clip.endMs + trimEndDelta,
+  };
+}
+
+/** Compute the render key for a clip (effective trimmed start-end). */
+function clipRenderKey(clip: ViralClip): string {
+  const effectiveStart = clip.startMs + (clip.trimStartDelta ?? 0);
+  const effectiveEnd = clip.endMs + (clip.trimEndDelta ?? CAPTION_DELAY_MS_BATCH);
+  return `${effectiveStart}-${effectiveEnd}`;
+}
+
+/** Download all rendered clips to the selected directory (or trigger individual downloads). */
+async function downloadClipsToDirectory(
+  sessionId: string,
+  dirHandle: FileSystemDirectoryHandle | null
+): Promise<void> {
+  const response = await fetch(`/api/sessions/${sessionId}/rendered-clips`);
+  if (!response.ok) throw new Error("Failed to fetch clips list");
+
+  const json = await response.json() as { clips: { url: string; filename: string }[] };
+  const clips = json.clips;
+
+  for (const clip of clips) {
+    const clipRes = await fetch(clip.url);
+    if (!clipRes.ok) throw new Error(`Failed to download ${clip.filename}`);
+
+    if (dirHandle) {
+      // Save directly to the chosen directory
+      const fileHandle = await dirHandle.getFileHandle(clip.filename, { create: true });
+      const writable = await fileHandle.createWritable();
+      const reader = clipRes.body!.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await writable.write(value);
+      }
+      await writable.close();
+    } else {
+      // Fallback: trigger standard browser download per file
+      const blob = await clipRes.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = clip.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    }
+  }
+}
+
 interface ClipSelectorProps {
   clips: ViralClip[];
   videoUrl: string;
+  sessionId: string;
+  videoName: string | null;
+  renders: Record<string, ClipRenderState>;
+  captions: CaptionWord[];
   onSelect: (clip: ViralClip) => void;
   onBack: () => void;
   onAddClip: (clip: ViralClip) => void;
 }
 
-export function ClipSelector({ clips, videoUrl, onSelect, onBack, onAddClip }: ClipSelectorProps) {
+export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, captions, onSelect, onBack, onAddClip }: ClipSelectorProps) {
   const [showForm, setShowForm] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [includeVideo, setIncludeVideo] = useState(false);
+  const [exportProgress, setExportProgress] = useState<number | null>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  const isExporting = exportProgress !== null && exportProgress < 100;
+
+  // ── Batch render state ─────────────────────────────────────────────────
+  type BatchState = "idle" | "rendering" | "zipping" | "done";
+  const [batchState, setBatchState] = useState<BatchState>("idle");
+  const [batchTotal, setBatchTotal] = useState(0);
+  const [batchDone, setBatchDone] = useState(0);
+  const [batchError, setBatchError] = useState<string | null>(null);
+
+  // Mutable batch control — not state to avoid stale closures
+  const batchRef = useRef<{
+    queue: ViralClip[];
+    index: number;
+    dirHandle: FileSystemDirectoryHandle | null;
+    currentKey: string | null;
+    currentWasRendering: boolean;
+  } | null>(null);
+
+  // Close export menu when clicking outside (but not during export)
+  useEffect(() => {
+    if (!showExportMenu || isExporting) return;
+    const handleClickOutside = (e: globalThis.MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showExportMenu, isExporting]);
+
+  // Auto-hide dropdown after export completes
+  useEffect(() => {
+    if (exportProgress !== 100) return;
+    const t = setTimeout(() => {
+      setShowExportMenu(false);
+      setExportProgress(null);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [exportProgress]);
+
+  // Advance the batch queue whenever renders state changes
+  useEffect(() => {
+    const batch = batchRef.current;
+    if (!batch || !batch.currentKey || batchState !== "rendering") return;
+
+    const key = batch.currentKey;
+    const renderState = renders[key];
+
+    if (renderState?.status === "rendering") {
+      batch.currentWasRendering = true;
+      return;
+    }
+
+    const finished = renderState?.status === "exported";
+    const failed = !renderState && batch.currentWasRendering;
+    if (!finished && !failed) return;
+
+    // Advance to next clip
+    batch.index++;
+    setBatchDone(batch.index);
+
+    if (batch.index >= batch.queue.length) {
+      // All clips done — download to directory
+      batch.currentKey = null;
+      const handle = batch.dirHandle;
+      batchRef.current = null;
+      setBatchState("zipping"); // Will rename to 'exporting' in next step
+      downloadClipsToDirectory(sessionId, handle)
+        .then(() => {
+          setBatchState("done");
+          setTimeout(() => setBatchState("idle"), 2000);
+        })
+        .catch((e: Error) => {
+          setBatchError(e.message);
+          setBatchState("idle");
+        });
+      return;
+    }
+
+    // Trigger next clip render
+    const nextClip = batch.queue[batch.index];
+    batch.currentKey = clipRenderKey(nextClip);
+    batch.currentWasRendering = false;
+
+    fetch("/api/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        clip: buildTrimmedClip(nextClip),
+        offsetX: nextClip.speakerOffsetX ?? 0,
+        captions: buildRemotionCaptions(nextClip, captions),
+      }),
+    }).then((res) => {
+      if (res.status === 409) {
+        // Already rendering — mark so the watcher detects when it clears
+        if (batchRef.current) batchRef.current.currentWasRendering = true;
+      }
+    }).catch(() => {/* network error — watcher will time out and advance */});
+  }, [renders, batchState, sessionId, captions, videoName]);
+
+  const handleRenderAll = useCallback(async () => {
+    setBatchError(null);
+    setShowExportMenu(false); // close export dropdown if open (native dialog won't fire outside-click)
+
+    // Ask the server to validate exported render files — clears any whose
+    // .mp4 was deleted while the server was running — and return the fresh map.
+    let freshRenders: Record<string, { status: string }> = { ...renders };
+    try {
+      const syncRes = await fetch(
+        `/api/sessions/${sessionId}/sync-render-states`,
+        { method: "POST" }
+      );
+      if (syncRes.ok) {
+        const json = await syncRes.json() as { renders: Record<string, { status: string }> };
+        freshRenders = json.renders;
+      }
+    } catch {
+      // Network error — fall back to current SSE state
+    }
+
+    // Build queue: clips not yet exported (using server-validated state)
+    const pending = clips.filter(
+      (clip) => freshRenders[clipRenderKey(clip)]?.status !== "exported"
+    );
+
+    // Prompt for save destination before any rendering starts
+    let dirHandle: FileSystemDirectoryHandle | null = null;
+    if ("showDirectoryPicker" in window) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        dirHandle = await (window as any).showDirectoryPicker({
+          mode: "readwrite",
+        });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        if (err.name === "AbortError") return; // User cancelled — abort
+      }
+    }
+
+    if (pending.length === 0) {
+      // All clips already rendered — just save them
+      setBatchState("zipping"); // Will rename to 'exporting'
+      setBatchTotal(clips.length);
+      setBatchDone(clips.length);
+      downloadClipsToDirectory(sessionId, dirHandle)
+        .then(() => {
+          setBatchState("done");
+          setTimeout(() => setBatchState("idle"), 2000);
+        })
+        .catch((e: Error) => {
+          setBatchError(e.message);
+          setBatchState("idle");
+        });
+      return;
+    }
+
+    // Start batch
+    const firstClip = pending[0];
+
+    batchRef.current = {
+      queue: pending,
+      index: 0,
+      dirHandle,
+      currentKey: clipRenderKey(firstClip),
+      currentWasRendering: false,
+    };
+
+    setBatchTotal(pending.length);
+    setBatchDone(0);
+    setBatchState("rendering");
+
+    // Fire first render
+    fetch("/api/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        clip: buildTrimmedClip(firstClip),
+        offsetX: firstClip.speakerOffsetX ?? 0,
+        captions: buildRemotionCaptions(firstClip, captions),
+      }),
+    }).then((res) => {
+      if (res.status === 409) {
+        // Clip already rendering — mark so the watcher detects when it clears
+        if (batchRef.current) batchRef.current.currentWasRendering = true;
+      }
+    }).catch(() => {/* network error ignored — watcher handles stall */});
+  }, [clips, renders, sessionId, captions, videoName]);
 
   const handleAdd = useCallback((clip: ViralClip) => {
     onAddClip(clip);
     setShowForm(false);
   }, [onAddClip]);
+
+  const startExport = useCallback(() => {
+    setExportProgress(0);
+    streamExport(sessionId, videoName, includeVideo, setExportProgress)
+      .catch(() => {
+        setExportProgress(null);
+      });
+  }, [sessionId, videoName, includeVideo]);
 
   return (
     <div className="clip-selector">
@@ -198,6 +580,91 @@ export function ClipSelector({ clips, videoUrl, onSelect, onBack, onAddClip }: C
             {clips.length} clip{clips.length !== 1 ? "s" : ""}
           </p>
         </div>
+        {clips.length > 0 && (
+          <div className="render-all-wrapper">
+            <button
+              className="render-all-btn"
+              onClick={handleRenderAll}
+              disabled={batchState === "rendering" || batchState === "zipping"}
+              title={batchError ?? undefined}
+            >
+              {/* Film strip + download icon */}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                <line x1="7" y1="2" x2="7" y2="22" />
+                <line x1="17" y1="2" x2="17" y2="22" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <line x1="2" y1="7" x2="7" y2="7" />
+                <line x1="2" y1="17" x2="7" y2="17" />
+                <line x1="17" y1="17" x2="22" y2="17" />
+                <line x1="17" y1="7" x2="22" y2="7" />
+              </svg>
+              {batchState === "done" ? "Done!" : "Render All"}
+              {batchState === "idle" && (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              )}
+            </button>
+            {batchError && <p className="render-all-error">{batchError}</p>}
+          </div>
+        )}
+        <div className="export-wrapper" ref={exportRef}>
+          <button
+            className="secondary export-trigger-btn"
+            onClick={() => setShowExportMenu((v) => !v)}
+          >
+            {/* Package/box icon */}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+              <line x1="12" y1="22.08" x2="12" y2="12" />
+            </svg>
+            Export
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          {showExportMenu && (
+            <div className="export-dropdown">
+              {isExporting ? (
+                <>
+                  <div className="export-progress-header">
+                    <span>Exporting...</span>
+                    <span className="export-progress-pct">{exportProgress}%</span>
+                  </div>
+                  <div className="export-progress-track">
+                    <div
+                      className="export-progress-fill"
+                      style={{ width: `${exportProgress}%` }}
+                    />
+                  </div>
+                </>
+              ) : exportProgress === 100 ? (
+                <div className="export-done">Done!</div>
+              ) : (
+                <>
+                  <label className="export-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={includeVideo}
+                      onChange={(e) => setIncludeVideo(e.target.checked)}
+                    />
+                    Include source video
+                  </label>
+                  <button
+                    className="primary export-confirm"
+                    onClick={startExport}
+                  >
+                    Export
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="clip-grid">
@@ -206,6 +673,7 @@ export function ClipSelector({ clips, videoUrl, onSelect, onBack, onAddClip }: C
             key={i}
             clip={clip}
             videoUrl={videoUrl}
+            disabled={batchState === "rendering" || batchState === "zipping"}
             onClick={() => onSelect(clip)}
           />
         ))}
@@ -223,6 +691,55 @@ export function ClipSelector({ clips, videoUrl, onSelect, onBack, onAddClip }: C
           </button>
         )}
       </div>
+
+      {/* Batch render progress modal */}
+      {(batchState === "rendering" || batchState === "zipping" || batchState === "done") && (
+        <div className="batch-modal-overlay">
+          <div className="batch-modal">
+            <div className={`batch-modal-icon ${batchState === "done" ? "done" : "spinning"}`}>
+              {batchState === "done" ? (
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              )}
+            </div>
+
+            <h3 className="batch-modal-title">
+              {batchState === "rendering" && `Rendering clip ${batchDone + 1} of ${batchTotal}`}
+              {batchState === "zipping" && "Saving files…"}
+              {batchState === "done" && "All done!"}
+            </h3>
+
+            <p className="batch-modal-sub">
+              {batchState === "rendering" && "Please wait — clips are rendered one by one"}
+              {batchState === "zipping" && "Saving rendered clips to chosen directory"}
+              {batchState === "done" && "Your clips have been saved successfully"}
+            </p>
+
+            {batchState !== "done" && (
+              <div className="batch-modal-progress">
+                <div className="batch-modal-progress-track">
+                  <div
+                    className="batch-modal-progress-fill"
+                    style={{
+                      width: batchState === "zipping"
+                        ? "100%"
+                        : `${Math.round((batchDone / Math.max(batchTotal, 1)) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <span className="batch-modal-progress-label">
+                  {batchState === "zipping" ? "Saving…" : `${batchDone} / ${batchTotal} done`}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

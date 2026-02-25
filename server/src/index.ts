@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import fs from "node:fs";
 import { uploadRoute } from "./routes/upload.js";
 import { staticPlugin } from "./plugins/static.js";
 import { eventsRoute } from "./routes/events.js";
@@ -8,6 +9,7 @@ import { transcribeRoute, doTranscribe } from "./routes/transcribe.js";
 import { renderRoute } from "./routes/render.js";
 import { alignRoute } from "./routes/align.js";
 import { sessionsRoute } from "./routes/sessions.js";
+import { exportImportRoute } from "./routes/exportImport.js";
 import { tempManager } from "./services/TempManager.js";
 import { orchestrator } from "./services/Orchestrator.js";
 
@@ -36,6 +38,7 @@ await server.register(transcribeRoute);
 await server.register(renderRoute);
 await server.register(alignRoute);
 await server.register(sessionsRoute);
+await server.register(exportImportRoute);
 
 server.get("/api/health", async () => {
   return { status: "ok" as const, uptime: process.uptime() };
@@ -48,6 +51,23 @@ const sessions = await tempManager.listSessions();
 for (const summary of sessions) {
   const state = await tempManager.restoreSession(summary.sessionId);
   if (state) {
+    // Clear any renders stuck "rendering" — they can't be in-progress after restart.
+    // Also clear "exported" entries whose file was manually deleted from disk,
+    // so Render All will correctly re-render them.
+    if (state.renders) {
+      const sessionDir = tempManager.getSessionDir(state.sessionId);
+      for (const key of Object.keys(state.renders)) {
+        const r = state.renders[key];
+        if (r.status === "rendering") {
+          delete state.renders[key];
+        } else if (r.status === "exported") {
+          const filePath = `${sessionDir}/output_${key}.mp4`;
+          if (!fs.existsSync(filePath)) {
+            delete state.renders[key];
+          }
+        }
+      }
+    }
     orchestrator.restoreSession(state);
     console.log(`Restored session ${state.sessionId} (${state.state})`);
 

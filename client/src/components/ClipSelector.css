@@ -234,3 +234,254 @@
   justify-content: flex-end;
   margin-top: 0.25rem;
 }
+
+/* ── Export Dropdown ── */
+
+.export-wrapper {
+  position: absolute;
+  right: 0;
+}
+
+.export-dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 200px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 10;
+}
+
+.export-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.export-checkbox input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+}
+
+.export-confirm {
+  width: 100%;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.75rem;
+}
+
+.export-progress-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.export-progress-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.export-progress-track {
+  height: 4px;
+  background: var(--surface);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.export-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.2s ease;
+}
+
+.export-done {
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 0.25rem 0;
+}
+
+/* ── Render All Button ── */
+
+.render-all-wrapper {
+  position: absolute;
+  right: 148px; /* Offset left of the export button */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.render-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(139, 92, 246, 0.35);
+  transition: opacity 0.15s, box-shadow 0.15s, transform 0.1s;
+  letter-spacing: 0.01em;
+}
+
+.render-all-btn:hover:not(:disabled) {
+  opacity: 0.92;
+  box-shadow: 0 4px 18px rgba(139, 92, 246, 0.5);
+  transform: translateY(-1px);
+}
+
+.render-all-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.render-all-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Export trigger button — icon + text + chevron layout */
+.export-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.85rem;
+}
+
+.render-all-error {
+  font-size: 0.75rem;
+  color: var(--error);
+  margin: 0;
+  max-width: 180px;
+  text-align: right;
+}
+
+/* ── Batch Progress Modal ── */
+
+@keyframes batch-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes batch-modal-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+
+.batch-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.batch-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2.5rem 2.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  min-width: 320px;
+  max-width: 420px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(139, 92, 246, 0.15);
+  animation: batch-modal-in 0.25s ease both;
+}
+
+.batch-modal-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  background: rgba(139, 92, 246, 0.12);
+  border: 1.5px solid rgba(139, 92, 246, 0.3);
+  margin-bottom: 0.25rem;
+}
+
+.batch-modal-icon.spinning svg {
+  animation: batch-spin 1.1s linear infinite;
+}
+
+.batch-modal-icon.done {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+  border-color: rgba(74, 222, 128, 0.3);
+}
+
+.batch-modal-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+  text-align: center;
+}
+
+.batch-modal-sub {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 0;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.batch-modal-progress {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.batch-modal-progress-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(139, 92, 246, 0.12);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.batch-modal-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #a78bfa);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
+}
+
+.batch-modal-progress-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
