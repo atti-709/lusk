@@ -108,7 +108,8 @@ export function StudioView({
     
     if (prev === "rendering" && status === "exported" && outputUrl) {
       const filename = `${videoName || "project"}_clip-${trimmedClip.title.replace(/[^a-z0-9]/gi, "_")}.mp4`;
-      triggerDownload(outputUrl, filename);
+      // Fire and forget
+      triggerDownload(outputUrl, filename).catch(() => {});
     }
     
     prevStatusRef.current = status ?? null;
@@ -440,11 +441,40 @@ export function StudioView({
 }
 
 // Helper to trigger download
-function triggerDownload(url: string, filename: string) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+async function triggerDownload(url: string, filename: string) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Failed to fetch render");
+
+    if ("showSaveFilePicker" in window) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fileHandle = await (window as any).showSaveFilePicker({
+        suggestedName: filename,
+        types: [{ description: "MP4 Video", accept: { "video/mp4": [".mp4"] } }],
+      });
+      const writable = await fileHandle.createWritable();
+      const reader = res.body!.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await writable.write(value);
+      }
+      await writable.close();
+      return;
+    }
+    
+    // Fallback if no picker available
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch (err: any) {
+    if (err.name === "AbortError") return; // User cancelled
+    console.error("Download failed", err);
+  }
 }

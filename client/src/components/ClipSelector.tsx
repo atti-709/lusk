@@ -197,6 +197,7 @@ async function streamExport(
 
   if ("showSaveFilePicker" in window) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const handle = await (window as any).showSaveFilePicker({
         suggestedName: fileName,
         types: [{
@@ -210,6 +211,7 @@ async function streamExport(
         writableStream!.releaseLock();
         await writable.close();
       };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       if (err.name === "AbortError") return;
     }
@@ -300,51 +302,44 @@ function clipRenderKey(clip: ViralClip): string {
   return `${effectiveStart}-${effectiveEnd}`;
 }
 
-/** Stream the clips-zip from server to a file handle or trigger a blob download. */
-async function downloadClipsZip(
+/** Download all rendered clips to the selected directory (or trigger individual downloads). */
+async function downloadClipsToDirectory(
   sessionId: string,
-  fileHandle: FileSystemFileHandle | null,
-  videoName: string | null
+  dirHandle: FileSystemDirectoryHandle | null
 ): Promise<void> {
-  const response = await fetch(`/api/sessions/${sessionId}/clips-zip`);
-  if (!response.ok) throw new Error("ZIP download failed");
+  const response = await fetch(`/api/sessions/${sessionId}/rendered-clips`);
+  if (!response.ok) throw new Error("Failed to fetch clips list");
 
-  const reader = response.body!.getReader();
+  const json = await response.json() as { clips: { url: string; filename: string }[] };
+  const clips = json.clips;
 
-  let writableStream: WritableStreamDefaultWriter<Uint8Array> | null = null;
-  let closeWritable: (() => Promise<void>) | null = null;
-  let blobChunks: Uint8Array[] | null = null;
+  for (const clip of clips) {
+    const clipRes = await fetch(clip.url);
+    if (!clipRes.ok) throw new Error(`Failed to download ${clip.filename}`);
 
-  if (fileHandle) {
-    const writable = await fileHandle.createWritable();
-    writableStream = writable.getWriter();
-    closeWritable = async () => {
-      writableStream!.releaseLock();
+    if (dirHandle) {
+      // Save directly to the chosen directory
+      const fileHandle = await dirHandle.getFileHandle(clip.filename, { create: true });
+      const writable = await fileHandle.createWritable();
+      const reader = clipRes.body!.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await writable.write(value);
+      }
       await writable.close();
-    };
-  } else {
-    blobChunks = [];
-  }
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (writableStream) await writableStream.write(value);
-    else blobChunks!.push(value);
-  }
-
-  if (writableStream && closeWritable) {
-    await closeWritable();
-  } else if (blobChunks) {
-    const blob = new Blob(blobChunks as BlobPart[], { type: "application/zip" });
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = `${videoName || "project"}_clips.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
+    } else {
+      // Fallback: trigger standard browser download per file
+      const blob = await clipRes.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = clip.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    }
   }
 }
 
@@ -380,7 +375,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
   const batchRef = useRef<{
     queue: ViralClip[];
     index: number;
-    fileHandle: FileSystemFileHandle | null;
+    dirHandle: FileSystemDirectoryHandle | null;
     currentKey: string | null;
     currentWasRendering: boolean;
   } | null>(null);
@@ -429,12 +424,12 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
     setBatchDone(batch.index);
 
     if (batch.index >= batch.queue.length) {
-      // All clips done — download zip
+      // All clips done — download to directory
       batch.currentKey = null;
-      const handle = batch.fileHandle;
+      const handle = batch.dirHandle;
       batchRef.current = null;
-      setBatchState("zipping");
-      downloadClipsZip(sessionId, handle, videoName)
+      setBatchState("zipping"); // Will rename to 'exporting' in next step
+      downloadClipsToDirectory(sessionId, handle)
         .then(() => {
           setBatchState("done");
           setTimeout(() => setBatchState("idle"), 2000);
@@ -494,24 +489,25 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
     );
 
     // Prompt for save destination before any rendering starts
-    let fileHandle: FileSystemFileHandle | null = null;
-    if ("showSaveFilePicker" in window) {
+    let dirHandle: FileSystemDirectoryHandle | null = null;
+    if ("showDirectoryPicker" in window) {
       try {
-        fileHandle = await (window as any).showSaveFilePicker({
-          suggestedName: `${videoName || "project"}_clips.zip`,
-          types: [{ description: "ZIP archive", accept: { "application/zip": [".zip"] } }],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        dirHandle = await (window as any).showDirectoryPicker({
+          mode: "readwrite",
         });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         if (err.name === "AbortError") return; // User cancelled — abort
       }
     }
 
     if (pending.length === 0) {
-      // All clips already rendered — just zip them
-      setBatchState("zipping");
+      // All clips already rendered — just save them
+      setBatchState("zipping"); // Will rename to 'exporting'
       setBatchTotal(clips.length);
       setBatchDone(clips.length);
-      downloadClipsZip(sessionId, fileHandle, videoName)
+      downloadClipsToDirectory(sessionId, dirHandle)
         .then(() => {
           setBatchState("done");
           setTimeout(() => setBatchState("idle"), 2000);
@@ -529,7 +525,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
     batchRef.current = {
       queue: pending,
       index: 0,
-      fileHandle,
+      dirHandle,
       currentKey: clipRenderKey(firstClip),
       currentWasRendering: false,
     };
@@ -714,14 +710,14 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
 
             <h3 className="batch-modal-title">
               {batchState === "rendering" && `Rendering clip ${batchDone + 1} of ${batchTotal}`}
-              {batchState === "zipping" && "Saving ZIP…"}
+              {batchState === "zipping" && "Saving files…"}
               {batchState === "done" && "All done!"}
             </h3>
 
             <p className="batch-modal-sub">
               {batchState === "rendering" && "Please wait — clips are rendered one by one"}
-              {batchState === "zipping" && "Packaging rendered clips into a ZIP file"}
-              {batchState === "done" && "Your ZIP has been saved successfully"}
+              {batchState === "zipping" && "Saving rendered clips to chosen directory"}
+              {batchState === "done" && "Your clips have been saved successfully"}
             </p>
 
             {batchState !== "done" && (
@@ -737,7 +733,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
                   />
                 </div>
                 <span className="batch-modal-progress-label">
-                  {batchState === "zipping" ? "Zipping…" : `${batchDone} / ${batchTotal} done`}
+                  {batchState === "zipping" ? "Saving…" : `${batchDone} / ${batchTotal} done`}
                 </span>
               </div>
             )}
