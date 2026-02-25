@@ -33,10 +33,12 @@ function parseTimeToMs(value: string): number | null {
 function ClipCard({
   clip,
   videoUrl,
+  disabled,
   onClick,
 }: {
   clip: ViralClip;
   videoUrl: string;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -50,7 +52,12 @@ function ClipCard({
   const durationSec = Math.round((clip.endMs - clip.startMs) / 1000);
 
   return (
-    <button className="clip-card" onClick={onClick}>
+    <button
+      className="clip-card"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      style={disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+    >
       <div className="clip-card-preview">
         <video
           ref={videoRef}
@@ -631,6 +638,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
             key={i}
             clip={clip}
             videoUrl={videoUrl}
+            disabled={batchState === "rendering" || batchState === "zipping"}
             onClick={() => onSelect(clip)}
           />
         ))}
