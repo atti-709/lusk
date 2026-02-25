@@ -574,13 +574,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
               disabled={batchState === "rendering" || batchState === "zipping"}
               title={batchError ?? undefined}
             >
-              {batchState === "rendering"
-                ? `Rendering ${batchDone + 1} / ${batchTotal}…`
-                : batchState === "zipping"
-                ? "Saving ZIP…"
-                : batchState === "done"
-                ? "Done!"
-                : "Render All & Download ZIP"}
+              {batchState === "done" ? "Done!" : "Render All & Download ZIP"}
             </button>
             {batchError && <p className="render-all-error">{batchError}</p>}
           </div>
@@ -656,6 +650,55 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
           </button>
         )}
       </div>
+
+      {/* Batch render progress modal */}
+      {(batchState === "rendering" || batchState === "zipping" || batchState === "done") && (
+        <div className="batch-modal-overlay">
+          <div className="batch-modal">
+            <div className={`batch-modal-icon ${batchState === "done" ? "done" : "spinning"}`}>
+              {batchState === "done" ? (
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              )}
+            </div>
+
+            <h3 className="batch-modal-title">
+              {batchState === "rendering" && `Rendering clip ${batchDone + 1} of ${batchTotal}`}
+              {batchState === "zipping" && "Saving ZIP…"}
+              {batchState === "done" && "All done!"}
+            </h3>
+
+            <p className="batch-modal-sub">
+              {batchState === "rendering" && "Please wait — clips are rendered one by one"}
+              {batchState === "zipping" && "Packaging rendered clips into a ZIP file"}
+              {batchState === "done" && "Your ZIP has been saved successfully"}
+            </p>
+
+            {batchState !== "done" && (
+              <div className="batch-modal-progress">
+                <div className="batch-modal-progress-track">
+                  <div
+                    className="batch-modal-progress-fill"
+                    style={{
+                      width: batchState === "zipping"
+                        ? "100%"
+                        : `${Math.round((batchDone / Math.max(batchTotal, 1)) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <span className="batch-modal-progress-label">
+                  {batchState === "zipping" ? "Zipping…" : `${batchDone} / ${batchTotal} done`}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
