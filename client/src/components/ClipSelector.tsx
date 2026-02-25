@@ -452,7 +452,12 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
         offsetX: nextClip.speakerOffsetX ?? 0,
         captions: buildRemotionCaptions(nextClip, captions),
       }),
-    });
+    }).then((res) => {
+      if (res.status === 409) {
+        // Already rendering — mark so the watcher detects when it clears
+        if (batchRef.current) batchRef.current.currentWasRendering = true;
+      }
+    }).catch(() => {/* network error — watcher will time out and advance */});
   }, [renders, batchState, sessionId, captions]);
 
   const handleRenderAll = useCallback(async () => {
@@ -518,7 +523,12 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
         offsetX: firstClip.speakerOffsetX ?? 0,
         captions: buildRemotionCaptions(firstClip, captions),
       }),
-    });
+    }).then((res) => {
+      if (res.status === 409) {
+        // Clip already rendering — mark so the watcher detects when it clears
+        if (batchRef.current) batchRef.current.currentWasRendering = true;
+      }
+    }).catch(() => {/* network error ignored — watcher handles stall */});
   }, [clips, renders, sessionId, captions]);
 
   const handleAdd = useCallback((clip: ViralClip) => {

@@ -59,17 +59,13 @@ async function runRender(
     });
   } catch (err) {
     log.error(err, "Render failed");
-    // Remove failed render entry so user can retry
+    // Delete the failed render entry so the clip appears retryable.
+    // emitAndPersist broadcasts the deletion via SSE so the client sees it.
     const s = orchestrator.getSession(sessionId);
     if (s?.renders) {
       delete s.renders[key];
+      orchestrator.emitAndPersist(sessionId);
     }
-    orchestrator.updateClipRender(sessionId, key, {
-      status: "rendering",
-      progress: 0,
-      message: "Render failed — try again",
-      outputUrl: null,
-    });
   }
 }
 
