@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from "react";
 import type { ViralClip, ClipRenderState, CaptionWord } from "@lusk/shared";
+import type { Caption } from "@remotion/captions";
 import "./ClipSelector.css";
 
 function formatMs(ms: number): string {
@@ -243,6 +244,102 @@ async function streamExport(
   onProgress(100);
 }
 
+// ── Batch render helpers ─────────────────────────────────────────────────
+
+const CAPTION_DELAY_MS_BATCH = 900; // matches StudioView's CAPTION_DELAY_MS
+const COMP_FPS_BATCH = 23.976;      // matches VideoComposition's COMP_FPS
+
+/** Compute Remotion-format captions for a clip, applying stored edits and offset. */
+function buildRemotionCaptions(clip: ViralClip, allCaptions: CaptionWord[]): Caption[] {
+  const trimStartDelta = clip.trimStartDelta ?? 0;
+  const trimEndDelta = clip.trimEndDelta ?? CAPTION_DELAY_MS_BATCH;
+  const captionOffset = clip.captionOffset ?? 0;
+  const captionEdits = clip.captionEdits ?? {};
+
+  const effectiveStartMs = clip.startMs + trimStartDelta;
+  const effectiveEndMs = clip.endMs + trimEndDelta;
+
+  // Frame-align the start (matches RenderService logic)
+  const startFrame = Math.round((effectiveStartMs / 1000) * COMP_FPS_BATCH);
+  const actualStartMs = (startFrame / COMP_FPS_BATCH) * 1000;
+
+  return allCaptions
+    .map((c, globalIndex) => ({ c, globalIndex }))
+    .filter(({ c }) => c.endMs > effectiveStartMs && c.startMs < effectiveEndMs)
+    .map(({ c, globalIndex }) => ({
+      text: captionEdits[globalIndex] ?? c.text,
+      startMs: c.startMs - actualStartMs + captionOffset,
+      endMs: c.endMs - actualStartMs + captionOffset,
+      timestampMs: c.timestampMs != null ? c.timestampMs - actualStartMs + captionOffset : null,
+      confidence: c.confidence,
+    }));
+}
+
+/** Build the trimmed clip object sent to /api/render. */
+function buildTrimmedClip(clip: ViralClip): ViralClip {
+  const trimStartDelta = clip.trimStartDelta ?? 0;
+  const trimEndDelta = clip.trimEndDelta ?? CAPTION_DELAY_MS_BATCH;
+  return {
+    ...clip,
+    startMs: clip.startMs + trimStartDelta,
+    endMs: clip.endMs + trimEndDelta,
+  };
+}
+
+/** Compute the render key for a clip (effective trimmed start-end). */
+function clipRenderKey(clip: ViralClip): string {
+  const effectiveStart = clip.startMs + (clip.trimStartDelta ?? 0);
+  const effectiveEnd = clip.endMs + (clip.trimEndDelta ?? CAPTION_DELAY_MS_BATCH);
+  return `${effectiveStart}-${effectiveEnd}`;
+}
+
+/** Stream the clips-zip from server to a file handle or trigger a blob download. */
+async function downloadClipsZip(
+  sessionId: string,
+  fileHandle: FileSystemFileHandle | null,
+): Promise<void> {
+  const response = await fetch(`/api/sessions/${sessionId}/clips-zip`);
+  if (!response.ok) throw new Error("ZIP download failed");
+
+  const reader = response.body!.getReader();
+
+  let writableStream: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  let closeWritable: (() => Promise<void>) | null = null;
+  let blobChunks: Uint8Array[] | null = null;
+
+  if (fileHandle) {
+    const writable = await fileHandle.createWritable();
+    writableStream = writable.getWriter();
+    closeWritable = async () => {
+      writableStream!.releaseLock();
+      await writable.close();
+    };
+  } else {
+    blobChunks = [];
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (writableStream) await writableStream.write(value);
+    else blobChunks!.push(value);
+  }
+
+  if (writableStream && closeWritable) {
+    await closeWritable();
+  } else if (blobChunks) {
+    const blob = new Blob(blobChunks as BlobPart[], { type: "application/zip" });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = "clips.zip";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
 interface ClipSelectorProps {
   clips: ViralClip[];
   videoUrl: string;
@@ -263,6 +360,22 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
   const exportRef = useRef<HTMLDivElement>(null);
 
   const isExporting = exportProgress !== null && exportProgress < 100;
+
+  // ── Batch render state ─────────────────────────────────────────────────
+  type BatchState = "idle" | "rendering" | "zipping" | "done";
+  const [batchState, setBatchState] = useState<BatchState>("idle");
+  const [batchTotal, setBatchTotal] = useState(0);
+  const [batchDone, setBatchDone] = useState(0);
+  const [batchError, setBatchError] = useState<string | null>(null);
+
+  // Mutable batch control — not state to avoid stale closures
+  const batchRef = useRef<{
+    queue: ViralClip[];
+    index: number;
+    fileHandle: FileSystemFileHandle | null;
+    currentKey: string | null;
+    currentWasRendering: boolean;
+  } | null>(null);
 
   // Close export menu when clicking outside (but not during export)
   useEffect(() => {
@@ -285,6 +398,128 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
     }, 1500);
     return () => clearTimeout(t);
   }, [exportProgress]);
+
+  // Advance the batch queue whenever renders state changes
+  useEffect(() => {
+    const batch = batchRef.current;
+    if (!batch || !batch.currentKey || batchState !== "rendering") return;
+
+    const key = batch.currentKey;
+    const renderState = renders[key];
+
+    if (renderState?.status === "rendering") {
+      batch.currentWasRendering = true;
+      return;
+    }
+
+    const finished = renderState?.status === "exported";
+    const failed = !renderState && batch.currentWasRendering;
+    if (!finished && !failed) return;
+
+    // Advance to next clip
+    batch.index++;
+    setBatchDone(batch.index);
+
+    if (batch.index >= batch.queue.length) {
+      // All clips done — download zip
+      batch.currentKey = null;
+      const handle = batch.fileHandle;
+      batchRef.current = null;
+      setBatchState("zipping");
+      downloadClipsZip(sessionId, handle)
+        .then(() => {
+          setBatchState("done");
+          setTimeout(() => setBatchState("idle"), 2000);
+        })
+        .catch((e: Error) => {
+          setBatchError(e.message);
+          setBatchState("idle");
+        });
+      return;
+    }
+
+    // Trigger next clip render
+    const nextClip = batch.queue[batch.index];
+    batch.currentKey = clipRenderKey(nextClip);
+    batch.currentWasRendering = false;
+
+    fetch("/api/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        clip: buildTrimmedClip(nextClip),
+        offsetX: nextClip.speakerOffsetX ?? 0,
+        captions: buildRemotionCaptions(nextClip, captions),
+      }),
+    });
+  }, [renders, batchState, sessionId, captions]);
+
+  const handleRenderAll = useCallback(async () => {
+    setBatchError(null);
+
+    // Build queue: clips not yet exported
+    const pending = clips.filter(
+      (clip) => renders[clipRenderKey(clip)]?.status !== "exported"
+    );
+
+    // Prompt for save destination before any rendering starts
+    let fileHandle: FileSystemFileHandle | null = null;
+    if ("showSaveFilePicker" in window) {
+      try {
+        fileHandle = await (window as any).showSaveFilePicker({
+          suggestedName: "clips.zip",
+          types: [{ description: "ZIP archive", accept: { "application/zip": [".zip"] } }],
+        });
+      } catch (err: any) {
+        if (err.name === "AbortError") return; // User cancelled — abort
+      }
+    }
+
+    if (pending.length === 0) {
+      // All clips already rendered — just zip them
+      setBatchState("zipping");
+      setBatchTotal(clips.length);
+      setBatchDone(clips.length);
+      downloadClipsZip(sessionId, fileHandle)
+        .then(() => {
+          setBatchState("done");
+          setTimeout(() => setBatchState("idle"), 2000);
+        })
+        .catch((e: Error) => {
+          setBatchError(e.message);
+          setBatchState("idle");
+        });
+      return;
+    }
+
+    // Start batch
+    const firstClip = pending[0];
+
+    batchRef.current = {
+      queue: pending,
+      index: 0,
+      fileHandle,
+      currentKey: clipRenderKey(firstClip),
+      currentWasRendering: false,
+    };
+
+    setBatchTotal(pending.length);
+    setBatchDone(0);
+    setBatchState("rendering");
+
+    // Fire first render
+    fetch("/api/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        clip: buildTrimmedClip(firstClip),
+        offsetX: firstClip.speakerOffsetX ?? 0,
+        captions: buildRemotionCaptions(firstClip, captions),
+      }),
+    });
+  }, [clips, renders, sessionId, captions]);
 
   const handleAdd = useCallback((clip: ViralClip) => {
     onAddClip(clip);
