@@ -1,4 +1,6 @@
 import { FastifyInstance } from "fastify";
+import fs from "node:fs";
+import path from "node:path";
 import { orchestrator } from "../services/Orchestrator.js";
 import { tempManager } from "../services/TempManager.js";
 import { renderService } from "../services/RenderService.js";
@@ -119,6 +121,39 @@ export async function renderRoute(app: FastifyInstance) {
       });
 
       return { success: true as const };
+    }
+  );
+
+  // Validate exported render entries against the actual files on disk.
+  // Removes orphaned entries (file deleted while server was running) and returns
+  // the fresh renders map so the client can build an accurate pending queue.
+  app.post<{ Params: { sessionId: string }; Reply: { renders: Record<string, unknown> } | ErrorResponse }>(
+    "/api/sessions/:sessionId/sync-render-states",
+    async (request, reply) => {
+      const { sessionId } = request.params;
+      const session = orchestrator.getSession(sessionId);
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+
+      const sessionDir = tempManager.getSessionDir(sessionId);
+      let changed = false;
+
+      if (session.renders) {
+        for (const key of Object.keys(session.renders)) {
+          if (session.renders[key].status === "exported") {
+            const filePath = path.join(sessionDir, `output_${key}.mp4`);
+            if (!fs.existsSync(filePath)) {
+              delete session.renders[key];
+              changed = true;
+            }
+          }
+        }
+      }
+
+      if (changed) orchestrator.emitAndPersist(sessionId);
+
+      return reply.send({ renders: session.renders ?? {} });
     }
   );
 }

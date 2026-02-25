@@ -470,9 +470,25 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
   const handleRenderAll = useCallback(async () => {
     setBatchError(null);
 
-    // Build queue: clips not yet exported
+    // Ask the server to validate exported render files — clears any whose
+    // .mp4 was deleted while the server was running — and return the fresh map.
+    let freshRenders: Record<string, { status: string }> = { ...renders };
+    try {
+      const syncRes = await fetch(
+        `/api/sessions/${sessionId}/sync-render-states`,
+        { method: "POST" }
+      );
+      if (syncRes.ok) {
+        const json = await syncRes.json() as { renders: Record<string, { status: string }> };
+        freshRenders = json.renders;
+      }
+    } catch {
+      // Network error — fall back to current SSE state
+    }
+
+    // Build queue: clips not yet exported (using server-validated state)
     const pending = clips.filter(
-      (clip) => renders[clipRenderKey(clip)]?.status !== "exported"
+      (clip) => freshRenders[clipRenderKey(clip)]?.status !== "exported"
     );
 
     // Prompt for save destination before any rendering starts
