@@ -50,6 +50,14 @@ const sessions = await tempManager.listSessions();
 for (const summary of sessions) {
   const state = await tempManager.restoreSession(summary.sessionId);
   if (state) {
+    // Clear any renders stuck "rendering" — they can't be in-progress after restart
+    if (state.renders) {
+      for (const key of Object.keys(state.renders)) {
+        if (state.renders[key].status === "rendering") {
+          delete state.renders[key];
+        }
+      }
+    }
     orchestrator.restoreSession(state);
     console.log(`Restored session ${state.sessionId} (${state.state})`);
 
