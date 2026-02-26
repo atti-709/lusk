@@ -1,6 +1,4 @@
 import { EventEmitter } from "node:events";
-import { writeFile, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type {
   PipelineState,
   ProjectState,
@@ -10,7 +8,7 @@ import type {
   ViralClip,
   ClipRenderState,
 } from "@lusk/shared";
-import { tempManager } from "./TempManager.js";
+import { projectFileService } from "./ProjectFileService.js";
 
 const TRANSITIONS: Record<PipelineState, PipelineState[]> = {
   IDLE: ["UPLOADING"],
@@ -25,15 +23,25 @@ const TRANSITIONS: Record<PipelineState, PipelineState[]> = {
 class Orchestrator extends EventEmitter {
   private sessions = new Map<string, ProjectState>();
   private writeQueue = new Map<string, Promise<void>>();
+  private saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly SAVE_DEBOUNCE_MS = 2000;
 
-  createSession(id: string, videoUrl: string, videoName: string | null = null, videoDurationMs: number | null = null): ProjectState {
+  createSession(id: string, videoUrl: string, videoName: string | null = null, videoDurationMs: number | null = null, projectFilePath: string | null = null): ProjectState {
+    const now = new Date().toISOString();
     const state: ProjectState = {
+      version: 1,
+      projectId: id,
+      createdAt: now,
+      updatedAt: now,
+      videoPath: "",  // will be set by ProjectFileService
+      projectFilePath,
+
       sessionId: id,
       state: "UPLOADING",
       progress: 100,
       message: "Upload complete",
       videoUrl,
-      videoName,
+      videoName: videoName ?? "",
       videoDurationMs,
 
       transcript: null,
@@ -69,7 +77,7 @@ class Orchestrator extends EventEmitter {
     session.progress = 0;
     session.message = "";
     this.emitProgress(session);
-    this.persistSession(id);
+    this.saveProjectNow(id).catch(() => {});
   }
 
   updateProgress(id: string, percent: number, message: string): void {
@@ -137,7 +145,7 @@ class Orchestrator extends EventEmitter {
   emitAndPersist(id: string): void {
     const session = this.requireSession(id);
     this.emitProgress(session);
-    this.persistSession(id);
+    this.saveProjectNow(id).catch(() => {});
   }
 
   private emitProgress(session: ProjectState): void {
@@ -150,25 +158,34 @@ class Orchestrator extends EventEmitter {
     this.emit("progress", event);
   }
 
-  private persistSession(id: string): void {
-    const session = this.sessions.get(id);
-    if (!session) return;
+  async saveProjectNow(id: string): Promise<void> {
+    const timer = this.saveTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.saveTimers.delete(id);
+    }
 
-    // Serialize writes per session to prevent file corruption
+    const session = this.sessions.get(id);
+    if (!session?.projectFilePath) return;
+
     const prev = this.writeQueue.get(id) ?? Promise.resolve();
     const next = prev.then(async () => {
-      const dir = tempManager.getSessionDir(id);
-      const data = JSON.stringify(session, null, 2);
-      const meta = JSON.stringify({
-        sessionId: session.sessionId,
-        state: session.state,
-        videoUrl: session.videoUrl,
-        videoName: session.videoName ?? null,
-      });
-      await writeFile(join(dir, "session.json"), data);
-      await writeFile(join(dir, "session-meta.json"), meta);
+      await projectFileService.saveProject(session);
     }).catch(() => {});
     this.writeQueue.set(id, next);
+  }
+
+  private persistSession(id: string): void {
+    const session = this.sessions.get(id);
+    if (!session?.projectFilePath) return;
+
+    const existing = this.saveTimers.get(id);
+    if (existing) clearTimeout(existing);
+
+    this.saveTimers.set(id, setTimeout(() => {
+      this.saveTimers.delete(id);
+      this.saveProjectNow(id).catch(() => {});
+    }, this.SAVE_DEBOUNCE_MS));
   }
 }
 
