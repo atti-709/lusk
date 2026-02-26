@@ -32,7 +32,14 @@ export async function doTranscribe(sessionId: string, log: Logger): Promise<void
 
 async function runTranscription(sessionId: string, log: Logger): Promise<void> {
   orchestrator.transition(sessionId, "TRANSCRIBING");
-  await doTranscribe(sessionId, log);
+  try {
+    await doTranscribe(sessionId, log);
+  } catch (err: any) {
+    const message = err?.message ?? String(err);
+    log.error(err, "Transcription pipeline failed");
+    // Surface the error to the user in the UI
+    orchestrator.updateProgress(sessionId, -1, `Error: ${message}`);
+  }
 }
 
 export async function transcribeRoute(app: FastifyInstance) {
@@ -56,10 +63,8 @@ export async function transcribeRoute(app: FastifyInstance) {
           .send({ success: false, error: `Cannot transcribe in state: ${session.state}` });
       }
 
-      // Fire-and-forget
-      runTranscription(sessionId, app.log).catch((err) => {
-        app.log.error(err, "Transcription pipeline failed");
-      });
+      // Fire-and-forget — errors are reported to the user via progress events
+      runTranscription(sessionId, app.log).catch(() => {});
 
       return { success: true as const };
     }

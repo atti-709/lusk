@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog } from "electron";
 import { spawn, execSync, ChildProcess } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 
 const PORT = 3000;
@@ -80,16 +80,16 @@ const LOGIN_PATH = getLoginShellPath();
 
 function checkDependencies(): string[] {
   const missing: string[] = [];
-  const env = { ...process.env, PATH: LOGIN_PATH };
+  const shell = process.env.SHELL ?? "/bin/zsh";
 
   try {
-    execSync("python3 --version", { stdio: "pipe", env });
+    execSync(`${shell} -lc "python3 --version"`, { stdio: "pipe" });
   } catch {
     missing.push("Python 3 (brew install python@3.11)");
   }
 
   try {
-    execSync("python3 -c \"import whisperx\"", { stdio: "pipe", env });
+    execSync(`${shell} -lc "python3 -m pip show whisperx"`, { stdio: "pipe" });
   } catch {
     missing.push("WhisperX (pip3 install whisperx)");
   }
@@ -123,18 +123,35 @@ async function startServer(): Promise<void> {
   const tempDir = path.join(app.getPath("userData"), "lusk_temp");
 
   // Resolve ffmpeg/ffprobe from the bundled npm packages
-  let ffmpegPath = "ffmpeg";
-  let ffprobePath = "ffprobe";
+  let ffmpegPath: string | undefined;
+  let ffprobePath: string | undefined;
   try {
     ffmpegPath = require("ffmpeg-static");
   } catch {
-    // Fall back to system ffmpeg
+    // Will be resolved by the server instead
   }
   try {
     ffprobePath = require("ffprobe-static").path;
   } catch {
-    // Fall back to system ffprobe
+    // Will be resolved by the server instead
   }
+
+  // Validate and fix binary permissions for packaged app
+  for (const binPath of [ffmpegPath, ffprobePath]) {
+    if (binPath && path.isAbsolute(binPath) && existsSync(binPath)) {
+      // macOS quarantine can prevent execution of downloaded binaries
+      try {
+        execSync(`xattr -dr com.apple.quarantine "${binPath}"`, {
+          stdio: "ignore",
+        });
+      } catch {
+        // Attribute may not exist — that's fine
+      }
+    }
+  }
+
+  console.log(`[lusk] ffmpeg: ${ffmpegPath ?? "(server will resolve)"}`);
+  console.log(`[lusk] ffprobe: ${ffprobePath ?? "(server will resolve)"}`);
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -146,8 +163,8 @@ async function startServer(): Promise<void> {
     LUSK_PUBLIC_DIR: publicDir,
     LUSK_REMOTION_ENTRY: remotionEntry,
     LUSK_SERVER_ORIGIN: `http://localhost:${PORT}`,
-    FFMPEG_PATH: ffmpegPath,
-    FFPROBE_PATH: ffprobePath,
+    ...(ffmpegPath ? { FFMPEG_PATH: ffmpegPath } : {}),
+    ...(ffprobePath ? { FFPROBE_PATH: ffprobePath } : {}),
   };
 
   // Use Electron itself as the Node runtime (ELECTRON_RUN_AS_NODE=1).

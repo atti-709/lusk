@@ -71,6 +71,13 @@ const config: ForgeConfig = {
       fs.copyFileSync(`${ROOT}/server/package.json`, `${serverBundleDir}/package.json`);
       console.log("Installing server production dependencies (this may take a minute)...");
       execSync("npm install --omit=dev", { cwd: serverBundleDir, stdio: "inherit" });
+      // Remove macOS quarantine from ffmpeg binary so it can execute in the packaged app
+      const ffmpegBin = path.join(serverBundleDir, "node_modules", "ffmpeg-static", "ffmpeg");
+      if (fs.existsSync(ffmpegBin)) {
+        try { execSync(`xattr -dr com.apple.quarantine "${ffmpegBin}"`, { stdio: "ignore" }); } catch { /* ok */ }
+        try { execSync(`chmod +x "${ffmpegBin}"`, { stdio: "ignore" }); } catch { /* ok */ }
+        console.log(`ffmpeg binary ready: ${ffmpegBin}`);
+      }
       copyDir(`${ROOT}/server/dist`, `${serverBundleDir}/dist`);
 
       // client/dist, client/public, client/src/remotion
@@ -92,7 +99,6 @@ const config: ForgeConfig = {
       name: "@electron-forge/maker-dmg",
       config: {
         format: "ULFO",
-        background: "./resources/dmg-background.png",
         iconSize: 128,
         // electron-installer-dmg only passes specific keys to appdmg;
         // window must go through additionalDMGOptions.
