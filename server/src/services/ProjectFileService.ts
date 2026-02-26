@@ -221,8 +221,8 @@ class ProjectFileService {
    * Writes the .lusk ZIP, sets up the cache, and registers the project.
    */
   async createProject(
-    videoPath: string,
     projectFilePath: string,
+    videoPath: string,
   ): Promise<ProjectState> {
     const projectId = randomUUID();
     const videoName = sanitizeVideoName(basename(videoPath));
@@ -366,10 +366,10 @@ class ProjectFileService {
     return validated;
   }
 
-  /** Remove a single entry from the recent projects registry. */
-  async removeFromRegistry(projectPath: string): Promise<void> {
+  /** Remove a single entry from the recent projects registry by project ID. */
+  async removeFromRegistry(projectId: string): Promise<void> {
     let entries = await readRegistry();
-    entries = entries.filter((e) => e.projectPath !== projectPath);
+    entries = entries.filter((e) => e.projectId !== projectId);
     await writeRegistry(entries);
   }
 }
