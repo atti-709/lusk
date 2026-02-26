@@ -8,3 +8,5 @@ output/
 .DS_Store
 server/whisper.cpp/
 server/models/
+electron/out/
+electron/bundle/

@@ -11,7 +11,8 @@ const execFileAsync = promisify(execFile);
 
 const COMP_FPS = 23.976;
 const COMPOSITION_ID = "LuskClip";
-const LUSK_SERVER_ORIGIN = "http://localhost:3000";
+const LUSK_SERVER_ORIGIN =
+  process.env.LUSK_SERVER_ORIGIN ?? "http://localhost:3000";
 const OUTRO_OVERLAP_FRAMES = 4; // must match VideoComposition.tsx
 
 type ProgressCallback = (percent: number, message: string) => void;
@@ -26,14 +27,17 @@ class RenderService {
   private bundledWithOutro: boolean | null = null; // tracks public dir state at bundle time
 
   private get entryPoint(): string {
-    return path.resolve(
-      import.meta.dirname,
-      "../../../client/src/remotion/index.ts"
+    return (
+      process.env.LUSK_REMOTION_ENTRY ??
+      path.resolve(import.meta.dirname, "../../../client/src/remotion/index.ts")
     );
   }
 
   private get publicDir(): string {
-    return path.resolve(import.meta.dirname, "../../../client/public");
+    return (
+      process.env.LUSK_PUBLIC_DIR ??
+      path.resolve(import.meta.dirname, "../../../client/public")
+    );
   }
 
   /**
@@ -42,7 +46,8 @@ class RenderService {
    */
   async probeDuration(filePath: string): Promise<number> {
     try {
-      const { stdout } = await execFileAsync("ffprobe", [
+      const ffprobe = process.env.FFPROBE_PATH ?? "ffprobe";
+      const { stdout } = await execFileAsync(ffprobe, [
         "-v", "quiet",
         "-print_format", "json",
         "-show_format",
@@ -82,9 +87,21 @@ class RenderService {
 
     this.bundledWithOutro = outroPresent ?? false;
     onProgress?.(5, "Bundling composition...");
+
+    // When packaged, client/node_modules is not included in the bundle to save space.
+    // Tell webpack to resolve modules from server/node_modules (one level up from dist/).
+    const serverNodeModules = path.resolve(import.meta.dirname, "../node_modules");
+
     this.bundlePath = await bundle({
       entryPoint: this.entryPoint,
       publicDir: this.publicDir,
+      webpackOverride: (config) => ({
+        ...config,
+        resolve: {
+          ...config.resolve,
+          modules: ["node_modules", serverNodeModules],
+        },
+      }),
       onProgress: (progress) => {
         onProgress?.(5 + Math.round(progress * 15), "Bundling composition...");
       },

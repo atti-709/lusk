@@ -7,7 +7,10 @@ class TempManager {
   readonly baseDir: string;
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir ?? join(import.meta.dirname, "../../.lusk_temp");
+    this.baseDir =
+      baseDir ??
+      process.env.LUSK_TEMP_DIR ??
+      join(import.meta.dirname, "../../.lusk_temp");
   }
 
   async init(): Promise<void> {

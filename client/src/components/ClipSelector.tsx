@@ -239,7 +239,7 @@ async function streamExport(
   if (writableStream && closeWritable) {
     await closeWritable();
   } else if (blobChunks) {
-    const blob = new Blob(blobChunks, { type: "application/zip" });
+    const blob = new Blob(blobChunks as BlobPart[], { type: "application/zip" });
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = blobUrl;

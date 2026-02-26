@@ -1,0 +1,24 @@
+<svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-gradient" x1="0" y1="1024" x2="1024" y2="0">
+      <stop offset="0%" stop-color="#1a0a2e" />
+      <stop offset="100%" stop-color="#2d1054" />
+    </linearGradient>
+    <linearGradient id="logo-gradient" x1="0" y1="1024" x2="1024" y2="0">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background with rounded corners (macOS masks to squircle automatically) -->
+  <rect width="1024" height="1024" fill="url(#bg-gradient)" />
+
+  <!-- L vertical bar -->
+  <path d="M307 256C307 227.6 329.6 205 358 205H409C437.4 205 460 227.6 460 256V716C460 744.4 437.4 767 409 767H358C329.6 767 307 744.4 307 716V256Z" fill="url(#logo-gradient)" />
+
+  <!-- L horizontal foot -->
+  <path d="M460 614H676C719 614 740 637 740 680C740 723 719 767 676 767H460V614Z" fill="url(#logo-gradient)" />
+
+  <!-- Play triangle -->
+  <path d="M564 358L768 460L564 562V358Z" fill="url(#logo-gradient)" opacity="0.85" />
+</svg>
