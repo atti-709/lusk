@@ -12,9 +12,29 @@ export async function staticPlugin(app: FastifyInstance) {
   });
 
   // Serve client/public/ so Remotion can fetch assets (e.g. outro.mp4) via HTTP
+  const publicDir =
+    process.env.LUSK_PUBLIC_DIR ??
+    path.resolve(import.meta.dirname, "../../../client/public");
+
   await app.register(fastifyStatic, {
-    root: path.resolve(import.meta.dirname, "../../../client/public"),
+    root: publicDir,
     prefix: "/public/",
     decorateReply: false, // avoid double-decorating sendFile
   });
+
+  // In production (Electron), serve the built Vite client at /
+  const clientDist = process.env.LUSK_CLIENT_DIST;
+  if (clientDist) {
+    await app.register(fastifyStatic, {
+      root: clientDist,
+      prefix: "/",
+      decorateReply: false,
+      wildcard: false, // let explicit API routes take priority
+    });
+
+    // SPA fallback: serve index.html for unmatched routes
+    app.setNotFoundHandler((_req, reply) => {
+      return reply.sendFile("index.html", clientDist);
+    });
+  }
 }

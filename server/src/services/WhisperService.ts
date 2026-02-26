@@ -53,8 +53,9 @@ class WhisperService {
     onProgress?.(1, "Extracting audio...");
     await access(inputPath);
 
+    const ffmpeg = process.env.FFMPEG_PATH ?? "ffmpeg";
     execSync(
-      `ffmpeg -i "${inputPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${outputPath}" -y`,
+      `"${ffmpeg}" -i "${inputPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${outputPath}" -y`,
       { stdio: "pipe" }
     );
 

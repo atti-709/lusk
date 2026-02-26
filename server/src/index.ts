@@ -44,7 +44,7 @@ server.get("/api/health", async () => {
   return { status: "ok" as const, uptime: process.uptime() };
 });
 
-const PORT = 3000;
+const PORT = parseInt(process.env.LUSK_PORT ?? "3000", 10);
 
 // Restore existing sessions instead of cleaning up
 const sessions = await tempManager.listSessions();

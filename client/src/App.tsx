@@ -57,6 +57,20 @@ function App() {
       });
   }, []);
 
+  // Handle .lusk files opened from Finder (Electron only)
+  useEffect(() => {
+    const lusk = (window as any).lusk;
+    if (!lusk?.onOpenSession) return;
+    lusk.onOpenSession((id: string) => {
+      setCaptions([]);
+      setViralClips([]);
+      setSelectedClip(null);
+      setReadySubView("review");
+      setSessionId(id);
+      setView("session");
+    });
+  }, []);
+
   // Fetch project data when reaching READY state
   useEffect(() => {
     if (!sessionId || !isReady) return;
@@ -484,7 +498,7 @@ function App() {
             <ClipSelector
               clips={viralClips}
               videoUrl={state.videoUrl}
-              sessionId={sessionId}
+              sessionId={sessionId!}
               videoName={state.videoName}
               renders={state.renders ?? {}}
               captions={captions}

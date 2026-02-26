@@ -4,11 +4,16 @@
   "workspaces": [
     "server",
     "client",
-    "shared"
+    "shared",
+    "electron"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=server & npm run dev --workspace=client",
     "dev:server": "npm run dev --workspace=server",
-    "dev:client": "npm run dev --workspace=client"
+    "dev:client": "npm run dev --workspace=client",
+    "dev:electron": "npm run build:electron && npm run start -w @lusk/electron",
+    "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
+    "build:electron": "npm run build && npm run build -w @lusk/electron",
+    "package": "npm run build:electron && npm run make -w @lusk/electron"
   }
 }
