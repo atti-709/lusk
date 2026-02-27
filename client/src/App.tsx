@@ -89,28 +89,17 @@ function App() {
     const lusk = window.lusk;
     if (!lusk) return;
 
-    // 1. Pick save location
+    // Pick save location — video is selected on the next screen
     const saveResult = await lusk.showSaveDialog({
       title: "Save new project as...",
       filters: [{ name: "Lusk Project", extensions: ["lusk"] }],
     });
     if (saveResult.canceled || !saveResult.filePath) return;
 
-    // 2. Pick video file
-    const videoResult = await lusk.showOpenDialog({
-      title: "Select video file",
-      filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "avi", "webm"] }],
-    });
-    if (videoResult.canceled || !videoResult.filePath) return;
-
-    // 3. Create project via server
     const res = await fetch("/api/projects/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectPath: saveResult.filePath,
-        videoPath: videoResult.filePath,
-      }),
+      body: JSON.stringify({ projectPath: saveResult.filePath }),
     });
 
     if (res.ok) {
@@ -118,13 +107,6 @@ function App() {
       resetSessionState();
       setSessionId(data.projectId);
       setView("session");
-
-      // Start transcription
-      fetch("/api/transcribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: data.projectId }),
-      }).catch(() => {});
     }
   }, [resetSessionState]);
 
@@ -321,7 +303,7 @@ function App() {
         </div>
       )}
 
-      {/* IDLE state: imported without video — show upload prompt */}
+      {/* IDLE state: no video linked yet — show upload prompt */}
       {view === "session" && state && state.state === "IDLE" && (
         <div className="pipeline-stage">
           <div className="idle-notice">
@@ -333,7 +315,7 @@ function App() {
               </svg>
             </div>
             <h2>Add a source video</h2>
-            <p>This project was imported without a video file. Upload one to continue.</p>
+            <p>Select the video podcast you want to create clips from.</p>
             {state.videoName && (
               <p className="idle-filename-hint">
                 Looking for: <code>{state.videoName}.mp4</code>

@@ -50,7 +50,7 @@ export const projectsRoute: FastifyPluginAsync = async (server) => {
   // POST /api/projects/create
   // -------------------------------------------------------------------------
   server.post<{
-    Body: { projectPath: string; videoPath: string };
+    Body: { projectPath: string; videoPath?: string };
     Reply: CreateProjectResponse | ErrorResponse;
   }>("/api/projects/create", async (request, reply) => {
     try {

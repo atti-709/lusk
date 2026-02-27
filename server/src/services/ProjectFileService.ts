@@ -217,27 +217,29 @@ function buildProjectState(
 
 class ProjectFileService {
   /**
-   * Create a new .lusk project from a source video file.
-   * Writes the .lusk ZIP, sets up the cache, and registers the project.
+   * Create a new .lusk project, optionally with a source video file.
+   * Writes the .lusk ZIP, sets up the cache (if video provided), and registers the project.
    */
   async createProject(
     projectFilePath: string,
-    videoPath: string,
+    videoPath?: string,
   ): Promise<ProjectState> {
     const projectId = randomUUID();
-    const videoName = sanitizeVideoName(basename(videoPath));
-    const videoDurationMs = probeVideoDurationMs(videoPath);
     const now = new Date().toISOString();
+
+    const hasVideo = !!videoPath;
+    const videoName = hasVideo ? sanitizeVideoName(basename(videoPath)) : "";
+    const videoDurationMs = hasVideo ? probeVideoDurationMs(videoPath) : null;
 
     const data: ProjectData = {
       version: 1,
       projectId,
       createdAt: now,
       updatedAt: now,
-      videoPath,
+      videoPath: videoPath ?? "",
       videoName,
       videoDurationMs,
-      state: "IDLE",
+      state: hasVideo ? "UPLOADING" : "IDLE",
       transcript: null,
       correctedTranscriptRaw: null,
       captions: null,
@@ -248,10 +250,11 @@ class ProjectFileService {
     await mkdir(dirname(projectFilePath), { recursive: true });
     writeLuskFile(projectFilePath, data);
 
-    // Set up cache (symlink video)
-    await setupCache(projectId, videoPath);
-
-    const videoUrl = `/static/${projectId}/input.mp4`;
+    let videoUrl: string | null = null;
+    if (hasVideo) {
+      await setupCache(projectId, videoPath);
+      videoUrl = `/static/${projectId}/input.mp4`;
+    }
 
     const state = buildProjectState(data, {
       videoUrl,
@@ -259,7 +262,7 @@ class ProjectFileService {
     });
 
     // Generate thumbnail and add to registry
-    const thumbnail = generateThumbnail(videoPath);
+    const thumbnail = hasVideo ? generateThumbnail(videoPath) : null;
     await addToRegistry({
       projectId,
       projectPath: projectFilePath,
