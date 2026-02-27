@@ -22,7 +22,7 @@ function formatTime(iso: string): string {
 }
 
 interface DashboardProps {
-  onOpenProject: (projectId: string) => void;
+  onOpenProject: (projectId: string, projectPath: string) => void;
   onNewProject: () => void;
   onOpenFile: () => void;
 }
@@ -74,7 +74,7 @@ export function Dashboard({ onOpenProject, onNewProject, onOpenFile }: Dashboard
               <div
                 key={p.projectId}
                 className={`project-card ${p.missing ? "project-card--missing" : ""}`}
-                onClick={() => !p.missing && onOpenProject(p.projectId)}
+                onClick={() => !p.missing && onOpenProject(p.projectId, p.projectPath)}
                 role="button"
                 tabIndex={0}
               >

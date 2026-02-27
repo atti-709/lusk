@@ -116,6 +116,24 @@
   padding: 3rem 1rem;
 }
 
+.idle-dropzone {
+  max-width: 480px;
+  padding: 3rem 2rem;
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  cursor: default;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.idle-dropzone.drag-over {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb, 99, 102, 241), 0.06);
+}
+
+.idle-dropzone.drag-over .upload-icon {
+  color: var(--accent);
+}
+
 .idle-notice .upload-icon {
   color: var(--text-dim);
   margin-bottom: 0.5rem;

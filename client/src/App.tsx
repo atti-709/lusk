@@ -134,32 +134,43 @@ function App() {
     }
   }, [resetSessionState]);
 
-  const handleOpenProject = useCallback(async (projectId: string) => {
+  const handleOpenProject = useCallback(async (projectId: string, projectPath: string) => {
     resetSessionState();
+
+    // Ensure the server has the session loaded (it may have restarted)
+    try {
+      const res = await fetch("/api/projects/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath }),
+      });
+      if (!res.ok) {
+        console.error("Failed to open project on server");
+        return;
+      }
+    } catch {
+      console.error("Failed to reach server");
+      return;
+    }
+
     setSessionId(projectId);
     setView("session");
   }, [resetSessionState]);
 
-  // Upload video to an existing IDLE session (imported without video)
+  // Upload video to an existing IDLE session
   const [idleUploadError, setIdleUploadError] = useState<string | null>(null);
-  const handleIdleVideoSelect = useCallback(async () => {
+  const [idleDragOver, setIdleDragOver] = useState(false);
+
+  const VIDEO_EXTENSIONS = ["mp4", "mov", "mkv", "avi", "webm"];
+
+  const selectVideoForProject = useCallback(async (videoPath: string) => {
     if (!sessionId) return;
     setIdleUploadError(null);
-
-    const lusk = window.lusk;
-    if (!lusk) return;
-
-    const result = await lusk.showOpenDialog({
-      title: "Select video file",
-      filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "avi", "webm"] }],
-    });
-    if (result.canceled || !result.filePath) return;
-
     try {
       const response = await fetch(`/api/projects/${sessionId}/select-video`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videoPath: result.filePath }),
+        body: JSON.stringify({ videoPath }),
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({ error: "Failed to select video" }));
@@ -169,6 +180,36 @@ function App() {
       setIdleUploadError("Failed to select video");
     }
   }, [sessionId]);
+
+  const handleIdleVideoSelect = useCallback(async () => {
+    const lusk = window.lusk;
+    if (!lusk) return;
+    const result = await lusk.showOpenDialog({
+      title: "Select video file",
+      filters: [{ name: "Video", extensions: VIDEO_EXTENSIONS }],
+    });
+    if (result.canceled || !result.filePath) return;
+    selectVideoForProject(result.filePath);
+  }, [selectVideoForProject]);
+
+  const handleIdleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIdleDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    // Electron exposes .path on dropped File objects
+    const filePath = (file as File & { path?: string }).path;
+    if (!filePath) {
+      setIdleUploadError("Drag & drop requires the desktop app");
+      return;
+    }
+    const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+    if (!VIDEO_EXTENSIONS.includes(ext)) {
+      setIdleUploadError(`Unsupported format. Use: ${VIDEO_EXTENSIONS.join(", ")}`);
+      return;
+    }
+    selectVideoForProject(filePath);
+  }, [selectVideoForProject]);
 
   const handleTranscribe = useCallback(async () => {
     if (!sessionId) return;
@@ -303,10 +344,15 @@ function App() {
         </div>
       )}
 
-      {/* IDLE state: no video linked yet — show upload prompt */}
+      {/* IDLE state: no video linked yet — show drop zone */}
       {view === "session" && state && state.state === "IDLE" && (
         <div className="pipeline-stage">
-          <div className="idle-notice">
+          <div
+            className={`idle-notice idle-dropzone${idleDragOver ? " drag-over" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); setIdleDragOver(true); }}
+            onDragLeave={() => setIdleDragOver(false)}
+            onDrop={handleIdleDrop}
+          >
             <div className="upload-icon">
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -315,14 +361,14 @@ function App() {
               </svg>
             </div>
             <h2>Add a source video</h2>
-            <p>Select the video podcast you want to create clips from.</p>
+            <p>Drag & drop a video file here, or click to browse.</p>
             {state.videoName && (
               <p className="idle-filename-hint">
                 Looking for: <code>{state.videoName}.mp4</code>
               </p>
             )}
             <button className="primary" onClick={handleIdleVideoSelect}>
-              Choose video
+              Browse files
             </button>
             {idleUploadError && (
               <p className="idle-error">{idleUploadError}</p>
