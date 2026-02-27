@@ -31,7 +31,7 @@ export function AlignStep({ sessionId }: AlignStepProps) {
 
   // Prefill data from session
   useEffect(() => {
-    fetch(`/api/project/${sessionId}`)
+    fetch(`/api/projects/${sessionId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!data) return;
@@ -63,7 +63,7 @@ export function AlignStep({ sessionId }: AlignStepProps) {
   }, [sessionId]);
 
   const handleDownloadTsv = useCallback(async () => {
-    const res = await fetch(`/api/project/${sessionId}/transcript.tsv`);
+    const res = await fetch(`/api/projects/${sessionId}/transcript.tsv`);
     if (!res.ok) return;
     
     // Check content type to determine extension (zip vs tsv)
@@ -113,7 +113,7 @@ export function AlignStep({ sessionId }: AlignStepProps) {
     try {
       // Auto-save the corrected transcript first
       if (correctedTsv.trim()) {
-        const tsvRes = await fetch(`/api/project/${sessionId}/corrected-transcript`, {
+        const tsvRes = await fetch(`/api/projects/${sessionId}/corrected-transcript`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: correctedTsv }),
@@ -125,7 +125,7 @@ export function AlignStep({ sessionId }: AlignStepProps) {
       }
 
       // Then submit viral clips
-      const res = await fetch(`/api/project/${sessionId}/viral-clips`, {
+      const res = await fetch(`/api/projects/${sessionId}/viral-clips`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: viralText }),
