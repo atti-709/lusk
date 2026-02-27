@@ -44,14 +44,6 @@ export interface TranscriptData {
   words: TranscriptWord[];
 }
 
-export interface SessionSummary {
-  sessionId: string;
-  state: PipelineState;
-  videoUrl: string | null;
-  videoName: string | null;
-  createdAt: string;
-}
-
 export interface ViralClip {
   title: string;
   startMs: number;
@@ -140,12 +132,6 @@ export interface RenderRequest {
   clip: ViralClip;
   offsetX: number;
   captions?: CaptionWord[];
-}
-
-export interface ImportResponse {
-  success: boolean;
-  sessionId: string;
-  videoName: string | null;
 }
 
 export interface OpenProjectResponse {

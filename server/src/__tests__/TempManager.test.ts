@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { stat, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { TempManager } from "../services/TempManager.js";
 
 const TEST_BASE = join(import.meta.dirname, "../../.lusk_temp_test");
@@ -23,15 +24,8 @@ describe("TempManager", () => {
     expect(info.isDirectory()).toBe(true);
   });
 
-  it("createSession() returns a UUID", () => {
-    const id = tm.createSession();
-    expect(id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-    );
-  });
-
   it("ensureSessionDir() creates the session directory", async () => {
-    const id = tm.createSession();
+    const id = randomUUID();
     const dir = await tm.ensureSessionDir(id);
     const info = await stat(dir);
     expect(info.isDirectory()).toBe(true);
@@ -44,7 +38,7 @@ describe("TempManager", () => {
   });
 
   it("sessionExists() returns true for existing session", async () => {
-    const id = tm.createSession();
+    const id = randomUUID();
     await tm.ensureSessionDir(id);
     expect(await tm.sessionExists(id)).toBe(true);
   });
@@ -54,8 +48,8 @@ describe("TempManager", () => {
   });
 
   it("cleanupAll() removes all session directories", async () => {
-    const id1 = tm.createSession();
-    const id2 = tm.createSession();
+    const id1 = randomUUID();
+    const id2 = randomUUID();
     await tm.ensureSessionDir(id1);
     await tm.ensureSessionDir(id2);
 
