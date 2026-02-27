@@ -148,7 +148,8 @@ class WhisperService {
     outputDir: string,
     python3: string,
     ffmpegPath: string,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<WhisperXOutput> {
     return new Promise<WhisperXOutput>((resolve, reject) => {
       const args = [
@@ -166,10 +167,20 @@ class WhisperService {
       const ffmpegDir = path.dirname(ffmpegPath);
       const envPath = process.env.PATH ? `${ffmpegDir}:${process.env.PATH}` : ffmpegDir;
 
+      if (signal?.aborted) {
+        return reject(new Error("Transcription cancelled"));
+      }
+
       const proc = spawn(python3, ["-u", ...args], {
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env, PYTHONUNBUFFERED: "1", PATH: envPath },
       });
+
+      const onAbort = () => {
+        proc.kill("SIGTERM");
+        reject(new Error("Transcription cancelled"));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
 
       let partialErr = "";
       let partialOut = "";
@@ -201,6 +212,8 @@ class WhisperService {
       });
 
       proc.on("close", async (code) => {
+        signal?.removeEventListener("abort", onAbort);
+
         for (const buf of [partialErr, partialOut]) {
           const m = /(\d+)%\|/.exec(buf);
           if (m) {
@@ -208,6 +221,8 @@ class WhisperService {
             onProgress?.(pct, "Transcribing & aligning...");
           }
         }
+
+        if (signal?.aborted) return; // already rejected by onAbort
 
         if (code !== 0) {
           return reject(
@@ -232,23 +247,26 @@ class WhisperService {
 
   async transcribe(
     sessionDir: string,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<TranscriptionResult> {
     const inputVideo = path.join(sessionDir, "input.mp4");
     const audioWav = path.join(sessionDir, "audio.wav");
 
     // Step 1: Extract audio
     await this.extractAudio(inputVideo, audioWav, onProgress);
+    if (signal?.aborted) throw new Error("Transcription cancelled");
 
     // Resolve the ffmpeg binary path so WhisperX can find it
     const ffmpegPath = process.env.FFMPEG_PATH || resolveFFmpegStatic() || "ffmpeg";
 
     // Step 2: Ensure WhisperX is available
     const python3 = await this.ensureInstalled(onProgress);
+    if (signal?.aborted) throw new Error("Transcription cancelled");
 
     // Step 3: Run WhisperX (transcription + forced alignment)
     onProgress?.(10, "Starting WhisperX...");
-    const whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, onProgress);
+    const whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, onProgress, signal);
 
     onProgress?.(96, "Processing results...");
 

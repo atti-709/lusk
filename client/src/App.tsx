@@ -85,6 +85,14 @@ function App() {
     setReadySubView("review");
   }, []);
 
+  const cancelTranscription = useCallback((id: string) => {
+    fetch("/api/transcribe/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: id }),
+    }).catch(() => {});
+  }, []);
+
   const handleNewProject = useCallback(async () => {
     const lusk = window.lusk;
     if (!lusk) return;
@@ -135,6 +143,10 @@ function App() {
   }, [resetSessionState]);
 
   const handleOpenProject = useCallback(async (projectId: string, projectPath: string) => {
+    // Cancel any in-progress transcription for the current session
+    if (sessionId && state?.state === "TRANSCRIBING") {
+      cancelTranscription(sessionId);
+    }
     resetSessionState();
 
     // Ensure the server has the session loaded (it may have restarted)
@@ -197,8 +209,7 @@ function App() {
     setIdleDragOver(false);
     const file = e.dataTransfer.files[0];
     if (!file) return;
-    // Electron exposes .path on dropped File objects
-    const filePath = (file as File & { path?: string }).path;
+    const filePath = window.lusk?.getFilePath?.(file) ?? "";
     if (!filePath) {
       setIdleUploadError("Drag & drop requires the desktop app");
       return;
@@ -301,8 +312,11 @@ function App() {
 
   const handleLogoClick = useCallback(() => {
     if (view === "dashboard" || view === "loading") return;
+    if (sessionId && state?.state === "TRANSCRIBING") {
+      cancelTranscription(sessionId);
+    }
     setView("dashboard");
-  }, [view]);
+  }, [view, sessionId, state?.state, cancelTranscription]);
 
   return (
     <div className="app">

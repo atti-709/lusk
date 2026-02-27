@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 contextBridge.exposeInMainWorld("lusk", {
   isElectron: true,
@@ -18,4 +18,6 @@ contextBridge.exposeInMainWorld("lusk", {
     defaultPath?: string;
     filters?: { name: string; extensions: string[] }[];
   }) => ipcRenderer.invoke("show-open-dialog", options ?? {}),
+
+  getFilePath: (file: File) => webUtils.getPathForFile(file),
 });

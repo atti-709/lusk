@@ -6,12 +6,15 @@ import type { TranscribeRequest, ErrorResponse } from "@lusk/shared";
 
 type Logger = Pick<FastifyInstance["log"], "error">;
 
+/** Active transcription abort controllers, keyed by sessionId. */
+const activeTranscriptions = new Map<string, AbortController>();
+
 /**
  * Core transcription work — does not perform the UPLOADING→TRANSCRIBING
  * transition so it can be called both from the HTTP handler (which does the
  * transition first) and from server startup (session already in TRANSCRIBING).
  */
-export async function doTranscribe(sessionId: string, log: Logger): Promise<void> {
+export async function doTranscribe(sessionId: string, log: Logger, signal?: AbortSignal): Promise<void> {
   const sessionDir = tempManager.getSessionDir(sessionId);
 
   orchestrator.updateProgress(sessionId, 0, "Starting transcription...");
@@ -20,7 +23,8 @@ export async function doTranscribe(sessionId: string, log: Logger): Promise<void
     sessionDir,
     (percent, message) => {
       orchestrator.updateProgress(sessionId, percent, message);
-    }
+    },
+    signal,
   );
 
   orchestrator.setTranscript(sessionId, transcript);
@@ -31,14 +35,24 @@ export async function doTranscribe(sessionId: string, log: Logger): Promise<void
 }
 
 async function runTranscription(sessionId: string, log: Logger): Promise<void> {
+  const controller = new AbortController();
+  activeTranscriptions.set(sessionId, controller);
+
   orchestrator.transition(sessionId, "TRANSCRIBING");
   try {
-    await doTranscribe(sessionId, log);
+    await doTranscribe(sessionId, log, controller.signal);
   } catch (err: any) {
+    if (controller.signal.aborted) {
+      // Cancelled — revert to UPLOADING so the user can retry
+      orchestrator.transition(sessionId, "UPLOADING");
+      orchestrator.updateProgress(sessionId, 0, "Transcription cancelled");
+      return;
+    }
     const message = err?.message ?? String(err);
     log.error(err, "Transcription pipeline failed");
-    // Surface the error to the user in the UI
     orchestrator.updateProgress(sessionId, -1, `Error: ${message}`);
+  } finally {
+    activeTranscriptions.delete(sessionId);
   }
 }
 
@@ -67,6 +81,21 @@ export async function transcribeRoute(app: FastifyInstance) {
       runTranscription(sessionId, app.log).catch(() => {});
 
       return { success: true as const };
+    }
+  );
+
+  app.post<{ Body: { sessionId: string }; Reply: { success: true } | ErrorResponse }>(
+    "/api/transcribe/cancel",
+    async (request, reply) => {
+      const { sessionId } = request.body ?? {};
+
+      const controller = activeTranscriptions.get(sessionId);
+      if (!controller) {
+        return reply.send({ success: true }); // nothing to cancel
+      }
+
+      controller.abort();
+      return reply.send({ success: true });
     }
   );
 }
