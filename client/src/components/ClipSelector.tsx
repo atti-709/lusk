@@ -359,7 +359,6 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
 
   const handleRenderAll = useCallback(async () => {
     setBatchError(null);
-    setShowExportMenu(false); // close export dropdown if open (native dialog won't fire outside-click)
 
     // Ask the server to validate exported render files — clears any whose
     // .mp4 was deleted while the server was running — and return the fresh map.
