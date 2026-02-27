@@ -1,6 +1,6 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { spawn, execSync, ChildProcess } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 const PORT = 3000;
@@ -15,32 +15,27 @@ app.on("open-file", (event, filePath) => {
   if (!filePath.endsWith(".lusk")) return;
   if (mainWindow && !mainWindow.isDestroyed()) {
     // App already running — import immediately
-    importLuskFile(filePath).catch(console.error);
+    openLuskFile(filePath).catch(console.error);
   } else {
     // App is still starting up — process after window is ready
     pendingFilePath = filePath;
   }
 });
 
-async function importLuskFile(filePath: string): Promise<void> {
+async function openLuskFile(filePath: string): Promise<void> {
   try {
-    const fileBuffer = readFileSync(filePath);
-    const fileName = path.basename(filePath);
-
-    const formData = new FormData();
-    formData.append("file", new Blob([fileBuffer]), fileName);
-
-    const res = await fetch(`http://localhost:${PORT}/api/import`, {
+    const res = await fetch(`http://localhost:${PORT}/api/projects/open`, {
       method: "POST",
-      body: formData,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath: filePath }),
     });
 
     if (res.ok) {
-      const data = (await res.json()) as { sessionId: string };
-      mainWindow?.webContents.send("open-session", data.sessionId);
+      const data = (await res.json()) as { projectId: string };
+      mainWindow?.webContents.send("open-session", data.projectId);
     }
   } catch (err) {
-    console.error("Failed to import .lusk file:", err);
+    console.error("Failed to open .lusk file:", err);
   }
 }
 
@@ -51,10 +46,8 @@ async function importLuskFile(filePath: string): Promise<void> {
  */
 function getResourcePath(...segments: string[]): string {
   if (app.isPackaged) {
-    // extraResource copies ./bundle → Contents/Resources/bundle/
     return path.join(process.resourcesPath, "bundle", ...segments);
   }
-  // In dev: electron/dist/main.js → go up to monorepo root
   return path.join(__dirname, "../..", ...segments);
 }
 
@@ -77,25 +70,6 @@ function getLoginShellPath(): string {
 }
 
 const LOGIN_PATH = getLoginShellPath();
-
-function checkDependencies(): string[] {
-  const missing: string[] = [];
-  const shell = process.env.SHELL ?? "/bin/zsh";
-
-  try {
-    execSync(`${shell} -lc "python3 --version"`, { stdio: "pipe" });
-  } catch {
-    missing.push("Python 3 (brew install python@3.11)");
-  }
-
-  try {
-    execSync(`${shell} -lc "python3 -m pip show whisperx"`, { stdio: "pipe" });
-  } catch {
-    missing.push("WhisperX (pip3 install whisperx)");
-  }
-
-  return missing;
-}
 
 async function waitForServer(retries = 30, delayMs = 500): Promise<void> {
   for (let i = 0; i < retries; i++) {
@@ -159,6 +133,7 @@ async function startServer(): Promise<void> {
     NODE_ENV: "production",
     LUSK_PORT: String(PORT),
     LUSK_TEMP_DIR: tempDir,
+    LUSK_REGISTRY_DIR: path.join(app.getPath("userData")),
     LUSK_CLIENT_DIST: clientDist,
     LUSK_PUBLIC_DIR: publicDir,
     LUSK_REMOTION_ENTRY: remotionEntry,
@@ -230,7 +205,7 @@ function createWindow(): void {
   // Once the page has loaded, process any file that was opened at launch
   mainWindow.webContents.once("did-finish-load", () => {
     if (pendingFilePath) {
-      importLuskFile(pendingFilePath).catch(console.error);
+      openLuskFile(pendingFilePath).catch(console.error);
       pendingFilePath = null;
     }
   });
@@ -241,20 +216,6 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
-  // Check for Python/WhisperX
-  const missing = checkDependencies();
-  if (missing.length > 0) {
-    dialog.showMessageBoxSync({
-      type: "warning",
-      title: "Missing Dependencies",
-      message: "Some dependencies are required for transcription:",
-      detail: missing.join("\n") +
-        "\n\nYou can still use Lusk, but transcription will not work until these are installed.",
-      buttons: ["Continue Anyway", "Quit"],
-      defaultId: 0,
-    }) === 1 && app.quit();
-  }
-
   try {
     await startServer();
   } catch (err) {
@@ -267,6 +228,31 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+
+  // IPC handlers for native file dialogs
+  ipcMain.handle("show-save-dialog", async (_event, options: any) => {
+    if (!mainWindow) return { canceled: true, filePath: null };
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: options.title ?? "Save",
+      defaultPath: options.defaultPath,
+      filters: options.filters ?? [{ name: "Lusk Project", extensions: ["lusk"] }],
+    });
+    return { canceled: result.canceled, filePath: result.filePath ?? null };
+  });
+
+  ipcMain.handle("show-open-dialog", async (_event, options: any) => {
+    if (!mainWindow) return { canceled: true, filePath: null };
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: options.title ?? "Open",
+      defaultPath: options.defaultPath,
+      filters: options.filters ?? [{ name: "Lusk Project", extensions: ["lusk"] }],
+      properties: ["openFile"],
+    });
+    return {
+      canceled: result.canceled,
+      filePath: result.filePaths?.[0] ?? null,
+    };
+  });
 
   app.on("activate", () => {
     // macOS: re-create window when dock icon is clicked

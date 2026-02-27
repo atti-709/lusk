@@ -44,14 +44,6 @@ export interface TranscriptData {
   words: TranscriptWord[];
 }
 
-export interface SessionSummary {
-  sessionId: string;
-  state: PipelineState;
-  videoUrl: string | null;
-  videoName: string | null;
-  createdAt: string;
-}
-
 export interface ViralClip {
   title: string;
   startMs: number;
@@ -80,21 +72,55 @@ export interface ClipRenderState {
   outputUrl: string | null;
 }
 
-export interface ProjectState {
-  sessionId: string;
-  state: PipelineState;
-  progress: number;
-  message: string;
-  videoUrl: string | null;
-  videoName: string | null;
+// Persisted project data (saved to .lusk files)
+export interface ProjectData {
+  version: number;
+  projectId: string;
+  createdAt: string;
+  updatedAt: string;
+  videoPath: string;
+  videoName: string;
   videoDurationMs: number | null;
-
+  state: PipelineState;
   transcript: TranscriptData | null;
   correctedTranscriptRaw?: string | null;
   captions: CaptionWord[] | null;
   viralClips: ViralClip[] | null;
-  outputUrl: string | null;
+}
+
+// Runtime project state (extends persisted data with runtime-only fields)
+export interface ProjectState extends ProjectData {
+  sessionId: string; // alias for projectId, kept for backwards compat
+  videoUrl: string | null;
+  progress: number;
+  message: string;
   renders: Record<string, ClipRenderState>;
+  outputUrl: string | null;
+  projectFilePath: string | null;
+}
+
+// Recent project entry for the dashboard registry
+export interface RecentProject {
+  projectId: string;
+  projectPath: string;
+  videoName: string;
+  state: PipelineState;
+  updatedAt: string;
+  thumbnail: string | null;
+  missing?: boolean;
+}
+
+// Native file dialog types
+export interface BrowseRequest {
+  type: "save" | "open";
+  title?: string;
+  filters?: { name: string; extensions: string[] }[];
+  defaultPath?: string;
+}
+
+export interface BrowseResponse {
+  canceled: boolean;
+  filePath: string | null;
 }
 
 export interface TranscribeRequest {
@@ -108,9 +134,15 @@ export interface RenderRequest {
   captions?: CaptionWord[];
 }
 
-export interface ImportResponse {
+export interface OpenProjectResponse {
   success: boolean;
-  sessionId: string;
+  projectId: string;
   videoName: string | null;
+  state: PipelineState;
+}
+
+export interface CreateProjectResponse {
+  success: boolean;
+  projectId: string;
 }
 

@@ -15,54 +15,12 @@ export async function uploadRoute(app: FastifyInstance) {
     },
   });
 
-  app.post<{ Reply: UploadResponse | ErrorResponse }>(
-    "/api/upload",
-    async (request, reply) => {
-      let data;
-      try {
-        data = await request.file();
-      } catch {
-        return reply.status(400).send({ success: false, error: "No file uploaded" });
-      }
-
-      if (!data) {
-        return reply.status(400).send({ success: false, error: "No file uploaded" });
-      }
-
-      const sessionId = tempManager.createSession();
-      const sessionDir = await tempManager.ensureSessionDir(sessionId);
-
-      const savePath = join(sessionDir, "input.mp4");
-      await pipeline(data.file, createWriteStream(savePath));
-
-      const videoUrl = `/static/${sessionId}/input.mp4`;
-      // Strip extension for display; fall back to null if filename unavailable
-      const rawName = data.filename ?? null;
-      const videoName = rawName
-        ? rawName.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ").trim()
-        : null;
-
-      // Probe video duration for identity verification on re-import
-      const durationSec = await renderService.probeDuration(savePath);
-      const videoDurationMs = durationSec > 0 ? Math.round(durationSec * 1000) : null;
-
-      orchestrator.createSession(sessionId, videoUrl, videoName, videoDurationMs);
-
-      return {
-        success: true as const,
-        sessionId,
-        fileName: "input.mp4",
-        url: videoUrl,
-      };
-    }
-  );
-
   // Upload video to an existing IDLE session (e.g. imported without video)
-  app.post<{ Params: { sessionId: string }; Reply: UploadResponse | ErrorResponse }>(
-    "/api/sessions/:sessionId/upload-video",
+  app.post<{ Params: { projectId: string }; Reply: UploadResponse | ErrorResponse }>(
+    "/api/projects/:projectId/upload-video",
     async (request, reply) => {
-      const { sessionId } = request.params;
-      const session = orchestrator.getSession(sessionId);
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
 
       if (!session) {
         return reply.status(404).send({ success: false, error: "Session not found" });
@@ -81,7 +39,7 @@ export async function uploadRoute(app: FastifyInstance) {
         return reply.status(400).send({ success: false, error: "No file uploaded" });
       }
 
-      const sessionDir = await tempManager.ensureSessionDir(sessionId);
+      const sessionDir = await tempManager.ensureSessionDir(projectId);
       const savePath = join(sessionDir, "input.mp4");
       await pipeline(data.file, createWriteStream(savePath));
 
@@ -102,7 +60,7 @@ export async function uploadRoute(app: FastifyInstance) {
         }
       }
 
-      const videoUrl = `/static/${sessionId}/input.mp4`;
+      const videoUrl = `/static/${projectId}/input.mp4`;
       const rawName = data.filename ?? null;
       const videoName = rawName
         ? rawName.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ").trim()
@@ -116,11 +74,11 @@ export async function uploadRoute(app: FastifyInstance) {
       session.state = "READY";
       session.progress = 0;
       session.message = "";
-      orchestrator.emitAndPersist(sessionId);
+      orchestrator.emitAndPersist(projectId);
 
       return {
         success: true as const,
-        sessionId,
+        sessionId: projectId,
         fileName: "input.mp4",
         url: videoUrl,
       };

@@ -34,7 +34,7 @@ const config: ForgeConfig = {
           CFBundleTypeRole: "Editor",
           LSHandlerRank: "Owner",
           CFBundleTypeExtensions: ["lusk"],
-          CFBundleTypeIconFile: "icon",
+          CFBundleTypeIconFile: "icon.icns",
           LSItemContentTypes: ["com.lusk.project"],
         },
       ],
@@ -46,11 +46,10 @@ const config: ForgeConfig = {
           UTTypeTagSpecification: {
             "public.filename-extension": ["lusk"],
           },
-          UTTypeIconFile: "icon",
+          UTTypeIconFile: "icon.icns",
         },
       ],
     },
-    // Single extraResource so basenames never conflict
     extraResource: ["./bundle"],
   },
   hooks: {

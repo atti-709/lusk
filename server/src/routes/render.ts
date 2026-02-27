@@ -127,16 +127,16 @@ export async function renderRoute(app: FastifyInstance) {
   // Validate exported render entries against the actual files on disk.
   // Removes orphaned entries (file deleted while server was running) and returns
   // the fresh renders map so the client can build an accurate pending queue.
-  app.post<{ Params: { sessionId: string }; Reply: { renders: Record<string, unknown> } | ErrorResponse }>(
-    "/api/sessions/:sessionId/sync-render-states",
+  app.post<{ Params: { projectId: string }; Reply: { renders: Record<string, unknown> } | ErrorResponse }>(
+    "/api/projects/:projectId/sync-render-states",
     async (request, reply) => {
-      const { sessionId } = request.params;
-      const session = orchestrator.getSession(sessionId);
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
       if (!session) {
         return reply.status(404).send({ success: false, error: "Session not found" });
       }
 
-      const sessionDir = tempManager.getSessionDir(sessionId);
+      const sessionDir = tempManager.getSessionDir(projectId);
       let changed = false;
 
       if (session.renders) {
@@ -151,7 +151,7 @@ export async function renderRoute(app: FastifyInstance) {
         }
       }
 
-      if (changed) orchestrator.emitAndPersist(sessionId);
+      if (changed) orchestrator.emitAndPersist(projectId);
 
       return reply.send({ renders: session.renders ?? {} });
     }

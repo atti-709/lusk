@@ -79,11 +79,11 @@ function wordsToCaptions(words: TranscriptWord[]): CaptionWord[] {
 
 export async function alignRoute(app: FastifyInstance) {
   // 5a. Download transcript as TSV
-  app.get<{ Params: { sessionId: string }; Reply: string | ErrorResponse | unknown }>(
-    "/api/project/:sessionId/transcript.tsv",
+  app.get<{ Params: { projectId: string }; Reply: string | ErrorResponse | unknown }>(
+    "/api/projects/:projectId/transcript.tsv",
     async (request, reply) => {
-      const { sessionId } = request.params;
-      const session = orchestrator.getSession(sessionId);
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
 
       if (!session) {
         return reply.status(404).send({ success: false, error: "Session not found" });
@@ -140,13 +140,13 @@ export async function alignRoute(app: FastifyInstance) {
 
   // 5b. Upload corrected transcript
   app.post<{
-    Params: { sessionId: string };
+    Params: { projectId: string };
     Reply: { success: true } | ErrorResponse;
   }>(
-    "/api/project/:sessionId/corrected-transcript",
+    "/api/projects/:projectId/corrected-transcript",
     async (request, reply) => {
-      const { sessionId } = request.params;
-      const session = orchestrator.getSession(sessionId);
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
 
       if (!session) {
         return reply.status(404).send({ success: false, error: "Session not found" });
@@ -174,9 +174,9 @@ export async function alignRoute(app: FastifyInstance) {
           words: correctedWords,
         };
 
-        orchestrator.setTranscript(sessionId, correctedTranscript);
-        orchestrator.setCorrectedTranscriptRaw(sessionId, rawBody);
-        orchestrator.setCaptions(sessionId, wordsToCaptions(correctedWords));
+        orchestrator.setTranscript(projectId, correctedTranscript);
+        orchestrator.setCorrectedTranscriptRaw(projectId, rawBody);
+        orchestrator.setCaptions(projectId, wordsToCaptions(correctedWords));
 
         return { success: true as const };
       } catch (err) {
@@ -190,14 +190,14 @@ export async function alignRoute(app: FastifyInstance) {
 
   // 5c. Submit viral clips (parsed from Gemini text output)
   app.post<{
-    Params: { sessionId: string };
+    Params: { projectId: string };
     Body: { text: string };
     Reply: { success: true; clips: ViralClip[] } | ErrorResponse;
   }>(
-    "/api/project/:sessionId/viral-clips",
+    "/api/projects/:projectId/viral-clips",
     async (request, reply) => {
-      const { sessionId } = request.params;
-      const session = orchestrator.getSession(sessionId);
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
 
       if (!session) {
         return reply.status(404).send({ success: false, error: "Session not found" });
@@ -209,15 +209,15 @@ export async function alignRoute(app: FastifyInstance) {
         // Empty text means "skip viral clip detection" — proceed to READY with 0 clips
         const clips = text?.trim() ? parseViralClipText(text) : [];
 
-        orchestrator.setViralClips(sessionId, clips);
+        orchestrator.setViralClips(projectId, clips);
 
         // Regenerate captions from (possibly corrected) transcript
         if (session.transcript) {
-          orchestrator.setCaptions(sessionId, wordsToCaptions(session.transcript.words));
+          orchestrator.setCaptions(projectId, wordsToCaptions(session.transcript.words));
         }
 
-        orchestrator.transition(sessionId, "READY");
-        orchestrator.updateProgress(sessionId, 100, "Ready to review");
+        orchestrator.transition(projectId, "READY");
+        orchestrator.updateProgress(projectId, 100, "Ready to review");
 
         return { success: true as const, clips };
       } catch (err) {
@@ -231,14 +231,14 @@ export async function alignRoute(app: FastifyInstance) {
 
   // 5d. Add a single clip manually
   app.post<{
-    Params: { sessionId: string };
+    Params: { projectId: string };
     Body: ViralClip;
     Reply: { success: true; clips: ViralClip[] } | ErrorResponse;
   }>(
-    "/api/project/:sessionId/clips",
+    "/api/projects/:projectId/clips",
     async (request, reply) => {
-      const { sessionId } = request.params;
-      const session = orchestrator.getSession(sessionId);
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
 
       if (!session) {
         return reply.status(404).send({ success: false, error: "Session not found" });
@@ -251,7 +251,7 @@ export async function alignRoute(app: FastifyInstance) {
 
       const existing = session.viralClips ?? [];
       const updated = [...existing, clip];
-      orchestrator.setViralClips(sessionId, updated);
+      orchestrator.setViralClips(projectId, updated);
 
       return { success: true as const, clips: updated };
     }
@@ -259,21 +259,21 @@ export async function alignRoute(app: FastifyInstance) {
 
   // 5e. Go back to align step from READY
   app.post<{
-    Params: { sessionId: string };
+    Params: { projectId: string };
     Reply: { success: true } | ErrorResponse;
   }>(
-    "/api/project/:sessionId/back-to-align",
+    "/api/projects/:projectId/back-to-align",
     async (request, reply) => {
-      const { sessionId } = request.params;
-      const session = orchestrator.getSession(sessionId);
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
 
       if (!session) {
         return reply.status(404).send({ success: false, error: "Session not found" });
       }
 
       try {
-        orchestrator.transition(sessionId, "ALIGNING");
-        orchestrator.updateProgress(sessionId, 100, "Modify transcript or clips");
+        orchestrator.transition(projectId, "ALIGNING");
+        orchestrator.updateProgress(projectId, 100, "Modify transcript or clips");
         return { success: true as const };
       } catch (err) {
         return reply.status(409).send({
@@ -346,12 +346,12 @@ function formatSrtBlock(index: number, words: CaptionWord[]): string {
 
 // ... inside alignRoute function ...
 
-  // 5e. Download captions as SRT
-  app.get<{ Params: { sessionId: string }; Reply: string | ErrorResponse }>(
-    "/api/project/:sessionId/captions.srt",
+  // 5f. Download captions as SRT
+  app.get<{ Params: { projectId: string }; Reply: string | ErrorResponse }>(
+    "/api/projects/:projectId/captions.srt",
     async (request, reply) => {
-      const { sessionId } = request.params;
-      const session = orchestrator.getSession(sessionId);
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
 
       if (!session) {
         return reply.status(404).send({ success: false, error: "Session not found" });

@@ -3,46 +3,9 @@ import fs from "node:fs";
 import { execSync, execFileSync, spawn } from "node:child_process";
 import { access, readFile, unlink } from "node:fs/promises";
 import type { TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
+import { getFFmpegPath } from "../config/ffmpeg.js";
 
 const WHISPERX_MODEL = "large-v3-turbo";
-
-/**
- * Resolve the absolute path to the ffmpeg binary bundled by ffmpeg-static.
- * Tries multiple strategies because under ELECTRON_RUN_AS_NODE, standard
- * module resolution may not traverse to the monorepo root.
- */
-function resolveFFmpegStatic(): string | null {
-  const BIN = path.join("node_modules", "ffmpeg-static", "ffmpeg");
-
-  // Strategy 1: from current working directory (usually monorepo root)
-  const fromCwd = path.join(process.cwd(), BIN);
-  if (fs.existsSync(fromCwd)) return fromCwd;
-
-  // Strategy 2: walk up from the script being run (process.argv[1])
-  if (process.argv[1]) {
-    let dir = path.dirname(path.resolve(process.argv[1]));
-    const root = path.parse(dir).root;
-    while (dir !== root) {
-      const candidate = path.join(dir, BIN);
-      if (fs.existsSync(candidate)) return candidate;
-      dir = path.dirname(dir);
-    }
-  }
-
-  // Strategy 3: walk up from this module's location
-  try {
-    let dir = path.dirname(new URL(import.meta.url).pathname);
-    const root = path.parse(dir).root;
-    while (dir !== root) {
-      const candidate = path.join(dir, BIN);
-      if (fs.existsSync(candidate)) return candidate;
-      dir = path.dirname(dir);
-    }
-  } catch { /* ignore */ }
-
-  console.error("[lusk] Could not resolve ffmpeg-static binary. cwd:", process.cwd(), "argv[1]:", process.argv[1]);
-  return null;
-}
 
 export interface TranscriptionResult {
   transcript: TranscriptData;
@@ -70,6 +33,20 @@ interface WhisperXOutput {
 }
 
 class WhisperService {
+  private _availableCache: boolean | null = null;
+
+  async isAvailable(): Promise<boolean> {
+    if (this._availableCache !== null) return this._availableCache;
+    const python3 = this.resolvePython3();
+    try {
+      execFileSync(python3, ["-m", "whisperx", "--version"], { stdio: "pipe" });
+      this._availableCache = true;
+    } catch {
+      this._availableCache = false;
+    }
+    return this._availableCache;
+  }
+
   /**
    * Resolve the correct python3 binary using the login shell.
    * In packaged macOS apps, the raw PATH may point to the system Python
@@ -111,7 +88,7 @@ class WhisperService {
     onProgress?.(1, "Extracting audio...");
     await access(inputPath);
 
-    const ffmpeg = process.env.FFMPEG_PATH || resolveFFmpegStatic() || "ffmpeg";
+    const ffmpeg = getFFmpegPath();
 
     // Pre-flight: verify the ffmpeg binary exists when an absolute path is given
     if (path.isAbsolute(ffmpeg) && !fs.existsSync(ffmpeg)) {
@@ -148,7 +125,8 @@ class WhisperService {
     outputDir: string,
     python3: string,
     ffmpegPath: string,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<WhisperXOutput> {
     return new Promise<WhisperXOutput>((resolve, reject) => {
       const args = [
@@ -166,10 +144,20 @@ class WhisperService {
       const ffmpegDir = path.dirname(ffmpegPath);
       const envPath = process.env.PATH ? `${ffmpegDir}:${process.env.PATH}` : ffmpegDir;
 
+      if (signal?.aborted) {
+        return reject(new Error("Transcription cancelled"));
+      }
+
       const proc = spawn(python3, ["-u", ...args], {
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env, PYTHONUNBUFFERED: "1", PATH: envPath },
       });
+
+      const onAbort = () => {
+        proc.kill("SIGTERM");
+        reject(new Error("Transcription cancelled"));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
 
       let partialErr = "";
       let partialOut = "";
@@ -201,6 +189,8 @@ class WhisperService {
       });
 
       proc.on("close", async (code) => {
+        signal?.removeEventListener("abort", onAbort);
+
         for (const buf of [partialErr, partialOut]) {
           const m = /(\d+)%\|/.exec(buf);
           if (m) {
@@ -208,6 +198,8 @@ class WhisperService {
             onProgress?.(pct, "Transcribing & aligning...");
           }
         }
+
+        if (signal?.aborted) return; // already rejected by onAbort
 
         if (code !== 0) {
           return reject(
@@ -232,23 +224,26 @@ class WhisperService {
 
   async transcribe(
     sessionDir: string,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<TranscriptionResult> {
     const inputVideo = path.join(sessionDir, "input.mp4");
     const audioWav = path.join(sessionDir, "audio.wav");
 
     // Step 1: Extract audio
     await this.extractAudio(inputVideo, audioWav, onProgress);
+    if (signal?.aborted) throw new Error("Transcription cancelled");
 
     // Resolve the ffmpeg binary path so WhisperX can find it
-    const ffmpegPath = process.env.FFMPEG_PATH || resolveFFmpegStatic() || "ffmpeg";
+    const ffmpegPath = getFFmpegPath();
 
     // Step 2: Ensure WhisperX is available
     const python3 = await this.ensureInstalled(onProgress);
+    if (signal?.aborted) throw new Error("Transcription cancelled");
 
     // Step 3: Run WhisperX (transcription + forced alignment)
     onProgress?.(10, "Starting WhisperX...");
-    const whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, onProgress);
+    const whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, onProgress, signal);
 
     onProgress?.(96, "Processing results...");
 

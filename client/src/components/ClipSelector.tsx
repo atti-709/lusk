@@ -175,83 +175,6 @@ function AddClipForm({ onAdd, onCancel }: { onAdd: (clip: ViralClip) => void; on
   );
 }
 
-async function streamExport(
-  sessionId: string,
-  videoName: string | null,
-  includeVideo: boolean,
-  onProgress: (pct: number) => void,
-) {
-  const fileName = `${videoName || "project"}.lusk`;
-  const url = `/api/project/${sessionId}/export?includeVideo=${includeVideo}`;
-
-  const response = await fetch(url);
-  if (!response.ok) throw new Error("Export failed");
-
-  const contentLength = Number(response.headers.get("Content-Length") || 0);
-  const reader = response.body!.getReader();
-
-  // Try File System Access API first
-  let writableStream: WritableStreamDefaultWriter<Uint8Array> | null = null;
-  let closeWritable: (() => Promise<void>) | null = null;
-  let blobChunks: Uint8Array[] | null = null;
-
-  if ("showSaveFilePicker" in window) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const handle = await (window as any).showSaveFilePicker({
-        suggestedName: fileName,
-        types: [{
-          description: "Lusk Project",
-          accept: { "application/zip": [".lusk"] },
-        }],
-      });
-      const writable = await handle.createWritable();
-      writableStream = writable.getWriter();
-      closeWritable = async () => {
-        writableStream!.releaseLock();
-        await writable.close();
-      };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      if (err.name === "AbortError") return;
-    }
-  }
-
-  if (!writableStream) {
-    blobChunks = [];
-  }
-
-  let received = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    if (contentLength > 0) {
-      onProgress(Math.min(99, Math.round((received / contentLength) * 100)));
-    }
-    if (writableStream) {
-      await writableStream.write(value);
-    } else {
-      blobChunks!.push(value);
-    }
-  }
-
-  if (writableStream && closeWritable) {
-    await closeWritable();
-  } else if (blobChunks) {
-    const blob = new Blob(blobChunks as BlobPart[], { type: "application/zip" });
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
-  }
-
-  onProgress(100);
-}
 
 // ── Batch render helpers ─────────────────────────────────────────────────
 
@@ -307,7 +230,7 @@ async function downloadClipsToDirectory(
   sessionId: string,
   dirHandle: FileSystemDirectoryHandle | null
 ): Promise<void> {
-  const response = await fetch(`/api/sessions/${sessionId}/rendered-clips`);
+  const response = await fetch(`/api/projects/${sessionId}/rendered-clips`);
   if (!response.ok) throw new Error("Failed to fetch clips list");
 
   const json = await response.json() as { clips: { url: string; filename: string }[] };
@@ -357,13 +280,6 @@ interface ClipSelectorProps {
 
 export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, captions, onSelect, onBack, onAddClip }: ClipSelectorProps) {
   const [showForm, setShowForm] = useState(false);
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  const [includeVideo, setIncludeVideo] = useState(false);
-  const [exportProgress, setExportProgress] = useState<number | null>(null);
-  const exportRef = useRef<HTMLDivElement>(null);
-
-  const isExporting = exportProgress !== null && exportProgress < 100;
-
   // ── Batch render state ─────────────────────────────────────────────────
   type BatchState = "idle" | "rendering" | "zipping" | "done";
   const [batchState, setBatchState] = useState<BatchState>("idle");
@@ -379,28 +295,6 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
     currentKey: string | null;
     currentWasRendering: boolean;
   } | null>(null);
-
-  // Close export menu when clicking outside (but not during export)
-  useEffect(() => {
-    if (!showExportMenu || isExporting) return;
-    const handleClickOutside = (e: globalThis.MouseEvent) => {
-      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
-        setShowExportMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showExportMenu, isExporting]);
-
-  // Auto-hide dropdown after export completes
-  useEffect(() => {
-    if (exportProgress !== 100) return;
-    const t = setTimeout(() => {
-      setShowExportMenu(false);
-      setExportProgress(null);
-    }, 1500);
-    return () => clearTimeout(t);
-  }, [exportProgress]);
 
   // Advance the batch queue whenever renders state changes
   useEffect(() => {
@@ -465,14 +359,13 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
 
   const handleRenderAll = useCallback(async () => {
     setBatchError(null);
-    setShowExportMenu(false); // close export dropdown if open (native dialog won't fire outside-click)
 
     // Ask the server to validate exported render files — clears any whose
     // .mp4 was deleted while the server was running — and return the fresh map.
     let freshRenders: Record<string, { status: string }> = { ...renders };
     try {
       const syncRes = await fetch(
-        `/api/sessions/${sessionId}/sync-render-states`,
+        `/api/projects/${sessionId}/sync-render-states`,
         { method: "POST" }
       );
       if (syncRes.ok) {
@@ -557,13 +450,6 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
     setShowForm(false);
   }, [onAddClip]);
 
-  const startExport = useCallback(() => {
-    setExportProgress(0);
-    streamExport(sessionId, videoName, includeVideo, setExportProgress)
-      .catch(() => {
-        setExportProgress(null);
-      });
-  }, [sessionId, videoName, includeVideo]);
 
   return (
     <div className="clip-selector">
@@ -611,60 +497,6 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
             {batchError && <p className="render-all-error">{batchError}</p>}
           </div>
         )}
-        <div className="export-wrapper" ref={exportRef}>
-          <button
-            className="secondary export-trigger-btn"
-            onClick={() => setShowExportMenu((v) => !v)}
-          >
-            {/* Package/box icon */}
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-              <line x1="12" y1="22.08" x2="12" y2="12" />
-            </svg>
-            Export
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-          {showExportMenu && (
-            <div className="export-dropdown">
-              {isExporting ? (
-                <>
-                  <div className="export-progress-header">
-                    <span>Exporting...</span>
-                    <span className="export-progress-pct">{exportProgress}%</span>
-                  </div>
-                  <div className="export-progress-track">
-                    <div
-                      className="export-progress-fill"
-                      style={{ width: `${exportProgress}%` }}
-                    />
-                  </div>
-                </>
-              ) : exportProgress === 100 ? (
-                <div className="export-done">Done!</div>
-              ) : (
-                <>
-                  <label className="export-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={includeVideo}
-                      onChange={(e) => setIncludeVideo(e.target.checked)}
-                    />
-                    Include source video
-                  </label>
-                  <button
-                    className="primary export-confirm"
-                    onClick={startExport}
-                  >
-                    Export
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </div>
       </div>
 
       <div className="clip-grid">

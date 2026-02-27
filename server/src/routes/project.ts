@@ -3,11 +3,11 @@ import { orchestrator } from "../services/Orchestrator.js";
 import type { ProjectState, ErrorResponse } from "@lusk/shared";
 
 export async function projectRoute(app: FastifyInstance) {
-  app.get<{ Params: { sessionId: string }; Reply: ProjectState | ErrorResponse }>(
-    "/api/project/:sessionId",
+  app.get<{ Params: { projectId: string }; Reply: ProjectState | ErrorResponse }>(
+    "/api/projects/:projectId",
     async (request, reply) => {
-      const { sessionId } = request.params;
-      const state = orchestrator.toProjectState(sessionId);
+      const { projectId } = request.params;
+      const state = orchestrator.toProjectState(projectId);
 
       if (!state) {
         return reply.status(404).send({ success: false, error: "Session not found" });

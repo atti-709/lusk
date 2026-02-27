@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import fastifyStatic from "@fastify/static";
-import path from "node:path";
 import { tempManager } from "../services/TempManager.js";
+import { getClientPublicDir } from "../config/paths.js";
 
 export async function staticPlugin(app: FastifyInstance) {
   await tempManager.init();
@@ -12,9 +12,7 @@ export async function staticPlugin(app: FastifyInstance) {
   });
 
   // Serve client/public/ so Remotion can fetch assets (e.g. outro.mp4) via HTTP
-  const publicDir =
-    process.env.LUSK_PUBLIC_DIR ??
-    path.resolve(import.meta.dirname, "../../../client/public");
+  const publicDir = getClientPublicDir();
 
   await app.register(fastifyStatic, {
     root: publicDir,
