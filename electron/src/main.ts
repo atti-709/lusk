@@ -46,10 +46,8 @@ async function openLuskFile(filePath: string): Promise<void> {
  */
 function getResourcePath(...segments: string[]): string {
   if (app.isPackaged) {
-    // extraResource copies ./bundle → Contents/Resources/bundle/
     return path.join(process.resourcesPath, "bundle", ...segments);
   }
-  // In dev: electron/dist/main.js → go up to monorepo root
   return path.join(__dirname, "../..", ...segments);
 }
 

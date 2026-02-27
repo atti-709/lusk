@@ -5,6 +5,8 @@ output/
 .env
 *.log
 *.mp4
+# Outro asset must be committed so packaged app includes it
+!client/public/outro.mp4
 .DS_Store
 server/whisper.cpp/
 server/models/
