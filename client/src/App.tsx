@@ -1,11 +1,10 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { Player } from "@remotion/player";
 import type { Caption } from "@remotion/captions";
-import { UploadZone } from "./components/UploadZone";
+import { Dashboard } from "./components/Dashboard";
 import { PipelineStepper, type ReadySubView } from "./components/PipelineStepper";
 import { ClipSelector } from "./components/ClipSelector";
 import { StudioView } from "./components/StudioView";
-import { ResumeDialog } from "./components/ResumeDialog";
 import {
   VideoComposition,
   COMP_WIDTH,
@@ -17,19 +16,15 @@ import { useSSE } from "./hooks/useSSE";
 import type {
   CaptionWord,
   ViralClip,
-  SessionSummary,
   ProjectState,
 } from "@lusk/shared";
 import "./App.css";
 
-type AppView = "loading" | "resume" | "upload" | "session";
+type AppView = "loading" | "dashboard" | "session";
 
 function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("loading");
-  const [existingSessions, setExistingSessions] = useState<SessionSummary[]>(
-    []
-  );
   const { state } = useSSE(sessionId);
   const [captions, setCaptions] = useState<CaptionWord[]>([]);
   const [viralClips, setViralClips] = useState<ViralClip[]>([]);
@@ -40,21 +35,9 @@ function App() {
   const isReady = state && state.state === "READY";
   const isStudio = selectedClip !== null && !!isReady;
 
-  // Check for existing sessions on mount
+  // Show dashboard on mount
   useEffect(() => {
-    fetch("/api/sessions")
-      .then((r) => r.json())
-      .then((sessions: SessionSummary[]) => {
-        if (sessions.length > 0) {
-          setExistingSessions(sessions);
-          setView("resume");
-        } else {
-          setView("upload");
-        }
-      })
-      .catch(() => {
-        setView("upload");
-      });
+    setView("dashboard");
   }, []);
 
   // Handle .lusk files opened from Finder (Electron only)
@@ -79,7 +62,7 @@ function App() {
     const fetchProject = async () => {
       setProjectLoading(true);
       try {
-        const r = await fetch(`/api/project/${sessionId}`);
+        const r = await fetch(`/api/projects/${sessionId}`);
         const data: ProjectState = await r.json();
         if (!isMounted) return;
         if (data.captions) setCaptions(data.captions);
@@ -95,107 +78,115 @@ function App() {
     return () => { isMounted = false; };
   }, [sessionId, isReady]);
 
-  const handleUploadComplete = useCallback((id: string) => {
-    setSessionId(id);
-    setView("session");
-    // Start transcription automatically
-    fetch("/api/transcribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: id }),
-    }).catch(() => {});
-  }, []);
-
-  // Upload video to an existing IDLE session (imported without video)
-  const [idleUploadError, setIdleUploadError] = useState<string | null>(null);
-  const handleIdleVideoSelect = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file || !sessionId) return;
-      setIdleUploadError(null);
-
-      const formData = new FormData();
-      formData.append("file", file);
-
-      try {
-        const response = await fetch(`/api/sessions/${sessionId}/upload-video`, {
-          method: "POST",
-          body: formData,
-        });
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({ error: "Upload failed" }));
-          setIdleUploadError(err.error ?? "Upload failed");
-          return;
-        }
-        // Server verifies duration and transitions straight to READY —
-        // SSE will push the new state automatically, no transcription needed.
-      } catch {
-        setIdleUploadError("Upload failed");
-      }
-    },
-    [sessionId]
-  );
-
-  const handleResume = useCallback((id: string) => {
+  const resetSessionState = useCallback(() => {
     setCaptions([]);
     setViralClips([]);
     setSelectedClip(null);
     setReadySubView("review");
-    setSessionId(id);
-    setView("session");
   }, []);
 
-  const handleDeleteSession = useCallback((id: string) => {
-    fetch(`/api/sessions/${id}`, { method: "DELETE" }).catch(() => {});
-    setExistingSessions((prev) => {
-      const next = prev.filter((s) => s.sessionId !== id);
-      if (next.length === 0) setView("upload");
-      return next;
+  const handleNewProject = useCallback(async () => {
+    const lusk = window.lusk;
+    if (!lusk) return;
+
+    // 1. Pick save location
+    const saveResult = await lusk.showSaveDialog({
+      title: "Save new project as...",
+      filters: [{ name: "Lusk Project", extensions: ["lusk"] }],
     });
-  }, []);
+    if (saveResult.canceled || !saveResult.filePath) return;
 
-  const handleNew = useCallback(() => {
-    setView("upload");
-  }, []);
+    // 2. Pick video file
+    const videoResult = await lusk.showOpenDialog({
+      title: "Select video file",
+      filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "avi", "webm"] }],
+    });
+    if (videoResult.canceled || !videoResult.filePath) return;
 
-  const [importProgress, setImportProgress] = useState<number | null>(null);
+    // 3. Create project via server
+    const res = await fetch("/api/projects/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectPath: saveResult.filePath,
+        videoPath: videoResult.filePath,
+      }),
+    });
 
-  const handleImport = useCallback((file: File) => {
-    setImportProgress(0);
+    if (res.ok) {
+      const data = await res.json();
+      resetSessionState();
+      setSessionId(data.projectId);
+      setView("session");
 
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/import");
+      // Start transcription
+      fetch("/api/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: data.projectId }),
+      }).catch(() => {});
+    }
+  }, [resetSessionState]);
 
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        setImportProgress(Math.round((e.loaded / e.total) * 100));
+  const handleOpenFile = useCallback(async () => {
+    const lusk = window.lusk;
+    if (!lusk) return;
+
+    const result = await lusk.showOpenDialog({
+      title: "Open project",
+      filters: [{ name: "Lusk Project", extensions: ["lusk"] }],
+    });
+    if (result.canceled || !result.filePath) return;
+
+    const res = await fetch("/api/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath: result.filePath }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      resetSessionState();
+      setSessionId(data.projectId);
+      setView("session");
+    }
+  }, [resetSessionState]);
+
+  const handleOpenProject = useCallback(async (projectId: string) => {
+    resetSessionState();
+    setSessionId(projectId);
+    setView("session");
+  }, [resetSessionState]);
+
+  // Upload video to an existing IDLE session (imported without video)
+  const [idleUploadError, setIdleUploadError] = useState<string | null>(null);
+  const handleIdleVideoSelect = useCallback(async () => {
+    if (!sessionId) return;
+    setIdleUploadError(null);
+
+    const lusk = window.lusk;
+    if (!lusk) return;
+
+    const result = await lusk.showOpenDialog({
+      title: "Select video file",
+      filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "avi", "webm"] }],
+    });
+    if (result.canceled || !result.filePath) return;
+
+    try {
+      const response = await fetch(`/api/projects/${sessionId}/select-video`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoPath: result.filePath }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: "Failed to select video" }));
+        setIdleUploadError(err.error ?? "Failed to select video");
       }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        const data = JSON.parse(xhr.responseText);
-        setImportProgress(null);
-        // Reset UI state for the new session
-        setCaptions([]);
-        setViralClips([]);
-        setSelectedClip(null);
-        setReadySubView("review");
-        setSessionId(data.sessionId);
-        setView("session");
-      } else {
-        setImportProgress(null);
-      }
-    };
-
-    xhr.onerror = () => {
-      setImportProgress(null);
-    };
-
-    const formData = new FormData();
-    formData.append("file", file);
-    xhr.send(formData);
-  }, []);
+    } catch {
+      setIdleUploadError("Failed to select video");
+    }
+  }, [sessionId]);
 
   const handleTranscribe = useCallback(async () => {
     if (!sessionId) return;
@@ -218,7 +209,7 @@ function App() {
   const handleAddClip = useCallback(async (clip: ViralClip) => {
     if (!sessionId) return;
     try {
-      const res = await fetch(`/api/project/${sessionId}/clips`, {
+      const res = await fetch(`/api/projects/${sessionId}/clips`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(clip),
@@ -234,7 +225,7 @@ function App() {
 
   const handleBackToAlign = useCallback(async () => {
     if (!sessionId) return;
-    const res = await fetch(`/api/project/${sessionId}/back-to-align`, {
+    const res = await fetch(`/api/projects/${sessionId}/back-to-align`, {
       method: "POST",
     });
     if (res.ok) {
@@ -286,26 +277,8 @@ function App() {
   const showStepper = view === "session" && sessionId && state;
 
   const handleLogoClick = useCallback(() => {
-    // If not in session, do nothing or just stay
-    if (view === "upload" || view === "loading") return;
-
-    // Fetch latest sessions to decide where to go
-    fetch("/api/sessions")
-      .then((r) => r.json())
-      .then((sessions: SessionSummary[]) => {
-        setExistingSessions(sessions);
-        if (sessions.length > 0) {
-          setView("resume");
-        } else {
-          setView("upload");
-        }
-      })
-      .catch(() => {
-        setView("upload");
-      });
-      
-    // Note: We don't clear sessionId here to allow "resuming" the current active session easily 
-    // unless the user picks a different one or deletes it.
+    if (view === "dashboard" || view === "loading") return;
+    setView("dashboard");
   }, [view]);
 
   return (
@@ -325,24 +298,12 @@ function App() {
 
       {view === "loading" && <div className="connecting">Loading</div>}
 
-      {view === "resume" && (
-        <ResumeDialog
-          sessions={existingSessions}
-          onResume={handleResume}
-          onDelete={handleDeleteSession}
-          onNew={handleNew}
-          onImport={handleImport}
-          importProgress={importProgress}
+      {view === "dashboard" && (
+        <Dashboard
+          onOpenProject={handleOpenProject}
+          onNewProject={handleNewProject}
+          onOpenFile={handleOpenFile}
         />
-      )}
-
-      {view === "upload" && (
-        <div className="upload-hero">
-          <p className="tagline">
-            Create viral shorts from Slovak video podcasts
-          </p>
-          <UploadZone onUploadComplete={handleUploadComplete} onImport={handleImport} importProgress={importProgress} />
-        </div>
       )}
 
       {/* Always show stepper when in session (skip IDLE — has no pipeline steps) */}
@@ -378,15 +339,9 @@ function App() {
                 Looking for: <code>{state.videoName}.mp4</code>
               </p>
             )}
-            <label className="primary browse-btn">
+            <button className="primary" onClick={handleIdleVideoSelect}>
               Choose video
-              <input
-                type="file"
-                accept="video/*"
-                onChange={handleIdleVideoSelect}
-                hidden
-              />
-            </label>
+            </button>
             {idleUploadError && (
               <p className="idle-error">{idleUploadError}</p>
             )}
@@ -438,7 +393,7 @@ function App() {
                 <button
                   className="secondary"
                   onClick={async () => {
-                    const url = `/api/project/${sessionId}/captions.srt`;
+                    const url = `/api/projects/${sessionId}/captions.srt`;
                     const filename = `${state.videoName || "project"}_captions.srt`;
 
                     if ("showSaveFilePicker" in window) {
