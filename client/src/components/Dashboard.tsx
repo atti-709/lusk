@@ -25,9 +25,10 @@ interface DashboardProps {
   onOpenProject: (projectId: string, projectPath: string) => void;
   onNewProject: () => void;
   onOpenFile: () => void;
+  whisperxAvailable?: boolean;
 }
 
-export function Dashboard({ onOpenProject, onNewProject, onOpenFile }: DashboardProps) {
+export function Dashboard({ onOpenProject, onNewProject, onOpenFile, whisperxAvailable = true }: DashboardProps) {
   const [projects, setProjects] = useState<RecentProject[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -50,8 +51,13 @@ export function Dashboard({ onOpenProject, onNewProject, onOpenFile }: Dashboard
 
   return (
     <div className="dashboard">
+      {!whisperxAvailable && (
+        <div className="dashboard-warning">
+          <strong>WhisperX not available</strong> — transcription is disabled. Install it with <code>pip3 install whisperx</code> and restart the app. You can still open existing projects.
+        </div>
+      )}
       <div className="dashboard-actions">
-        <button className="primary" onClick={onNewProject}>
+        <button className="primary" onClick={onNewProject} disabled={!whisperxAvailable} title={!whisperxAvailable ? "WhisperX is required to create new projects" : undefined}>
           + New Project
         </button>
         <button className="secondary" onClick={onOpenFile}>

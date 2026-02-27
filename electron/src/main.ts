@@ -73,25 +73,6 @@ function getLoginShellPath(): string {
 
 const LOGIN_PATH = getLoginShellPath();
 
-function checkDependencies(): string[] {
-  const missing: string[] = [];
-  const shell = process.env.SHELL ?? "/bin/zsh";
-
-  try {
-    execSync(`${shell} -lc "python3 --version"`, { stdio: "pipe" });
-  } catch {
-    missing.push("Python 3 (brew install python@3.11)");
-  }
-
-  try {
-    execSync(`${shell} -lc "python3 -m pip show whisperx"`, { stdio: "pipe" });
-  } catch {
-    missing.push("WhisperX (pip3 install whisperx)");
-  }
-
-  return missing;
-}
-
 async function waitForServer(retries = 30, delayMs = 500): Promise<void> {
   for (let i = 0; i < retries; i++) {
     try {
@@ -237,20 +218,6 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
-  // Check for Python/WhisperX
-  const missing = checkDependencies();
-  if (missing.length > 0) {
-    dialog.showMessageBoxSync({
-      type: "warning",
-      title: "Missing Dependencies",
-      message: "Some dependencies are required for transcription:",
-      detail: missing.join("\n") +
-        "\n\nYou can still use Lusk, but transcription will not work until these are installed.",
-      buttons: ["Continue Anyway", "Quit"],
-      defaultId: 0,
-    }) === 1 && app.quit();
-  }
-
   try {
     await startServer();
   } catch (err) {

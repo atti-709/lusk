@@ -31,13 +31,22 @@ function App() {
   const [selectedClip, setSelectedClip] = useState<ViralClip | null>(null);
   const [projectLoading, setProjectLoading] = useState(false);
   const [readySubView, setReadySubView] = useState<ReadySubView>("review");
+  const [whisperxAvailable, setWhisperxAvailable] = useState<boolean>(true);
 
   const isReady = state && state.state === "READY";
   const isStudio = selectedClip !== null && !!isReady;
 
-  // Show dashboard on mount
+  // Show dashboard on mount and check whisperx availability
   useEffect(() => {
     setView("dashboard");
+    fetch("/api/health")
+      .then((r) => r.json())
+      .then((data) => {
+        if (typeof data.whisperxAvailable === "boolean") {
+          setWhisperxAvailable(data.whisperxAvailable);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Handle .lusk files opened from Finder (Electron only)
@@ -143,13 +152,15 @@ function App() {
   }, [resetSessionState]);
 
   const handleOpenProject = useCallback(async (projectId: string, projectPath: string) => {
-    // Cancel any in-progress transcription for the current session
+    // Confirm before aborting any in-progress transcription
     if (sessionId && state?.state === "TRANSCRIBING") {
+      if (!window.confirm("Transcription is in progress. Navigate away and stop it?")) return;
       cancelTranscription(sessionId);
     }
     resetSessionState();
 
     // Ensure the server has the session loaded (it may have restarted)
+    let projectState: string | null = null;
     try {
       const res = await fetch("/api/projects/open", {
         method: "POST",
@@ -160,6 +171,8 @@ function App() {
         console.error("Failed to open project on server");
         return;
       }
+      const data = await res.json();
+      projectState = data.state ?? null;
     } catch {
       console.error("Failed to reach server");
       return;
@@ -167,7 +180,16 @@ function App() {
 
     setSessionId(projectId);
     setView("session");
-  }, [resetSessionState]);
+
+    // Auto-restart transcription if the project has a video but hasn't been transcribed yet
+    if (projectState === "UPLOADING" && whisperxAvailable) {
+      fetch("/api/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: projectId }),
+      }).catch(() => {});
+    }
+  }, [sessionId, state?.state, cancelTranscription, resetSessionState]);
 
   // Upload video to an existing IDLE session
   const [idleUploadError, setIdleUploadError] = useState<string | null>(null);
@@ -313,10 +335,13 @@ function App() {
   const handleLogoClick = useCallback(() => {
     if (view === "dashboard" || view === "loading") return;
     if (sessionId && state?.state === "TRANSCRIBING") {
+      if (!window.confirm("Transcription is in progress. Navigate away and stop it?")) return;
       cancelTranscription(sessionId);
     }
+    setSessionId(null);
+    resetSessionState();
     setView("dashboard");
-  }, [view, sessionId, state?.state, cancelTranscription]);
+  }, [view, sessionId, state?.state, cancelTranscription, resetSessionState]);
 
   return (
     <div className="app">
@@ -340,6 +365,7 @@ function App() {
           onOpenProject={handleOpenProject}
           onNewProject={handleNewProject}
           onOpenFile={handleOpenFile}
+          whisperxAvailable={whisperxAvailable}
         />
       )}
 
@@ -354,6 +380,7 @@ function App() {
             sessionId={sessionId}
             readySubView={readySubView}
             onTranscribe={handleTranscribe}
+            whisperxAvailable={whisperxAvailable}
           />
         </div>
       )}

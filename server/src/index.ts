@@ -9,6 +9,7 @@ import { renderRoute } from "./routes/render.js";
 import { alignRoute } from "./routes/align.js";
 import { exportImportRoute } from "./routes/exportImport.js";
 import { projectsRoute } from "./routes/projects.js";
+import { whisperService } from "./services/WhisperService.js";
 
 const server = Fastify({
   logger:
@@ -38,7 +39,8 @@ await server.register(exportImportRoute);
 await server.register(projectsRoute);
 
 server.get("/api/health", async () => {
-  return { status: "ok" as const, uptime: process.uptime() };
+  const whisperxAvailable = await whisperService.isAvailable();
+  return { status: "ok" as const, uptime: process.uptime(), whisperxAvailable };
 });
 
 const PORT = parseInt(process.env.LUSK_PORT ?? "3000", 10);

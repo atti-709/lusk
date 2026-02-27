@@ -85,6 +85,7 @@ export const projectsRoute: FastifyPluginAsync = async (server) => {
         success: true,
         projectId: state.projectId,
         videoName: state.videoName || null,
+        state: state.state,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

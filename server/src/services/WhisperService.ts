@@ -70,6 +70,20 @@ interface WhisperXOutput {
 }
 
 class WhisperService {
+  private _availableCache: boolean | null = null;
+
+  async isAvailable(): Promise<boolean> {
+    if (this._availableCache !== null) return this._availableCache;
+    const python3 = this.resolvePython3();
+    try {
+      execFileSync(python3, ["-m", "whisperx", "--version"], { stdio: "pipe" });
+      this._availableCache = true;
+    } catch {
+      this._availableCache = false;
+    }
+    return this._availableCache;
+  }
+
   /**
    * Resolve the correct python3 binary using the login shell.
    * In packaged macOS apps, the raw PATH may point to the system Python

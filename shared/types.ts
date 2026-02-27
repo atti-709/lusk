@@ -138,6 +138,7 @@ export interface OpenProjectResponse {
   success: boolean;
   projectId: string;
   videoName: string | null;
+  state: PipelineState;
 }
 
 export interface CreateProjectResponse {

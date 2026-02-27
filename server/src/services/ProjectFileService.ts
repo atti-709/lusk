@@ -289,6 +289,8 @@ class ProjectFileService {
     if (videoExists) {
       await setupCache(data.projectId, data.videoPath);
       videoUrl = `/static/${data.projectId}/input.mp4`;
+      // TRANSCRIBING can't survive a server restart — reset so it can be retried
+      if (data.state === "TRANSCRIBING") stateOverride = "UPLOADING";
     } else {
       // Video is missing – fall back to IDLE so the UI can prompt re-link
       stateOverride = "IDLE";

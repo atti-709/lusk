@@ -21,6 +21,7 @@ interface PipelineStepperProps {
   sessionId: string;
   readySubView?: ReadySubView;
   onTranscribe: () => void;
+  whisperxAvailable?: boolean;
 }
 
 function getActiveStepId(
@@ -52,6 +53,7 @@ export function PipelineStepper({
   sessionId,
   readySubView,
   onTranscribe,
+  whisperxAvailable = true,
 }: PipelineStepperProps) {
   const isProcessing =
     (currentState === "TRANSCRIBING") ||
@@ -119,9 +121,19 @@ export function PipelineStepper({
       {/* Action area */}
       <div className="actions">
         {currentState === "UPLOADING" && (
-          <button className="primary" onClick={() => onTranscribe()}>
-            Start Transcription
-          </button>
+          <>
+            <button
+              className="primary"
+              onClick={() => onTranscribe()}
+              disabled={!whisperxAvailable}
+              title={!whisperxAvailable ? "WhisperX is required for transcription — install it with: pip3 install whisperx" : undefined}
+            >
+              Start Transcription
+            </button>
+            {!whisperxAvailable && (
+              <p className="status-message">WhisperX is not installed. Run <code>pip3 install whisperx</code> and restart the app.</p>
+            )}
+          </>
         )}
       </div>
     </div>
