@@ -3,46 +3,9 @@ import fs from "node:fs";
 import { execSync, execFileSync, spawn } from "node:child_process";
 import { access, readFile, unlink } from "node:fs/promises";
 import type { TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
+import { getFFmpegPath } from "../config/ffmpeg.js";
 
 const WHISPERX_MODEL = "large-v3-turbo";
-
-/**
- * Resolve the absolute path to the ffmpeg binary bundled by ffmpeg-static.
- * Tries multiple strategies because under ELECTRON_RUN_AS_NODE, standard
- * module resolution may not traverse to the monorepo root.
- */
-function resolveFFmpegStatic(): string | null {
-  const BIN = path.join("node_modules", "ffmpeg-static", "ffmpeg");
-
-  // Strategy 1: from current working directory (usually monorepo root)
-  const fromCwd = path.join(process.cwd(), BIN);
-  if (fs.existsSync(fromCwd)) return fromCwd;
-
-  // Strategy 2: walk up from the script being run (process.argv[1])
-  if (process.argv[1]) {
-    let dir = path.dirname(path.resolve(process.argv[1]));
-    const root = path.parse(dir).root;
-    while (dir !== root) {
-      const candidate = path.join(dir, BIN);
-      if (fs.existsSync(candidate)) return candidate;
-      dir = path.dirname(dir);
-    }
-  }
-
-  // Strategy 3: walk up from this module's location
-  try {
-    let dir = path.dirname(new URL(import.meta.url).pathname);
-    const root = path.parse(dir).root;
-    while (dir !== root) {
-      const candidate = path.join(dir, BIN);
-      if (fs.existsSync(candidate)) return candidate;
-      dir = path.dirname(dir);
-    }
-  } catch { /* ignore */ }
-
-  console.error("[lusk] Could not resolve ffmpeg-static binary. cwd:", process.cwd(), "argv[1]:", process.argv[1]);
-  return null;
-}
 
 export interface TranscriptionResult {
   transcript: TranscriptData;
@@ -125,7 +88,7 @@ class WhisperService {
     onProgress?.(1, "Extracting audio...");
     await access(inputPath);
 
-    const ffmpeg = process.env.FFMPEG_PATH || resolveFFmpegStatic() || "ffmpeg";
+    const ffmpeg = getFFmpegPath();
 
     // Pre-flight: verify the ffmpeg binary exists when an absolute path is given
     if (path.isAbsolute(ffmpeg) && !fs.existsSync(ffmpeg)) {
@@ -272,7 +235,7 @@ class WhisperService {
     if (signal?.aborted) throw new Error("Transcription cancelled");
 
     // Resolve the ffmpeg binary path so WhisperX can find it
-    const ffmpegPath = process.env.FFMPEG_PATH || resolveFFmpegStatic() || "ffmpeg";
+    const ffmpegPath = getFFmpegPath();
 
     // Step 2: Ensure WhisperX is available
     const python3 = await this.ensureInstalled(onProgress);

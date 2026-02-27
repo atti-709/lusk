@@ -50,7 +50,6 @@ const config: ForgeConfig = {
         },
       ],
     },
-    // Single extraResource so basenames never conflict
     extraResource: ["./bundle"],
   },
   hooks: {

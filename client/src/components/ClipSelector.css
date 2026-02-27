@@ -318,7 +318,7 @@
 
 .render-all-wrapper {
   position: absolute;
-  right: 148px; /* Offset left of the export button */
+  right: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-end;

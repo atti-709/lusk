@@ -1,8 +1,9 @@
 import path from "node:path";
 import fs from "node:fs";
 import { execFile } from "node:child_process";
-import { getClientPublicDir } from "../config/paths.js";
 import { promisify } from "node:util";
+import { getClientPublicDir } from "../config/paths.js";
+import { getFFmpegPath } from "../config/ffmpeg.js";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import type { CaptionWord } from "@lusk/shared";
@@ -39,10 +40,11 @@ class RenderService {
   }
 
   /**
-   * Probe a video/audio file's duration in seconds using ffprobe.
-   * Returns 0 if ffprobe fails or the file doesn't exist.
+   * Probe a video/audio file's duration in seconds.
+   * Tries ffprobe first, falls back to parsing ffmpeg stderr output.
    */
   async probeDuration(filePath: string): Promise<number> {
+    // Try ffprobe
     try {
       const ffprobe = process.env.FFPROBE_PATH ?? "ffprobe";
       const { stdout } = await execFileAsync(ffprobe, [
@@ -51,11 +53,23 @@ class RenderService {
         "-show_format",
         filePath,
       ]);
-      const info = JSON.parse(stdout);
-      return parseFloat(info.format?.duration ?? "0");
-    } catch {
-      return 0;
-    }
+      const dur = parseFloat(JSON.parse(stdout).format?.duration ?? "0");
+      if (dur > 0) return dur;
+    } catch { /* ffprobe not available */ }
+
+    // Fallback: use ffmpeg -i (resolves bundled ffmpeg-static binary)
+    try {
+      const ffmpeg = getFFmpegPath();
+      const result = await execFileAsync(ffmpeg, ["-i", filePath])
+        .catch((e: { stderr?: string }) => e);
+      const text = (result as { stderr?: string }).stderr ?? "";
+      const m = text.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);
+      if (m) {
+        return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]);
+      }
+    } catch { /* ignore */ }
+
+    return 0;
   }
 
   /**
