@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { execFile } from "node:child_process";
+import { getClientPublicDir } from "../config/paths.js";
 import { promisify } from "node:util";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
@@ -34,10 +35,7 @@ class RenderService {
   }
 
   private get publicDir(): string {
-    return (
-      process.env.LUSK_PUBLIC_DIR ??
-      path.resolve(import.meta.dirname, "../../../client/public")
-    );
+    return getClientPublicDir();
   }
 
   /**
