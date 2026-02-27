@@ -198,13 +198,20 @@ function buildProjectState(
     stateOverride?: PipelineState;
   },
 ): ProjectState {
+  const resolvedState = opts.stateOverride ?? data.state;
+  // ALIGNING is a manual step — restore at 100% so the AlignStep UI is shown
+  const progress = resolvedState === "ALIGNING" ? 100 : 0;
+  const message = resolvedState === "ALIGNING"
+    ? "Transcript ready — download and correct with Gemini"
+    : "";
+
   return {
     ...data,
-    state: opts.stateOverride ?? data.state,
+    state: resolvedState,
     sessionId: data.projectId,
     videoUrl: opts.videoUrl,
-    progress: 0,
-    message: "",
+    progress,
+    message,
     renders: {},
     outputUrl: null,
     projectFilePath: opts.projectFilePath,
