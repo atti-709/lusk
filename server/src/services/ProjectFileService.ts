@@ -366,6 +366,11 @@ class ProjectFileService {
     return validated;
   }
 
+  /** Set up the cache directory with a symlink to the source video. */
+  async setupCache(projectId: string, videoPath: string): Promise<void> {
+    await setupCache(projectId, videoPath);
+  }
+
   /** Remove a single entry from the recent projects registry by project ID. */
   async removeFromRegistry(projectId: string): Promise<void> {
     let entries = await readRegistry();

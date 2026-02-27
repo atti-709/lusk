@@ -10,6 +10,7 @@ import { renderRoute } from "./routes/render.js";
 import { alignRoute } from "./routes/align.js";
 import { sessionsRoute } from "./routes/sessions.js";
 import { exportImportRoute } from "./routes/exportImport.js";
+import { projectsRoute } from "./routes/projects.js";
 import { tempManager } from "./services/TempManager.js";
 import { orchestrator } from "./services/Orchestrator.js";
 
@@ -39,6 +40,7 @@ await server.register(renderRoute);
 await server.register(alignRoute);
 await server.register(sessionsRoute);
 await server.register(exportImportRoute);
+await server.register(projectsRoute);
 
 server.get("/api/health", async () => {
   return { status: "ok" as const, uptime: process.uptime() };
