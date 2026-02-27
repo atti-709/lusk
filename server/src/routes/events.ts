@@ -3,12 +3,12 @@ import { orchestrator } from "../services/Orchestrator.js";
 import type { ProgressEvent } from "@lusk/shared";
 
 export async function eventsRoute(app: FastifyInstance) {
-  app.get<{ Params: { sessionId: string } }>(
-    "/api/events/:sessionId",
+  app.get<{ Params: { projectId: string } }>(
+    "/api/events/:projectId",
     async (request, reply) => {
-      const { sessionId } = request.params;
+      const { projectId } = request.params;
 
-      const session = orchestrator.toProjectState(sessionId);
+      const session = orchestrator.toProjectState(projectId);
       if (!session) {
         return reply.status(404).send({ success: false, error: "Session not found" });
       }
@@ -24,8 +24,8 @@ export async function eventsRoute(app: FastifyInstance) {
       raw.write(`data: ${JSON.stringify(session)}\n\n`);
 
       const onProgress = (event: ProgressEvent) => {
-        if (event.sessionId === sessionId) {
-          const state = orchestrator.toProjectState(sessionId);
+        if (event.sessionId === projectId) {
+          const state = orchestrator.toProjectState(projectId);
           if (state) {
             raw.write(`data: ${JSON.stringify(state)}\n\n`);
           }

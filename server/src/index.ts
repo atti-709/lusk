@@ -7,7 +7,6 @@ import { projectRoute } from "./routes/project.js";
 import { transcribeRoute } from "./routes/transcribe.js";
 import { renderRoute } from "./routes/render.js";
 import { alignRoute } from "./routes/align.js";
-import { sessionsRoute } from "./routes/sessions.js";
 import { exportImportRoute } from "./routes/exportImport.js";
 import { projectsRoute } from "./routes/projects.js";
 
@@ -35,7 +34,6 @@ await server.register(projectRoute);
 await server.register(transcribeRoute);
 await server.register(renderRoute);
 await server.register(alignRoute);
-await server.register(sessionsRoute);
 await server.register(exportImportRoute);
 await server.register(projectsRoute);
 
