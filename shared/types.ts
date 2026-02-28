@@ -84,6 +84,7 @@ export interface ProjectData {
   state: PipelineState;
   transcript: TranscriptData | null;
   correctedTranscriptRaw?: string | null;
+  scriptText?: string | null;
   captions: CaptionWord[] | null;
   viralClips: ViralClip[] | null;
 }
