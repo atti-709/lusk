@@ -14,6 +14,7 @@ interface LuskBridge {
   }) => Promise<{ canceled: boolean; filePath: string | null }>;
   getFilePath: (file: File) => string;
   readFile: (filePath: string) => Promise<string>;
+  writeFile: (filePath: string, base64Data: string) => Promise<void>;
 }
 
 declare global {

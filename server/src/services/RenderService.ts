@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { getClientPublicDir } from "../config/paths.js";
 import { getFFmpegPath } from "../config/ffmpeg.js";
 import { bundle } from "@remotion/bundler";
+import type { CancelSignal } from "@remotion/renderer";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import type { CaptionWord } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
@@ -139,7 +140,9 @@ class RenderService {
     onProgress?: ProgressCallback,
     outputFileName: string = "output.mp4",
     preProcessedCaptions?: Caption[],
-    outroConfig?: OutroConfig | null
+    outroConfig?: OutroConfig | null,
+    sourceAspectRatio?: number | null,
+    cancelSignal?: CancelSignal
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress, outroConfig != null);
     const videoUrl = `${LUSK_SERVER_ORIGIN}/static/${sessionId}/input.mp4`;
@@ -178,6 +181,7 @@ class RenderService {
       startFrom: startFrame,
       outroSrc: hasOutro ? outroConfig.outroSrc : "",
       outroDurationInFrames,
+      sourceAspectRatio: sourceAspectRatio ?? null,
     };
 
     const totalDurationInFrames =
@@ -195,19 +199,24 @@ class RenderService {
 
     onProgress?.(25, "Rendering video...");
 
-    await renderMedia({
+    const renderOptions = {
       composition,
       serveUrl,
-      codec: "h264",
+      codec: "h264" as const,
       videoBitrate: "6000k",
-      hardwareAcceleration: "if-possible",
+      hardwareAcceleration: "if-possible" as const,
       outputLocation: outputPath,
       inputProps,
-      onProgress: ({ progress }) => {
+      onProgress: ({ progress }: { progress: number }) => {
         const pct = 25 + Math.round(progress * 70);
         onProgress?.(pct, "Rendering video...");
       },
-    });
+    };
+    await renderMedia(
+      cancelSignal
+        ? { ...renderOptions, cancelSignal }
+        : renderOptions
+    );
 
     onProgress?.(95, "Render complete");
     return outputPath;

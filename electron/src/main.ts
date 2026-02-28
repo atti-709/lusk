@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut } from "electron";
 import { spawn, execSync, ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const PORT = 3000;
@@ -301,6 +301,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("read-file", async (_event, filePath: string) => {
     return readFile(filePath, "utf-8");
+  });
+
+  ipcMain.handle("write-file", async (_event, filePath: string, base64Data: string) => {
+    await writeFile(filePath, Buffer.from(base64Data, "base64"));
   });
 
   app.on("activate", () => {

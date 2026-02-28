@@ -26,4 +26,7 @@ contextBridge.exposeInMainWorld("lusk", {
   getFilePath: (file: File) => webUtils.getPathForFile(file),
 
   readFile: (filePath: string) => ipcRenderer.invoke("read-file", filePath),
+
+  writeFile: (filePath: string, base64Data: string) =>
+    ipcRenderer.invoke("write-file", filePath, base64Data),
 });

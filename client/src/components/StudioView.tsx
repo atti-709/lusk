@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
 import type { Caption } from "@remotion/captions";
 import type { CaptionWord, ViralClip, ClipRenderState } from "@lusk/shared";
@@ -59,7 +59,7 @@ export function StudioView({
   videoUrl,
   captions,
   clip,
-  videoName,
+  videoName: _videoName,
   onRender,
   onBack,
   renders,
@@ -103,20 +103,18 @@ export function StudioView({
   const renderProgress = renderState?.progress ?? 0;
   const renderMessage = renderState?.message ?? "";
 
-  // Auto-download when render completes
-  const prevStatusRef = useRef<string | null>(null);
+  const suggestedFilename = `${trimmedClip.title.replace(/[^a-z0-9]/gi, "_")}.mp4`;
+
+  // Pending save destination chosen when user clicked Render (before render started)
+  const [pendingSaveDestination, setPendingSaveDestination] = useState<SaveDestination | null>(null);
+
+  // When render completes, save to the destination chosen at the start
   useEffect(() => {
-    const status = renderState?.status;
-    const prev = prevStatusRef.current;
-    
-    if (prev === "rendering" && status === "exported" && outputUrl) {
-      const filename = `${videoName || "project"}_clip-${trimmedClip.title.replace(/[^a-z0-9]/gi, "_")}.mp4`;
-      // Fire and forget
-      triggerDownload(outputUrl, filename).catch(() => {});
-    }
-    
-    prevStatusRef.current = status ?? null;
-  }, [renderState?.status, outputUrl, trimmedClip.title, videoName]);
+    if (renderState?.status !== "exported" || !outputUrl || !pendingSaveDestination) return;
+    saveToDestination(outputUrl, pendingSaveDestination, suggestedFilename)
+      .catch(console.error)
+      .finally(() => setPendingSaveDestination(null));
+  }, [renderState?.status, outputUrl, pendingSaveDestination, suggestedFilename]);
 
   const startFrame = Math.round((effectiveStartMs / 1000) * COMP_FPS);
   const actualStartMs = (startFrame / COMP_FPS) * 1000;
@@ -266,15 +264,22 @@ export function StudioView({
   const clipDurationSec = ((effectiveEndMs - effectiveStartMs) / 1000).toFixed(1);
   const totalDurationSec = (durationInFrames / COMP_FPS).toFixed(1);
 
-  const handleRender = useCallback(() => {
+  const handleRender = useCallback(async () => {
+    const destination = await promptForSaveDestination(suggestedFilename);
+    if (!destination) return; // User canceled
+    setPendingSaveDestination(destination);
     playerRef.current?.pause();
     onRender(trimmedClip, offsetX, remotionCaptions);
-  }, [onRender, trimmedClip, offsetX, remotionCaptions]);
+  }, [onRender, trimmedClip, offsetX, remotionCaptions, suggestedFilename]);
 
   return (
     <div className="studio">
       <div className="studio-header">
-        <button className="secondary studio-back" onClick={onBack}>
+        <button
+          className="secondary studio-back"
+          onClick={onBack}
+          title="Back to clips"
+        >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="15 18 9 12 15 6" />
           </svg>
@@ -446,41 +451,76 @@ export function StudioView({
   );
 }
 
-// Helper to trigger download
-async function triggerDownload(url: string, filename: string) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("Failed to fetch render");
+type SaveDestination = { type: "lusk"; path: string } | { type: "fileHandle"; handle: FileSystemFileHandle } | { type: "fallback" };
 
-    if ("showSaveFilePicker" in window) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fileHandle = await (window as any).showSaveFilePicker({
+/** Show save dialog at start; returns destination or null if canceled. */
+async function promptForSaveDestination(filename: string): Promise<SaveDestination | null> {
+  const lusk = (window as Window & { lusk?: { showSaveDialog: (opts?: object) => Promise<{ canceled: boolean; filePath: string | null }> } }).lusk;
+  if (lusk?.showSaveDialog) {
+    const { canceled, filePath } = await lusk.showSaveDialog({
+      title: "Save video",
+      defaultPath: filename,
+      filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
+    });
+    if (canceled || !filePath) return null;
+    return { type: "lusk", path: filePath };
+  }
+  if ("showSaveFilePicker" in window) {
+    try {
+      const fileHandle = await (window as Window & { showSaveFilePicker: (opts: object) => Promise<FileSystemFileHandle> }).showSaveFilePicker({
         suggestedName: filename,
         types: [{ description: "MP4 Video", accept: { "video/mp4": [".mp4"] } }],
       });
-      const writable = await fileHandle.createWritable();
-      const reader = res.body!.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        await writable.write(value);
-      }
-      await writable.close();
-      return;
+      return { type: "fileHandle", handle: fileHandle };
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return null;
+      throw err;
     }
-    
-    // Fallback if no picker available
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
-  } catch (err: any) {
-    if (err.name === "AbortError") return; // User cancelled
-    console.error("Download failed", err);
   }
+  return { type: "fallback" };
+}
+
+/** Save fetched video to the chosen destination. */
+async function saveToDestination(
+  url: string,
+  destination: SaveDestination,
+  filename: string
+): Promise<void> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch render");
+  const blob = await res.blob();
+
+  const lusk = (window as Window & { lusk?: { writeFile: (path: string, base64: string) => Promise<void> } }).lusk;
+  if (destination.type === "lusk" && lusk?.writeFile) {
+    const base64 = await blobToBase64(blob);
+    await lusk.writeFile(destination.path, base64);
+    return;
+  }
+  if (destination.type === "fileHandle") {
+    const writable = await destination.handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return;
+  }
+  // Fallback: browser download
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(blobUrl);
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1] ?? "");
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }

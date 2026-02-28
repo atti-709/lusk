@@ -37,6 +37,7 @@ function App() {
   const [geminiAvailable, setGeminiAvailable] = useState<boolean>(false);
   const [scriptFileName, setScriptFileName] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [logoPopupOpen, setLogoPopupOpen] = useState(false);
   const [pendingVideoPath, setPendingVideoPath] = useState<string | null>(null);
 
   const VIDEO_EXTENSIONS = useMemo(() => ["mp4", "mov", "mkv", "avi", "webm"], []);
@@ -374,11 +375,20 @@ function App() {
 
   const handleSelectClip = useCallback((clip: ViralClip) => {
     setSelectedClip(clip);
-  }, []);
+    // Sync render states to clear any stuck "rendering" entries from cancelled renders
+    if (sessionId) {
+      fetch(`/api/projects/${sessionId}/sync-render-states`, { method: "POST" }).catch(() => {});
+    }
+  }, [sessionId]);
 
   const handleBackToClips = useCallback(() => {
+    const hasRendering = state?.renders && Object.values(state.renders).some((r) => r.status === "rendering");
+    if (hasRendering && !window.confirm("A video is rendering. Go back and cancel it?")) return;
+    if (sessionId && hasRendering) {
+      fetch(`/api/projects/${sessionId}/cancel-render`, { method: "POST" }).catch(() => {});
+    }
     setSelectedClip(null);
-  }, []);
+  }, [sessionId, state?.renders]);
 
   const handleAddClip = useCallback(async (clip: ViralClip) => {
     if (!sessionId) return;
@@ -452,14 +462,25 @@ function App() {
 
   const handleLogoClick = useCallback(() => {
     if (view === "dashboard" || view === "loading") return;
-    if (sessionId && isWorking) {
-      if (!window.confirm("A process is running. Navigate away and stop it?")) return;
-      cancelProject(sessionId);
+    setLogoPopupOpen(true);
+  }, [view]);
+
+  const handleLogoPopupConfirm = useCallback(() => {
+    setLogoPopupOpen(false);
+    if (sessionId) {
+      if (isWorking) cancelProject(sessionId);
+      if (state?.renders && Object.values(state.renders).some((r) => r.status === "rendering")) {
+        fetch(`/api/projects/${sessionId}/cancel-render`, { method: "POST" }).catch(() => {});
+      }
     }
     setSessionId(null);
     resetSessionState();
     setView("dashboard");
-  }, [view, sessionId, isWorking, cancelProject, resetSessionState]);
+  }, [sessionId, isWorking, state?.renders, cancelProject, resetSessionState]);
+
+  const handleLogoPopupDismiss = useCallback(() => {
+    setLogoPopupOpen(false);
+  }, []);
 
   // Intercept Cmd+R to show the same guard as the logo click instead of reloading
   useEffect(() => {
@@ -522,6 +543,34 @@ function App() {
       </header>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onKeySet={setGeminiAvailable} />
+
+      {logoPopupOpen && (
+        <div
+          className="cancel-prompt-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="logo-popup-title"
+        >
+          <div className="cancel-prompt">
+            <h3 id="logo-popup-title">
+              {isWorking ? "A process is running" : "Go to Dashboard?"}
+            </h3>
+            <p className="cancel-prompt-desc">
+              {isWorking
+                ? "Navigate away and stop the current operation?"
+                : "Leave this project and return to the dashboard?"}
+            </p>
+            <div className="cancel-prompt-actions">
+              <button className="secondary" onClick={handleLogoPopupDismiss}>
+                Stay
+              </button>
+              <button className="primary" onClick={handleLogoPopupConfirm}>
+                Go to Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {view === "loading" && <div className="connecting">Loading</div>}
 
