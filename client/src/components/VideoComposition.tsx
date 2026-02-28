@@ -21,11 +21,13 @@ function ClipVideo({
   startFrom,
   offsetX,
   clipDurationInFrames,
+  sourceAspectRatio,
 }: {
   src: string;
   startFrom: number;
   offsetX: number;
   clipDurationInFrames: number;
+  sourceAspectRatio?: number | null;
 }) {
   const frame = useCurrentFrame();
   const fadeStartFrame = clipDurationInFrames - Math.round(COMP_FPS);
@@ -36,19 +38,34 @@ function ClipVideo({
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
 
+  // Portrait source (aspect ratio < 1, e.g. 9:16): already fills the vertical frame.
+  // Landscape source (aspect ratio >= 1 or unknown): scale to 177.78% width to fill frame.
+  const isPortrait = sourceAspectRatio != null && sourceAspectRatio < 1;
+
+  const videoStyle = isPortrait
+    ? {
+        width: "100%",
+        height: "100%",
+        objectFit: "cover" as const,
+        position: "absolute" as const,
+        left: 0,
+        top: 0,
+      }
+    : {
+        width: "177.78%",
+        height: "100%",
+        objectFit: "cover" as const,
+        position: "absolute" as const,
+        left: "50%",
+        transform: `translateX(calc(-50% + ${offsetX}px))`,
+      };
+
   return (
     <Sequence from={-startFrom}>
       <OffthreadVideo
         src={src}
         volume={volume}
-        style={{
-          width: "177.78%",
-          height: "100%",
-          objectFit: "cover",
-          position: "absolute",
-          left: "50%",
-          transform: `translateX(calc(-50% + ${offsetX}px))`,
-        }}
+        style={videoStyle}
       />
     </Sequence>
   );
@@ -72,6 +89,7 @@ export type VideoCompositionProps = {
   startFrom?: number;
   outroSrc?: string;
   outroDurationInFrames?: number;
+  sourceAspectRatio?: number | null;  // videoWidth / videoHeight; null → assume landscape
 };
 
 export function VideoComposition({
@@ -81,6 +99,7 @@ export function VideoComposition({
   startFrom = 0,
   outroSrc,
   outroDurationInFrames = 0,
+  sourceAspectRatio,
 }: VideoCompositionProps) {
   const { durationInFrames } = useVideoConfig();
 
@@ -106,6 +125,7 @@ export function VideoComposition({
               startFrom={startFrom}
               offsetX={offsetX}
               clipDurationInFrames={clipDurationInFrames}
+              sourceAspectRatio={sourceAspectRatio}
             />
           )}
         </AbsoluteFill>

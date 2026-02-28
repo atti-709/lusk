@@ -81,9 +81,13 @@ export interface ProjectData {
   videoPath: string;
   videoName: string;
   videoDurationMs: number | null;
+  videoWidth: number | null;   // source pixel width
+  videoHeight: number | null;  // source pixel height
   state: PipelineState;
   transcript: TranscriptData | null;
+  originalTranscript?: TranscriptData | null;
   correctedTranscriptRaw?: string | null;
+  scriptText?: string | null;
   captions: CaptionWord[] | null;
   viralClips: ViralClip[] | null;
 }

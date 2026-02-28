@@ -1,10 +1,30 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut } from "electron";
 import { spawn, execSync, ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const PORT = 3000;
 let serverProcess: ChildProcess | null = null;
+
+// ── Terminal color helpers ──────────────────────────────────────────────────
+const C = {
+  reset: "\x1b[0m",
+  dim:   "\x1b[2m",
+  cyan:  "\x1b[36m",
+  yellow:"\x1b[33m",
+  red:   "\x1b[31m",
+};
+
+function prefixLines(prefix: string, data: Buffer): string {
+  return data
+    .toString()
+    .trimEnd()
+    .split("\n")
+    .map((line) => `${prefix} ${line}`)
+    .join("\n");
+}
+
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
 let pendingFilePath: string | null = null;
@@ -124,13 +144,14 @@ async function startServer(): Promise<void> {
     }
   }
 
-  console.log(`[lusk] ffmpeg: ${ffmpegPath ?? "(server will resolve)"}`);
-  console.log(`[lusk] ffprobe: ${ffprobePath ?? "(server will resolve)"}`);
+  const lusk = `${C.yellow}[lusk]${C.reset}`;
+  console.log(`${lusk} ffmpeg:  ${ffmpegPath ?? `${C.dim}(server will resolve)${C.reset}`}`);
+  console.log(`${lusk} ffprobe: ${ffprobePath ?? `${C.dim}(server will resolve)${C.reset}`}`);
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: LOGIN_PATH, // ensure server can find python3, ffmpeg, etc.
-    NODE_ENV: "production",
+    NODE_ENV: app.isPackaged ? "production" : "development",
     LUSK_PORT: String(PORT),
     LUSK_TEMP_DIR: tempDir,
     LUSK_REGISTRY_DIR: path.join(app.getPath("userData")),
@@ -150,19 +171,21 @@ async function startServer(): Promise<void> {
   });
 
   let serverStderr = "";
+  const serverOut = `${C.cyan}[server]${C.reset}`;
+  const serverErr = `${C.red}[server]${C.reset}`;
 
   serverProcess.stdout?.on("data", (data: Buffer) => {
-    console.log(`[server] ${data.toString().trimEnd()}`);
+    console.log(prefixLines(serverOut, data));
   });
 
   serverProcess.stderr?.on("data", (data: Buffer) => {
     const text = data.toString().trimEnd();
-    console.error(`[server] ${text}`);
+    console.error(prefixLines(serverErr, data));
     serverStderr = (serverStderr + "\n" + text).slice(-2000);
   });
 
   serverProcess.on("exit", (code) => {
-    console.log(`Server process exited with code ${code}`);
+    console.log(`${C.yellow}[lusk]${C.reset} server exited (code ${code})`);
     if (isQuitting) return;
     if (mainWindow && !mainWindow.isDestroyed()) {
       dialog.showErrorBox(
@@ -229,6 +252,28 @@ app.whenReady().then(async () => {
 
   createWindow();
 
+  // macOS: explicit app menu ensures Cmd+Q (Quit) works
+  if (process.platform === "darwin") {
+    const template: Electron.MenuItemConstructorOptions[] = [
+      {
+        label: app.name,
+        submenu: [
+          { role: "about" as const },
+          { type: "separator" as const },
+          { role: "quit" as const },
+        ],
+      },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  }
+
+  // Cmd+R: request cancel prompt during long-running processes (in-app overlay, not native dialog)
+  globalShortcut.register("CommandOrControl+R", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("request-cancel-prompt");
+    }
+  });
+
   // IPC handlers for native file dialogs
   ipcMain.handle("show-save-dialog", async (_event, options: any) => {
     if (!mainWindow) return { canceled: true, filePath: null };
@@ -254,6 +299,14 @@ app.whenReady().then(async () => {
     };
   });
 
+  ipcMain.handle("read-file", async (_event, filePath: string) => {
+    return readFile(filePath, "utf-8");
+  });
+
+  ipcMain.handle("write-file", async (_event, filePath: string, base64Data: string) => {
+    await writeFile(filePath, Buffer.from(base64Data, "base64"));
+  });
+
   app.on("activate", () => {
     // macOS: re-create window when dock icon is clicked
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -269,5 +322,6 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  globalShortcut.unregisterAll();
   killServer();
 });

@@ -31,6 +31,27 @@ function probeVideoDurationMs(filePath: string): number | null {
   }
 }
 
+/** Probe video width and height (first video stream). Returns null values on failure. */
+function probeVideoMeta(filePath: string): { width: number | null; height: number | null } {
+  try {
+    const ffprobe = process.env.FFPROBE_PATH ?? "ffprobe";
+    const stdout = execSync(
+      `${JSON.stringify(ffprobe)} -v quiet -print_format json -show_streams -select_streams v:0 ${JSON.stringify(filePath)}`,
+      { encoding: "utf-8", timeout: 15_000 },
+    );
+    const info = JSON.parse(stdout);
+    const stream = info.streams?.[0];
+    const w = stream?.width;
+    const h = stream?.height;
+    return {
+      width: typeof w === "number" && w > 0 ? w : null,
+      height: typeof h === "number" && h > 0 ? h : null,
+    };
+  } catch {
+    return { width: null, height: null };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Route plugin
 // ---------------------------------------------------------------------------
@@ -151,6 +172,9 @@ export const projectsRoute: FastifyPluginAsync = async (server) => {
       session.videoPath = videoPath;
       session.videoUrl = `/static/${projectId}/input.mp4`;
       session.videoDurationMs = probeVideoDurationMs(videoPath);
+      const meta = probeVideoMeta(videoPath);
+      session.videoWidth = meta.width;
+      session.videoHeight = meta.height;
       session.state = "UPLOADING";
       session.progress = 100;
       session.message = "Video selected";

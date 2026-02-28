@@ -8,14 +8,24 @@
 /* ── Header ── */
 .app-header {
   width: 100%;
-  padding: 1.5rem 2rem;
+  padding: 0.75rem 1.5rem;
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.75rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   -webkit-app-region: drag;
+}
+
+.header-side {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.header-actions {
+  justify-content: flex-end;
+  -webkit-app-region: no-drag;
 }
 
 .app-header h1 {
@@ -178,6 +188,19 @@
   margin: 0;
 }
 
+.idle-next-row {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+}
+
+.idle-next-row .primary {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 .idle-filename-hint {
   font-size: 0.8rem;
   color: var(--text-dim);
@@ -192,6 +215,29 @@
   color: var(--accent);
   padding: 0.1em 0.45em;
   border-radius: 5px;
+}
+
+.script-dropzone {
+  margin-top: 0;
+  border-style: dashed;
+  border-width: 1px;
+  padding: 1.5rem 2rem;
+}
+
+.optional-badge {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface);
+  padding: 0.15em 0.5em;
+  border-radius: 6px;
+  vertical-align: middle;
+  margin-left: 0.3em;
+}
+
+.script-loaded {
+  color: var(--accent) !important;
+  font-weight: 600;
 }
 
 /* ── Dashboard ── */
@@ -326,4 +372,151 @@
   color: white;
   border: none;
   cursor: pointer;
+}
+
+/* ── Settings ── */
+.settings-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.4rem;
+  border-radius: 8px;
+  transition: color 0.2s, background 0.2s;
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+}
+
+.settings-btn:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.settings-dialog {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 440px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.settings-dialog h2 {
+  margin: 0 0 1.5rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.settings-field {
+  margin-bottom: 1.5rem;
+}
+
+.settings-field label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.settings-field input {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+
+.settings-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0.5rem 0 0;
+}
+
+.settings-hint a,
+.settings-hint .inline-link {
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.settings-status {
+  font-size: 0.8rem;
+  color: var(--accent);
+  margin-right: auto;
+}
+
+/* ── Cmd+R cancel prompt overlay (in-app, not native — keeps Cmd+Q working) ── */
+.cancel-prompt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.cancel-prompt {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2rem 2.5rem;
+  min-width: 320px;
+  max-width: 400px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(139, 92, 246, 0.15);
+}
+
+.cancel-prompt h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  color: var(--text);
+}
+
+.cancel-prompt-desc {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin: 0 0 1.5rem;
+  line-height: 1.5;
+}
+
+.cancel-prompt-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
 }

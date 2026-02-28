@@ -1,10 +1,14 @@
 import { FastifyInstance } from "fastify";
 import fs from "node:fs";
 import path from "node:path";
+import { makeCancelSignal } from "@remotion/renderer";
 import { orchestrator } from "../services/Orchestrator.js";
 import { tempManager } from "../services/TempManager.js";
 import { renderService } from "../services/RenderService.js";
 import type { RenderRequest, ErrorResponse, CaptionWord } from "@lusk/shared";
+
+/** Active render cancel functions, keyed by sessionId (one render per session at a time). */
+const activeRenderCancels = new Map<string, { cancel: () => void; clipKey: string }>();
 
 function clipKey(clip: { startMs: number; endMs: number }): string {
   return `${clip.startMs}-${clip.endMs}`;
@@ -30,8 +34,16 @@ async function runRender(
     outputUrl: null,
   });
 
+  const { cancelSignal, cancel } = makeCancelSignal();
+  activeRenderCancels.set(sessionId, { cancel, clipKey: key });
+
   try {
     const outroConfig = await renderService.detectOutroConfig();
+
+    const sourceAspectRatio =
+      session.videoWidth != null && session.videoHeight != null
+        ? session.videoWidth / session.videoHeight
+        : null;
 
     await renderService.renderClip(
       sessionId,
@@ -49,7 +61,9 @@ async function runRender(
       },
       outputFileName,
       preProcessedCaptions as any,
-      outroConfig
+      outroConfig,
+      sourceAspectRatio,
+      cancelSignal
     );
 
     const outputUrl = `/static/${sessionId}/${outputFileName}?t=${Date.now()}`;
@@ -60,14 +74,16 @@ async function runRender(
       outputUrl,
     });
   } catch (err) {
-    log.error(err, "Render failed");
-    // Delete the failed render entry so the clip appears retryable.
-    // emitAndPersist broadcasts the deletion via SSE so the client sees it.
+    const isCancelled = err instanceof Error && err.message.includes("cancelled");
+    if (!isCancelled) log.error(err, "Render failed");
+    // Delete the render entry so the clip appears retryable.
     const s = orchestrator.getSession(sessionId);
     if (s?.renders) {
       delete s.renders[key];
       orchestrator.emitAndPersist(sessionId);
     }
+  } finally {
+    activeRenderCancels.delete(sessionId);
   }
 }
 
@@ -124,6 +140,26 @@ export async function renderRoute(app: FastifyInstance) {
     }
   );
 
+  app.post<{ Params: { projectId: string }; Reply: { success: true } | ErrorResponse }>(
+    "/api/projects/:projectId/cancel-render",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const entry = activeRenderCancels.get(projectId);
+      if (!entry) {
+        return reply.send({ success: true });
+      }
+      entry.cancel();
+      activeRenderCancels.delete(projectId);
+      // Clear render entry immediately so UI updates without waiting for render to throw
+      const session = orchestrator.getSession(projectId);
+      if (session?.renders?.[entry.clipKey]) {
+        delete session.renders[entry.clipKey];
+        orchestrator.emitAndPersist(projectId);
+      }
+      return reply.send({ success: true });
+    }
+  );
+
   // Validate exported render entries against the actual files on disk.
   // Removes orphaned entries (file deleted while server was running) and returns
   // the fresh renders map so the client can build an accurate pending queue.
@@ -140,13 +176,19 @@ export async function renderRoute(app: FastifyInstance) {
       let changed = false;
 
       if (session.renders) {
+        const hasActiveRender = activeRenderCancels.has(projectId);
         for (const key of Object.keys(session.renders)) {
-          if (session.renders[key].status === "exported") {
+          const entry = session.renders[key];
+          if (entry.status === "exported") {
             const filePath = path.join(sessionDir, `output_${key}.mp4`);
             if (!fs.existsSync(filePath)) {
               delete session.renders[key];
               changed = true;
             }
+          } else if (entry.status === "rendering" && !hasActiveRender) {
+            // Render was cancelled or crashed — clear stuck state
+            delete session.renders[key];
+            changed = true;
           }
         }
       }

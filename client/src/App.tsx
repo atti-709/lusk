@@ -5,6 +5,7 @@ import { Dashboard } from "./components/Dashboard";
 import { PipelineStepper, type ReadySubView } from "./components/PipelineStepper";
 import { ClipSelector } from "./components/ClipSelector";
 import { StudioView } from "./components/StudioView";
+import { useCancelPrompt } from "./contexts/CancelPromptContext";
 import {
   VideoComposition,
   COMP_WIDTH,
@@ -12,6 +13,7 @@ import {
   COMP_FPS,
 } from "./components/VideoComposition";
 import { Logo } from "./components/Logo";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { useSSE } from "./hooks/useSSE";
 import type {
   CaptionWord,
@@ -32,9 +34,25 @@ function App() {
   const [projectLoading, setProjectLoading] = useState(false);
   const [readySubView, setReadySubView] = useState<ReadySubView>("review");
   const [whisperxAvailable, setWhisperxAvailable] = useState<boolean>(true);
+  const [geminiAvailable, setGeminiAvailable] = useState<boolean>(false);
+  const [scriptFileName, setScriptFileName] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [logoPopupOpen, setLogoPopupOpen] = useState(false);
+  const [pendingVideoPath, setPendingVideoPath] = useState<string | null>(null);
+
+  const VIDEO_EXTENSIONS = useMemo(() => ["mp4", "mov", "mkv", "avi", "webm"], []);
 
   const isReady = state && state.state === "READY";
   const isStudio = selectedClip !== null && !!isReady;
+
+  // A process is "working" if the backend is actively munching on something
+  const isWorking = !!state &&
+    ["TRANSCRIBING", "ALIGNING", "RENDERING"].includes(state.state);
+
+  const sourceAspectRatio = useMemo(() => {
+    if (!state?.videoWidth || !state?.videoHeight) return null;
+    return state.videoWidth / state.videoHeight;
+  }, [state?.videoWidth, state?.videoHeight]);
 
   // Show dashboard on mount and check whisperx availability
   useEffect(() => {
@@ -44,6 +62,9 @@ function App() {
       .then((data) => {
         if (typeof data.whisperxAvailable === "boolean") {
           setWhisperxAvailable(data.whisperxAvailable);
+        }
+        if (typeof data.geminiApiKeySet === "boolean") {
+          setGeminiAvailable(data.geminiApiKeySet);
         }
       })
       .catch(() => {});
@@ -87,20 +108,53 @@ function App() {
     return () => { isMounted = false; };
   }, [sessionId, isReady]);
 
+  // Fetch whisper captions when entering ALIGNING state (for preview during alignment)
+  useEffect(() => {
+    if (!sessionId || state?.state !== "ALIGNING" || captions.length > 0) return;
+
+    let isMounted = true;
+    fetch(`/api/projects/${sessionId}`)
+      .then((r) => r.json())
+      .then((data: ProjectState) => {
+        if (!isMounted || !data.captions) return;
+        setCaptions(data.captions);
+      })
+      .catch(() => {});
+
+    return () => { isMounted = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, state?.state]);
+
   const resetSessionState = useCallback(() => {
     setCaptions([]);
     setViralClips([]);
     setSelectedClip(null);
     setReadySubView("review");
+    setScriptFileName(null);
+    setPendingVideoPath(null);
   }, []);
 
-  const cancelTranscription = useCallback((id: string) => {
-    fetch("/api/transcribe/cancel", {
+  const cancelPrompt = useCancelPrompt();
+  const cancelProject = useCallback((id: string) => {
+    fetch(`/api/projects/${id}/cancel`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: id }),
     }).catch(() => {});
   }, []);
+
+  // Register working process as cancellable for Cmd+R (transcription, alignment, render)
+  useEffect(() => {
+    if (!cancelPrompt || !sessionId || !isWorking) return;
+    const label = state?.state === "TRANSCRIBING" ? "transcription"
+      : state?.state === "ALIGNING" ? "alignment"
+      : "render";
+    cancelPrompt.register({
+      id: "project-work",
+      label,
+      onCancel: () => cancelProject(sessionId),
+    });
+    return () => cancelPrompt.unregister("project-work");
+  }, [cancelPrompt, sessionId, isWorking, state?.state, cancelProject]);
 
   const handleNewProject = useCallback(async () => {
     const lusk = window.lusk;
@@ -131,6 +185,11 @@ function App() {
     const lusk = window.lusk;
     if (!lusk) return;
 
+    if (isWorking) {
+      if (!window.confirm("A process is running. Opening a project will cancel it. Continue?")) return;
+      if (sessionId) cancelProject(sessionId);
+    }
+
     const result = await lusk.showOpenDialog({
       title: "Open project",
       filters: [{ name: "Lusk Project", extensions: ["lusk"] }],
@@ -149,13 +208,13 @@ function App() {
       setSessionId(data.projectId);
       setView("session");
     }
-  }, [resetSessionState]);
+  }, [resetSessionState, isWorking, cancelProject, sessionId]);
 
   const handleOpenProject = useCallback(async (projectId: string, projectPath: string) => {
     // Confirm before aborting any in-progress transcription
-    if (sessionId && state?.state === "TRANSCRIBING") {
-      if (!window.confirm("Transcription is in progress. Navigate away and stop it?")) return;
-      cancelTranscription(sessionId);
+    if (sessionId && isWorking) {
+      if (!window.confirm("A process is running. Navigate away and stop it?")) return;
+      cancelProject(sessionId);
     }
     resetSessionState();
 
@@ -189,13 +248,12 @@ function App() {
         body: JSON.stringify({ sessionId: projectId }),
       }).catch(() => {});
     }
-  }, [sessionId, state?.state, cancelTranscription, resetSessionState]);
+  }, [sessionId, isWorking, cancelProject, resetSessionState, whisperxAvailable]);
 
   // Upload video to an existing IDLE session
   const [idleUploadError, setIdleUploadError] = useState<string | null>(null);
   const [idleDragOver, setIdleDragOver] = useState(false);
-
-  const VIDEO_EXTENSIONS = ["mp4", "mov", "mkv", "avi", "webm"];
+  const [scriptDragOver, setScriptDragOver] = useState(false);
 
   const selectVideoForProject = useCallback(async (videoPath: string) => {
     if (!sessionId) return;
@@ -223,8 +281,9 @@ function App() {
       filters: [{ name: "Video", extensions: VIDEO_EXTENSIONS }],
     });
     if (result.canceled || !result.filePath) return;
-    selectVideoForProject(result.filePath);
-  }, [selectVideoForProject]);
+    setIdleUploadError(null);
+    setPendingVideoPath(result.filePath);
+  }, [VIDEO_EXTENSIONS]);
 
   const handleIdleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -241,26 +300,95 @@ function App() {
       setIdleUploadError(`Unsupported format. Use: ${VIDEO_EXTENSIONS.join(", ")}`);
       return;
     }
-    selectVideoForProject(filePath);
-  }, [selectVideoForProject]);
+    setIdleUploadError(null);
+    setPendingVideoPath(filePath);
+  }, [VIDEO_EXTENSIONS]);
 
-  const handleTranscribe = useCallback(async () => {
-    if (!sessionId) return;
-
-    await fetch("/api/transcribe", {
+  const handleIdleNext = useCallback(async () => {
+    if (!pendingVideoPath || !sessionId) return;
+    await selectVideoForProject(pendingVideoPath);
+    fetch("/api/transcribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId }),
-    });
+    }).catch(() => {});
+  }, [pendingVideoPath, sessionId, selectVideoForProject]);
+
+  const handleScriptFile = useCallback(async (filePath: string) => {
+    if (!sessionId) return;
+    const fileName = filePath.split("/").pop() ?? filePath;
+    try {
+      const content = await window.lusk?.readFile?.(filePath);
+      if (!content) {
+        setIdleUploadError("Could not read script file");
+        return;
+      }
+      const res = await fetch(`/api/projects/${sessionId}/script`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scriptText: content }),
+      });
+      if (res.ok) {
+        setScriptFileName(fileName);
+      }
+    } catch {
+      setIdleUploadError("Failed to upload script");
+    }
   }, [sessionId]);
+
+  const handleScriptDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const filePath = window.lusk?.getFilePath?.(file) ?? "";
+    if (filePath) {
+      handleScriptFile(filePath);
+    } else {
+      // Browser fallback: read via FileReader
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const content = reader.result as string;
+        if (!sessionId) return;
+        const res = await fetch(`/api/projects/${sessionId}/script`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scriptText: content }),
+        });
+        if (res.ok) {
+          setScriptFileName(file.name);
+        }
+      };
+      reader.readAsText(file);
+    }
+  }, [sessionId, handleScriptFile]);
+
+  const handleScriptBrowse = useCallback(async () => {
+    const lusk = window.lusk;
+    if (!lusk) return;
+    const result = await lusk.showOpenDialog({
+      title: "Select reference script",
+      filters: [{ name: "Markdown", extensions: ["md", "txt"] }],
+    });
+    if (result.canceled || !result.filePath) return;
+    handleScriptFile(result.filePath);
+  }, [handleScriptFile]);
 
   const handleSelectClip = useCallback((clip: ViralClip) => {
     setSelectedClip(clip);
-  }, []);
+    // Sync render states to clear any stuck "rendering" entries from cancelled renders
+    if (sessionId) {
+      fetch(`/api/projects/${sessionId}/sync-render-states`, { method: "POST" }).catch(() => {});
+    }
+  }, [sessionId]);
 
   const handleBackToClips = useCallback(() => {
+    const hasRendering = state?.renders && Object.values(state.renders).some((r) => r.status === "rendering");
+    if (hasRendering && !window.confirm("A video is rendering. Go back and cancel it?")) return;
+    if (sessionId && hasRendering) {
+      fetch(`/api/projects/${sessionId}/cancel-render`, { method: "POST" }).catch(() => {});
+    }
     setSelectedClip(null);
-  }, []);
+  }, [sessionId, state?.renders]);
 
   const handleAddClip = useCallback(async (clip: ViralClip) => {
     if (!sessionId) return;
@@ -334,20 +462,64 @@ function App() {
 
   const handleLogoClick = useCallback(() => {
     if (view === "dashboard" || view === "loading") return;
-    if (sessionId && state?.state === "TRANSCRIBING") {
-      if (!window.confirm("Transcription is in progress. Navigate away and stop it?")) return;
-      cancelTranscription(sessionId);
+    setLogoPopupOpen(true);
+  }, [view]);
+
+  const handleLogoPopupConfirm = useCallback(() => {
+    setLogoPopupOpen(false);
+    if (sessionId) {
+      if (isWorking) cancelProject(sessionId);
+      if (state?.renders && Object.values(state.renders).some((r) => r.status === "rendering")) {
+        fetch(`/api/projects/${sessionId}/cancel-render`, { method: "POST" }).catch(() => {});
+      }
     }
     setSessionId(null);
     resetSessionState();
     setView("dashboard");
-  }, [view, sessionId, state?.state, cancelTranscription, resetSessionState]);
+  }, [sessionId, isWorking, state?.renders, cancelProject, resetSessionState]);
+
+  const handleLogoPopupDismiss = useCallback(() => {
+    setLogoPopupOpen(false);
+  }, []);
+
+  // Intercept Cmd+R to show the same guard as the logo click instead of reloading
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === "r") {
+        if (isWorking) {
+          e.preventDefault();
+          if (window.confirm("A process is running. Reloading will stop it. Continue?")) {
+            if (sessionId) cancelProject(sessionId);
+            // Allow a tiny bit of time for the cancel request to fire before the page unloads
+            setTimeout(() => window.location.reload(), 50);
+          }
+        } else {
+          // In Electron without native menu, Cmd+R does not naturally reload. Manual reload is needed.
+          e.preventDefault();
+          window.location.reload();
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isWorking, sessionId, cancelProject]);
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isWorking) {
+        e.preventDefault();
+        e.returnValue = ""; // required for browser prompt
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isWorking]);
 
   return (
     <div className="app">
       <header className="app-header">
-        <div 
-          className="logo-container" 
+        <div className="header-side" />
+        <div
+          className="logo-container"
           onClick={handleLogoClick}
           role="button"
           tabIndex={0}
@@ -356,7 +528,49 @@ function App() {
           <div className="logo-mark"><Logo /></div>
           <h1>Lusk</h1>
         </div>
+        <div className="header-side header-actions">
+          <button
+            className="settings-btn"
+            onClick={() => setSettingsOpen(true)}
+            title="Settings"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        </div>
       </header>
+
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onKeySet={setGeminiAvailable} />
+
+      {logoPopupOpen && (
+        <div
+          className="cancel-prompt-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="logo-popup-title"
+        >
+          <div className="cancel-prompt">
+            <h3 id="logo-popup-title">
+              {isWorking ? "A process is running" : "Go to Dashboard?"}
+            </h3>
+            <p className="cancel-prompt-desc">
+              {isWorking
+                ? "Navigate away and stop the current operation?"
+                : "Leave this project and return to the dashboard?"}
+            </p>
+            <div className="cancel-prompt-actions">
+              <button className="secondary" onClick={handleLogoPopupDismiss}>
+                Stay
+              </button>
+              <button className="primary" onClick={handleLogoPopupConfirm}>
+                Go to Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {view === "loading" && <div className="connecting">Loading</div>}
 
@@ -379,8 +593,10 @@ function App() {
             videoUrl={state.videoUrl}
             sessionId={sessionId}
             readySubView={readySubView}
-            onTranscribe={handleTranscribe}
             whisperxAvailable={whisperxAvailable}
+            geminiAvailable={geminiAvailable}
+            captions={captions}
+            sourceAspectRatio={sourceAspectRatio}
           />
         </div>
       )}
@@ -402,19 +618,64 @@ function App() {
               </svg>
             </div>
             <h2>Add a source video</h2>
-            <p>Drag & drop a video file here, or click to browse.</p>
-            {state.videoName && (
+            {pendingVideoPath ? (
+              <p className="script-loaded">{pendingVideoPath.split("/").pop()}</p>
+            ) : (
+              <p>Drag & drop a video file here, or click to browse.</p>
+            )}
+            {state.videoName && !pendingVideoPath && (
               <p className="idle-filename-hint">
                 Looking for: <code>{state.videoName}.mp4</code>
               </p>
             )}
-            <button className="primary" onClick={handleIdleVideoSelect}>
+            <button className="secondary" onClick={handleIdleVideoSelect}>
               Browse files
             </button>
-            {idleUploadError && (
-              <p className="idle-error">{idleUploadError}</p>
-            )}
           </div>
+
+          {/* Script drop zone */}
+          <div
+            className={`idle-notice idle-dropzone script-dropzone${scriptDragOver ? " drag-over" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); setScriptDragOver(true); }}
+            onDragLeave={() => setScriptDragOver(false)}
+            onDrop={(e) => { setScriptDragOver(false); handleScriptDrop(e); }}
+          >
+            <div className="upload-icon">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+              </svg>
+            </div>
+            <h2>Add reference script <span className="optional-badge">optional</span></h2>
+            {scriptFileName ? (
+              <p className="script-loaded">{scriptFileName}</p>
+            ) : (
+              <p>Drag & drop a .md script for AI-powered transcript correction.</p>
+            )}
+            {!geminiAvailable && (
+              <p className="settings-hint">No Gemini API key — configure in <button className="inline-link" onClick={() => setSettingsOpen(true)}>Settings</button></p>
+            )}
+            <button className="secondary" onClick={handleScriptBrowse}>
+              Browse scripts
+            </button>
+          </div>
+
+          {idleUploadError && (
+            <p className="idle-error">{idleUploadError}</p>
+          )}
+
+          {pendingVideoPath && (
+            <div className="idle-next-row">
+              <button className="primary" onClick={handleIdleNext}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 4V2" /><path d="M15 16v-2" /><path d="M8 9h2" /><path d="M20 9h2" /><path d="M17.8 11.8 19 13" /><path d="M15 9h.01" /><path d="M17.8 6.2 19 5" /><path d="m3 21 9-9" /><path d="M12.2 6.2 11 5" />
+                </svg>
+                Start
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -437,6 +698,7 @@ function App() {
                     captions: fullVideoCaptions,
                     offsetX: 0,
                     startFrom: 0,
+                    sourceAspectRatio,
                   }}
                   compositionWidth={COMP_WIDTH}
                   compositionHeight={COMP_HEIGHT}
@@ -545,6 +807,7 @@ function App() {
             onRender={handleRender}
             onBack={handleBackToClips}
             renders={state.renders ?? {}}
+            sourceAspectRatio={sourceAspectRatio}
             onClipUpdate={(updatedClip) => {
               // Update local state for persistence
               setViralClips((prev) =>

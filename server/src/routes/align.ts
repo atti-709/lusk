@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import archiver from "archiver";
 import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord } from "@lusk/shared";
+import { runGeminiAutomation } from "./transcribe.js";
 
 // ── Helpers ──
 
@@ -15,18 +16,27 @@ function msToTimestamp(ms: number): string {
 
 function timestampToMs(ts: string): number {
   const parts = ts.split(":");
-  if (parts.length !== 3) throw new Error(`Invalid timestamp: ${ts}`);
-  const h = parseFloat(parts[0]);
-  const m = parseFloat(parts[1]);
-  const s = parseFloat(parts[2]);
-  return Math.round((h * 3600 + m * 60 + s) * 1000);
+  if (parts.length === 3) {
+    // HH:MM:SS.mmm
+    const h = parseFloat(parts[0]);
+    const m = parseFloat(parts[1]);
+    const s = parseFloat(parts[2]);
+    return Math.round((h * 3600 + m * 60 + s) * 1000);
+  }
+  if (parts.length === 2) {
+    // MM:SS.mmm (Gemini sometimes abbreviates 00:00:11.260 as 00:11.260)
+    const m = parseFloat(parts[0]);
+    const s = parseFloat(parts[1]);
+    return Math.round((m * 60 + s) * 1000);
+  }
+  throw new Error(`Invalid timestamp: ${ts}`);
 }
 
 function wordsToTsv(words: TranscriptWord[]): string {
   return words.map((w) => `${msToTimestamp(w.startMs)}\t${w.word}`).join("\n");
 }
 
-function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
+export function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
   const lines = tsv.trim().split("\n").filter((l) => l.trim());
   const words: TranscriptWord[] = [];
   for (const line of lines) {
@@ -42,7 +52,7 @@ function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
   return words;
 }
 
-function parseViralClipText(text: string): ViralClip[] {
+export function parseViralClipText(text: string): ViralClip[] {
   const clips: ViralClip[] = [];
   // Split on "CLIP N" headers
   const blocks = text.split(/^CLIP\s+\d+/im).filter((b) => b.trim());
@@ -65,7 +75,7 @@ function parseViralClipText(text: string): ViralClip[] {
   return clips;
 }
 
-function wordsToCaptions(words: TranscriptWord[]): CaptionWord[] {
+export function wordsToCaptions(words: TranscriptWord[]): CaptionWord[] {
   return words.map((w, i) => ({
     text: i === 0 ? w.word : ` ${w.word}`,
     startMs: w.startMs,
@@ -160,8 +170,22 @@ export async function alignRoute(app: FastifyInstance) {
         ? request.body
         : (request.body as { text?: string })?.text;
 
-      if (!rawBody || typeof rawBody !== "string") {
-        return reply.status(400).send({ success: false, error: "TSV text is required" });
+      // If text is empty/just whitespace or not provided, assume the user deleted the text
+      // to revert back to the original transcript.
+      if (!rawBody || !rawBody.trim()) {
+        try {
+          if (session.originalTranscript) {
+             orchestrator.setTranscript(projectId, session.originalTranscript);
+             orchestrator.setCaptions(projectId, wordsToCaptions(session.originalTranscript.words));
+          }
+          orchestrator.setCorrectedTranscriptRaw(projectId, "");
+          return { success: true as const };
+        } catch (err) {
+           return reply.status(400).send({
+              success: false,
+              error: `Failed to restore original transcript: ${err instanceof Error ? err.message : String(err)}`,
+           });
+        }
       }
 
       try {
@@ -370,11 +394,65 @@ function formatSrtBlock(index: number, words: CaptionWord[]): string {
       }
 
       const srt = captionsToSrt(session.captions);
-      
+
       return reply
         .header("Content-Type", "application/x-subrip")
         .header("Content-Disposition", 'attachment; filename="captions.srt"')
         .send(srt);
+    }
+  );
+
+  // 5g. Upload reference script text
+  app.post<{
+    Params: { projectId: string };
+    Body: { scriptText: string };
+    Reply: { success: true } | ErrorResponse;
+  }>(
+    "/api/projects/:projectId/script",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
+
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+
+      const { scriptText } = (request.body ?? {}) as Partial<{ scriptText: string }>;
+
+      if (!scriptText || typeof scriptText !== "string") {
+        return reply.status(400).send({ success: false, error: "scriptText is required" });
+      }
+
+      orchestrator.setScriptText(projectId, scriptText);
+      return { success: true as const };
+    }
+  );
+
+  // POST /api/projects/:projectId/run-gemini
+  // Trigger Gemini automation on a session already in ALIGNING state
+  app.post<{ Params: { projectId: string }; Reply: { success: true } | ErrorResponse }>(
+    "/api/projects/:projectId/run-gemini",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
+
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+      if (session.state !== "ALIGNING") {
+        return reply.status(409).send({ success: false, error: `Cannot run Gemini in state: ${session.state}` });
+      }
+      if (!session.transcript) {
+        return reply.status(409).send({ success: false, error: "No transcript available" });
+      }
+
+      // Reset progress so the UI shows the automation running
+      orchestrator.updateProgress(projectId, 0, "Starting Gemini...");
+
+      // Fire-and-forget — progress events update the client
+      runGeminiAutomation(projectId, session.transcript, app.log).catch(() => {});
+
+      return { success: true as const };
     }
   );
 }

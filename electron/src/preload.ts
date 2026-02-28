@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld("lusk", {
     ipcRenderer.on("open-session", (_event, sessionId: string) => callback(sessionId));
   },
 
+  onRequestCancelPrompt: (callback: () => void) => {
+    ipcRenderer.on("request-cancel-prompt", () => callback());
+  },
+
   showSaveDialog: (options?: {
     title?: string;
     defaultPath?: string;
@@ -20,4 +24,9 @@ contextBridge.exposeInMainWorld("lusk", {
   }) => ipcRenderer.invoke("show-open-dialog", options ?? {}),
 
   getFilePath: (file: File) => webUtils.getPathForFile(file),
+
+  readFile: (filePath: string) => ipcRenderer.invoke("read-file", filePath),
+
+  writeFile: (filePath: string, base64Data: string) =>
+    ipcRenderer.invoke("write-file", filePath, base64Data),
 });

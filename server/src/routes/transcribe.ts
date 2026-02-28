@@ -2,6 +2,8 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
+import { geminiService, wordsToTsv } from "../services/GeminiService.js";
+import { parseTsv, parseViralClipText, wordsToCaptions } from "./align.js";
 import type { TranscribeRequest, ErrorResponse } from "@lusk/shared";
 
 type Logger = Pick<FastifyInstance["log"], "error">;
@@ -28,10 +30,84 @@ export async function doTranscribe(sessionId: string, log: Logger, signal?: Abor
   );
 
   orchestrator.setTranscript(sessionId, transcript);
+  orchestrator.setOriginalTranscript(sessionId, transcript);
   orchestrator.setCaptions(sessionId, captions);
 
   orchestrator.transition(sessionId, "ALIGNING");
-  orchestrator.updateProgress(sessionId, 100, "Transcript ready — download and correct with Gemini");
+
+  const geminiAvailable = await geminiService.isAvailable();
+  if (geminiAvailable) {
+    const original = orchestrator.getSession(sessionId)?.originalTranscript ?? transcript;
+    await runGeminiAutomation(sessionId, original, log, signal);
+  } else {
+    // No API key — manual workflow
+    orchestrator.updateProgress(sessionId, 100, "No Gemini API key — use manual workflow below");
+  }
+}
+
+/**
+ * Run the Gemini automation pipeline on a session that is already in ALIGNING state.
+ * - If the session has a script: correct transcript, then detect viral clips.
+ * - If no script: detect viral clips from the raw transcript directly.
+ * On success transitions to READY. On failure stays in ALIGNING at progress=100 for manual fallback.
+ */
+export async function runGeminiAutomation(
+  sessionId: string,
+  rawTranscript: { words: { word: string; startMs: number; endMs: number }[] },
+  log: Logger,
+  signal?: AbortSignal
+): Promise<void> {
+  const session = orchestrator.getSession(sessionId);
+  if (!session) return;
+
+  try {
+    let tsvForClips: string;
+
+    if (session.scriptText) {
+      orchestrator.updateProgress(sessionId, 5, "Starting Gemini correction...");
+
+      // 1. Correct transcript using script
+      const correctedTsv = await geminiService.correctTranscript(
+        rawTranscript.words,
+        session.scriptText,
+        (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
+        signal,
+      );
+
+      // Parse and apply corrected transcript
+      const lastWord = rawTranscript.words.at(-1);
+      const fallbackEndMs = lastWord ? lastWord.endMs : 0;
+      const correctedWords = parseTsv(correctedTsv, fallbackEndMs);
+
+      orchestrator.setTranscript(sessionId, { text: "", words: correctedWords });
+      orchestrator.setCorrectedTranscriptRaw(sessionId, correctedTsv);
+      orchestrator.setCaptions(sessionId, wordsToCaptions(correctedWords));
+
+      tsvForClips = correctedTsv;
+    } else {
+      // No script — use raw transcript TSV directly
+      orchestrator.updateProgress(sessionId, 5, "Starting Gemini viral clip detection...");
+      tsvForClips = wordsToTsv(rawTranscript.words);
+    }
+
+    // 2. Detect viral clips
+    const viralClipText = await geminiService.detectViralClips(
+      tsvForClips,
+      (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
+      signal,
+    );
+
+    const clips = viralClipText.trim() ? parseViralClipText(viralClipText) : [];
+    orchestrator.setViralClips(sessionId, clips);
+
+    // Transition to READY
+    orchestrator.transition(sessionId, "READY");
+    orchestrator.updateProgress(sessionId, 100, "Ready to review");
+  } catch (err: any) {
+    if (signal?.aborted) throw err; // re-throw cancellation
+    log.error(err, "Gemini automation failed, falling back to manual");
+    orchestrator.updateProgress(sessionId, 100, "Gemini failed — use manual workflow below");
+  }
 }
 
 async function runTranscription(sessionId: string, log: Logger): Promise<void> {
@@ -84,12 +160,12 @@ export async function transcribeRoute(app: FastifyInstance) {
     }
   );
 
-  app.post<{ Body: { sessionId: string }; Reply: { success: true } | ErrorResponse }>(
-    "/api/transcribe/cancel",
+  app.post<{ Params: { projectId: string }; Reply: { success: true } | ErrorResponse }>(
+    "/api/projects/:projectId/cancel",
     async (request, reply) => {
-      const { sessionId } = request.body ?? {};
+      const { projectId } = request.params;
 
-      const controller = activeTranscriptions.get(sessionId);
+      const controller = activeTranscriptions.get(projectId);
       if (!controller) {
         return reply.send({ success: true }); // nothing to cancel
       }

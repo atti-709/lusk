@@ -1,3 +1,7 @@
+# System Prompt: Viral Short-Form Video Clip Detection
+
+Below this prompt under the header "**## Corrected Transcript (.tsv):**", you will find a corrected transcript.
+
 Based on the corrected transcript, identify 4-8 segments (15-60 seconds each) that would make the most viral short-form video clips. Look for:
 - Strong emotional hooks or controversial statements
 - Self-contained stories or arguments

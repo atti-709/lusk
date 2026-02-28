@@ -25,6 +25,7 @@ export function Root() {
         startFrom: 0,
         outroSrc: "", // real URL injected by server at render time
         outroDurationInFrames: OUTRO_DURATION_FRAMES,
+        sourceAspectRatio: null, // videoWidth/videoHeight; null → assume landscape
       }}
     />
   );
