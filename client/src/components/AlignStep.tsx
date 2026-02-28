@@ -114,16 +114,15 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
 
     try {
       // Auto-save the corrected transcript first
-      if (correctedTsv.trim()) {
-        const tsvRes = await fetch(`/api/projects/${sessionId}/corrected-transcript`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: correctedTsv }),
-        });
-        if (!tsvRes.ok) {
-          const err = await tsvRes.json();
-          throw new Error(err.error || "Failed to save transcript");
-        }
+      const tsvRes = await fetch(`/api/projects/${sessionId}/corrected-transcript`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // empty string implies "revert to original"
+        body: JSON.stringify({ text: correctedTsv }),
+      });
+      if (!tsvRes.ok) {
+        const err = await tsvRes.json();
+        throw new Error(err.error || "Failed to save transcript");
       }
 
       // Then submit viral clips

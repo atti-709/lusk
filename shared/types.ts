@@ -83,6 +83,7 @@ export interface ProjectData {
   videoDurationMs: number | null;
   state: PipelineState;
   transcript: TranscriptData | null;
+  originalTranscript?: TranscriptData | null;
   correctedTranscriptRaw?: string | null;
   scriptText?: string | null;
   captions: CaptionWord[] | null;

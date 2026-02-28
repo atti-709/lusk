@@ -170,8 +170,22 @@ export async function alignRoute(app: FastifyInstance) {
         ? request.body
         : (request.body as { text?: string })?.text;
 
-      if (!rawBody || typeof rawBody !== "string") {
-        return reply.status(400).send({ success: false, error: "TSV text is required" });
+      // If text is empty/just whitespace or not provided, assume the user deleted the text
+      // to revert back to the original transcript.
+      if (!rawBody || !rawBody.trim()) {
+        try {
+          if (session.originalTranscript) {
+             orchestrator.setTranscript(projectId, session.originalTranscript);
+             orchestrator.setCaptions(projectId, wordsToCaptions(session.originalTranscript.words));
+          }
+          orchestrator.setCorrectedTranscriptRaw(projectId, "");
+          return { success: true as const };
+        } catch (err) {
+           return reply.status(400).send({
+              success: false,
+              error: `Failed to restore original transcript: ${err instanceof Error ? err.message : String(err)}`,
+           });
+        }
       }
 
       try {
@@ -436,7 +450,7 @@ function formatSrtBlock(index: number, words: CaptionWord[]): string {
       orchestrator.updateProgress(projectId, 0, "Starting Gemini...");
 
       // Fire-and-forget — progress events update the client
-      runGeminiAutomation(projectId, app.log).catch(() => {});
+      runGeminiAutomation(projectId, session.transcript, app.log).catch(() => {});
 
       return { success: true as const };
     }

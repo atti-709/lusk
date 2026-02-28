@@ -36,9 +36,16 @@ function App() {
   const [geminiAvailable, setGeminiAvailable] = useState<boolean>(false);
   const [scriptFileName, setScriptFileName] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pendingVideoPath, setPendingVideoPath] = useState<string | null>(null);
+
+  const VIDEO_EXTENSIONS = useMemo(() => ["mp4", "mov", "mkv", "avi", "webm"], []);
 
   const isReady = state && state.state === "READY";
   const isStudio = selectedClip !== null && !!isReady;
+  
+  // A process is "working" if the backend is actively munching on something
+  const isWorking = !!state && 
+    ["TRANSCRIBING", "ALIGNING", "RENDERING"].includes(state.state);
 
   // Show dashboard on mount and check whisperx availability
   useEffect(() => {
@@ -103,11 +110,10 @@ function App() {
     setPendingVideoPath(null);
   }, []);
 
-  const cancelTranscription = useCallback((id: string) => {
-    fetch("/api/transcribe/cancel", {
+  const cancelProject = useCallback((id: string) => {
+    fetch(`/api/projects/${id}/cancel`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: id }),
     }).catch(() => {});
   }, []);
 
@@ -140,6 +146,11 @@ function App() {
     const lusk = window.lusk;
     if (!lusk) return;
 
+    if (isWorking) {
+      if (!window.confirm("A process is running. Opening a project will cancel it. Continue?")) return;
+      if (sessionId) cancelProject(sessionId);
+    }
+
     const result = await lusk.showOpenDialog({
       title: "Open project",
       filters: [{ name: "Lusk Project", extensions: ["lusk"] }],
@@ -158,13 +169,13 @@ function App() {
       setSessionId(data.projectId);
       setView("session");
     }
-  }, [resetSessionState]);
+  }, [resetSessionState, isWorking, cancelProject, sessionId]);
 
   const handleOpenProject = useCallback(async (projectId: string, projectPath: string) => {
     // Confirm before aborting any in-progress transcription
-    if (sessionId && state?.state === "TRANSCRIBING") {
-      if (!window.confirm("Transcription is in progress. Navigate away and stop it?")) return;
-      cancelTranscription(sessionId);
+    if (sessionId && isWorking) {
+      if (!window.confirm("A process is running. Navigate away and stop it?")) return;
+      cancelProject(sessionId);
     }
     resetSessionState();
 
@@ -198,15 +209,12 @@ function App() {
         body: JSON.stringify({ sessionId: projectId }),
       }).catch(() => {});
     }
-  }, [sessionId, state?.state, cancelTranscription, resetSessionState]);
+  }, [sessionId, isWorking, cancelProject, resetSessionState, whisperxAvailable]);
 
   // Upload video to an existing IDLE session
   const [idleUploadError, setIdleUploadError] = useState<string | null>(null);
   const [idleDragOver, setIdleDragOver] = useState(false);
   const [scriptDragOver, setScriptDragOver] = useState(false);
-  const [pendingVideoPath, setPendingVideoPath] = useState<string | null>(null);
-
-  const VIDEO_EXTENSIONS = ["mp4", "mov", "mkv", "avi", "webm"];
 
   const selectVideoForProject = useCallback(async (videoPath: string) => {
     if (!sessionId) return;
@@ -236,7 +244,7 @@ function App() {
     if (result.canceled || !result.filePath) return;
     setIdleUploadError(null);
     setPendingVideoPath(result.filePath);
-  }, []);
+  }, [VIDEO_EXTENSIONS]);
 
   const handleIdleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -255,7 +263,7 @@ function App() {
     }
     setIdleUploadError(null);
     setPendingVideoPath(filePath);
-  }, []);
+  }, [VIDEO_EXTENSIONS]);
 
   const handleIdleNext = useCallback(async () => {
     if (!pendingVideoPath || !sessionId) return;
@@ -406,26 +414,46 @@ function App() {
 
   const handleLogoClick = useCallback(() => {
     if (view === "dashboard" || view === "loading") return;
-    if (sessionId && state?.state === "TRANSCRIBING") {
-      if (!window.confirm("Transcription is in progress. Navigate away and stop it?")) return;
-      cancelTranscription(sessionId);
+    if (sessionId && isWorking) {
+      if (!window.confirm("A process is running. Navigate away and stop it?")) return;
+      cancelProject(sessionId);
     }
     setSessionId(null);
     resetSessionState();
     setView("dashboard");
-  }, [view, sessionId, state?.state, cancelTranscription, resetSessionState]);
+  }, [view, sessionId, isWorking, cancelProject, resetSessionState]);
 
   // Intercept Cmd+R to show the same guard as the logo click instead of reloading
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey && e.key === "r") {
-        e.preventDefault();
-        handleLogoClick();
+        if (isWorking) {
+          e.preventDefault();
+          if (window.confirm("A process is running. Reloading will stop it. Continue?")) {
+            if (sessionId) cancelProject(sessionId);
+            // Allow a tiny bit of time for the cancel request to fire before the page unloads
+            setTimeout(() => window.location.reload(), 50);
+          }
+        } else {
+          // In Electron without native menu, Cmd+R does not naturally reload. Manual reload is needed.
+          e.preventDefault();
+          window.location.reload();
+        }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleLogoClick]);
+  }, [isWorking, sessionId, cancelProject]);
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isWorking) {
+        e.preventDefault();
+        e.returnValue = ""; // required for browser prompt
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isWorking]);
 
   return (
     <div className="app">

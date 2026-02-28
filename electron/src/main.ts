@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, globalShortcut } from "electron";
 import { spawn, execSync, ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";

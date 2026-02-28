@@ -30,13 +30,15 @@ export async function doTranscribe(sessionId: string, log: Logger, signal?: Abor
   );
 
   orchestrator.setTranscript(sessionId, transcript);
+  orchestrator.setOriginalTranscript(sessionId, transcript);
   orchestrator.setCaptions(sessionId, captions);
 
   orchestrator.transition(sessionId, "ALIGNING");
 
   const geminiAvailable = await geminiService.isAvailable();
   if (geminiAvailable) {
-    await runGeminiAutomation(sessionId, log, signal);
+    const original = orchestrator.getSession(sessionId)?.originalTranscript ?? transcript;
+    await runGeminiAutomation(sessionId, original, log, signal);
   } else {
     // No API key — manual workflow
     orchestrator.updateProgress(sessionId, 100, "No Gemini API key — use manual workflow below");
@@ -49,7 +51,12 @@ export async function doTranscribe(sessionId: string, log: Logger, signal?: Abor
  * - If no script: detect viral clips from the raw transcript directly.
  * On success transitions to READY. On failure stays in ALIGNING at progress=100 for manual fallback.
  */
-export async function runGeminiAutomation(sessionId: string, log: Logger, signal?: AbortSignal): Promise<void> {
+export async function runGeminiAutomation(
+  sessionId: string,
+  rawTranscript: { words: { word: string; startMs: number; endMs: number }[] },
+  log: Logger,
+  signal?: AbortSignal
+): Promise<void> {
   const session = orchestrator.getSession(sessionId);
   if (!session) return;
 
@@ -61,14 +68,14 @@ export async function runGeminiAutomation(sessionId: string, log: Logger, signal
 
       // 1. Correct transcript using script
       const correctedTsv = await geminiService.correctTranscript(
-        session.transcript!.words,
+        rawTranscript.words,
         session.scriptText,
         (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
         signal,
       );
 
       // Parse and apply corrected transcript
-      const lastWord = session.transcript!.words.at(-1);
+      const lastWord = rawTranscript.words.at(-1);
       const fallbackEndMs = lastWord ? lastWord.endMs : 0;
       const correctedWords = parseTsv(correctedTsv, fallbackEndMs);
 
@@ -80,7 +87,7 @@ export async function runGeminiAutomation(sessionId: string, log: Logger, signal
     } else {
       // No script — use raw transcript TSV directly
       orchestrator.updateProgress(sessionId, 5, "Starting Gemini viral clip detection...");
-      tsvForClips = wordsToTsv(session.transcript!.words);
+      tsvForClips = wordsToTsv(rawTranscript.words);
     }
 
     // 2. Detect viral clips
@@ -153,12 +160,12 @@ export async function transcribeRoute(app: FastifyInstance) {
     }
   );
 
-  app.post<{ Body: { sessionId: string }; Reply: { success: true } | ErrorResponse }>(
-    "/api/transcribe/cancel",
+  app.post<{ Params: { projectId: string }; Reply: { success: true } | ErrorResponse }>(
+    "/api/projects/:projectId/cancel",
     async (request, reply) => {
-      const { sessionId } = request.body ?? {};
+      const { projectId } = request.params;
 
-      const controller = activeTranscriptions.get(sessionId);
+      const controller = activeTranscriptions.get(projectId);
       if (!controller) {
         return reply.send({ success: true }); // nothing to cancel
       }

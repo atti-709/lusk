@@ -1,7 +1,18 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { GoogleGenAI } from "@google/genai";
+import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
+
+// Increase global fetch timeouts to 15 minutes to prevent Headers Timeout Error
+// because undici defaults to 5 minutes (300_000ms) which breaks long Gemini streams.
+setGlobalDispatcher(
+  new Agent({
+    headersTimeout: 15 * 60 * 1000,
+    bodyTimeout: 15 * 60 * 1000,
+    connectTimeout: 15 * 60 * 1000,
+  })
+);
 
 const MODEL = "gemini-3.1-pro-preview";
 const CHUNK_SIZE = 1000; // lines per chunk

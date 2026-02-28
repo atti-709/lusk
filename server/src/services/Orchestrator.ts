@@ -45,6 +45,7 @@ class Orchestrator extends EventEmitter {
       videoDurationMs,
 
       transcript: null,
+      originalTranscript: null,
       correctedTranscriptRaw: null,
       captions: null,
       viralClips: null,
@@ -92,6 +93,12 @@ class Orchestrator extends EventEmitter {
   setTranscript(id: string, transcript: TranscriptData): void {
     const session = this.requireSession(id);
     session.transcript = transcript;
+    this.persistSession(id);
+  }
+
+  setOriginalTranscript(id: string, transcript: TranscriptData): void {
+    const session = this.requireSession(id);
+    session.originalTranscript = transcript;
     this.persistSession(id);
   }
 
