@@ -61,6 +61,27 @@ function probeVideoDurationMs(filePath: string): number | null {
   }
 }
 
+/** Probe video width and height (first video stream). Returns null values on failure. */
+function probeVideoMeta(filePath: string): { width: number | null; height: number | null } {
+  try {
+    const ffprobe = process.env.FFPROBE_PATH ?? "ffprobe";
+    const stdout = execSync(
+      `${JSON.stringify(ffprobe)} -v quiet -print_format json -show_streams -select_streams v:0 ${JSON.stringify(filePath)}`,
+      { encoding: "utf-8", timeout: 15_000 },
+    );
+    const info = JSON.parse(stdout);
+    const stream = info.streams?.[0];
+    const w = stream?.width;
+    const h = stream?.height;
+    return {
+      width: typeof w === "number" && w > 0 ? w : null,
+      height: typeof h === "number" && h > 0 ? h : null,
+    };
+  } catch {
+    return { width: null, height: null };
+  }
+}
+
 /** Generate a small JPEG thumbnail from a video, returned as a base64 data URL. */
 function generateThumbnail(videoPath: string): string | null {
   try {
@@ -246,10 +267,13 @@ class ProjectFileService {
       videoPath: videoPath ?? "",
       videoName,
       videoDurationMs,
+      videoWidth: null,
+      videoHeight: null,
       state: hasVideo ? "UPLOADING" : "IDLE",
       transcript: null,
       originalTranscript: null,
       correctedTranscriptRaw: null,
+      scriptText: null,
       captions: null,
       viralClips: null,
     };
@@ -299,6 +323,9 @@ class ProjectFileService {
       videoUrl = `/static/${data.projectId}/input.mp4`;
       // TRANSCRIBING can't survive a server restart — reset so it can be retried
       if (data.state === "TRANSCRIBING") stateOverride = "UPLOADING";
+      const meta = probeVideoMeta(data.videoPath);
+      data.videoWidth = data.videoWidth ?? meta.width;
+      data.videoHeight = data.videoHeight ?? meta.height;
     } else {
       // Video is missing – fall back to IDLE so the UI can prompt re-link
       stateOverride = "IDLE";
@@ -345,6 +372,8 @@ class ProjectFileService {
       videoPath: session.videoPath,
       videoName: session.videoName,
       videoDurationMs: session.videoDurationMs,
+      videoWidth: session.videoWidth ?? null,
+      videoHeight: session.videoHeight ?? null,
       state: session.state,
       transcript: session.transcript,
       originalTranscript: session.originalTranscript ?? null,
@@ -368,16 +397,42 @@ class ProjectFileService {
   // Registry queries
   // -------------------------------------------------------------------------
 
-  /** Return the list of recent projects, marking missing files. */
+  /** Return the list of recent projects, marking missing files, and repairing missing metadata where possible. */
   async getRecentProjects(): Promise<RecentProject[]> {
     const entries = await readRegistry();
     const validated: RecentProject[] = [];
+    let needsSave = false;
 
     for (const entry of entries) {
       const exists = await fileExists(entry.projectPath);
-      validated.push({ ...entry, missing: !exists });
+      let updatedEntry = { ...entry, missing: !exists };
+      
+      if (exists && (!updatedEntry.videoName || !updatedEntry.thumbnail)) {
+        try {
+          const data = readLuskFile(entry.projectPath);
+          updatedEntry.videoName = data.videoName || updatedEntry.videoName;
+          updatedEntry.state = data.state || updatedEntry.state;
+          updatedEntry.updatedAt = data.updatedAt || updatedEntry.updatedAt;
+          
+          if (!updatedEntry.thumbnail && data.videoPath) {
+             const videoExists = await fileExists(data.videoPath);
+             if (videoExists) {
+               updatedEntry.thumbnail = generateThumbnail(data.videoPath);
+             }
+          }
+          needsSave = true;
+        } catch {
+          // Ignore read errors
+        }
+      }
+
+      validated.push(updatedEntry);
     }
 
+    if (needsSave && validated.length > 0) {
+      await writeRegistry(validated);
+    }
+    
     return validated;
   }
 
