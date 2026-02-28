@@ -43,6 +43,8 @@ class Orchestrator extends EventEmitter {
       videoUrl,
       videoName: videoName ?? "",
       videoDurationMs,
+      videoWidth: null,
+      videoHeight: null,
 
       transcript: null,
       originalTranscript: null,
