@@ -101,6 +101,12 @@ class Orchestrator extends EventEmitter {
     this.persistSession(id);
   }
 
+  setScriptText(id: string, text: string | null): void {
+    const session = this.requireSession(id);
+    session.scriptText = text;
+    this.persistSession(id);
+  }
+
   setCaptions(id: string, captions: CaptionWord[]): void {
     const session = this.requireSession(id);
     session.captions = captions;

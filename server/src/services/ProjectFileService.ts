@@ -347,6 +347,7 @@ class ProjectFileService {
       state: session.state,
       transcript: session.transcript,
       correctedTranscriptRaw: session.correctedTranscriptRaw ?? null,
+      scriptText: session.scriptText ?? null,
       captions: session.captions,
       viralClips: session.viralClips,
     };
