@@ -3,10 +3,12 @@ import { join } from "node:path";
 import { GoogleGenAI } from "@google/genai";
 import { settingsService } from "./SettingsService.js";
 
-const MODEL = "gemini-2.5-pro";
-const CHUNK_SIZE = 2000; // lines per chunk, matches existing download logic
+const MODEL = "gemini-3.1-pro-preview";
+const CHUNK_SIZE = 1000; // lines per chunk
+const MIN_CHUNK_SIZE = 500; // merge last chunk into previous if smaller
 
 type ProgressCallback = (percent: number, message: string) => void;
+
 
 // ── Helpers ──
 
@@ -52,14 +54,14 @@ class GeminiService {
 
   private async getCorrectionPrompt(): Promise<string> {
     if (this.correctionPromptCache) return this.correctionPromptCache;
-    const promptPath = join(process.cwd(), "..", "client", "public", "prompts", "correction.md");
+    const promptPath = join(process.cwd(), "..", "client", "public", "prompts", "correction-api.md");
     this.correctionPromptCache = await readFile(promptPath, "utf-8");
     return this.correctionPromptCache;
   }
 
   private async getViralClipPrompt(): Promise<string> {
     if (this.viralClipPromptCache) return this.viralClipPromptCache;
-    const promptPath = join(process.cwd(), "..", "client", "public", "prompts", "viral-clips.md");
+    const promptPath = join(process.cwd(), "..", "client", "public", "prompts", "viral-clips-api.md");
     this.viralClipPromptCache = await readFile(promptPath, "utf-8");
     return this.viralClipPromptCache;
   }
@@ -89,6 +91,11 @@ class GeminiService {
     for (let i = 0; i < lines.length; i += CHUNK_SIZE) {
       chunks.push(lines.slice(i, i + CHUNK_SIZE).join("\n"));
     }
+    // Merge last chunk into previous if it's below minimum
+    if (chunks.length >= 2 && chunks[chunks.length - 1].split("\n").length < MIN_CHUNK_SIZE) {
+      const last = chunks.pop()!;
+      chunks[chunks.length - 1] = chunks[chunks.length - 1] + "\n" + last;
+    }
 
     const correctedParts: string[] = [];
 
@@ -113,10 +120,18 @@ class GeminiService {
         chunks[i],
       ].join("\n");
 
-      const response = await ai.models.generateContent({
-        model: MODEL,
-        contents: userMessage,
-      });
+      let response;
+      try {
+        response = await ai.models.generateContent({
+          model: MODEL,
+          contents: userMessage,
+        });
+      } catch (err: unknown) {
+        const errObj = err instanceof Error ? err : new Error(String(err));
+        console.error(`[GeminiService] Error during transcript correction chunk ${i}:`, errObj.message);
+        console.error(`[GeminiService] Request payload sample:`, userMessage.substring(0, 500) + "...");
+        throw errObj;
+      }
 
       const text = response.text ?? "";
       correctedParts.push(extractCodeBlock(text));
@@ -149,10 +164,18 @@ class GeminiService {
       correctedTsv,
     ].join("\n");
 
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: userMessage,
-    });
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: MODEL,
+        contents: userMessage,
+      });
+    } catch (err: unknown) {
+      const errObj = err instanceof Error ? err : new Error(String(err));
+      console.error("[GeminiService] Error during viral clip detection:", errObj.message);
+      console.error("[GeminiService] Request payload sample:", userMessage.substring(0, 500) + "...");
+      throw errObj;
+    }
 
     return response.text ?? "";
   }

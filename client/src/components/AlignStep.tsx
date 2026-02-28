@@ -20,12 +20,12 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
 
   // Fetch prompts on mount
   useEffect(() => {
-    fetch("/prompts/correction.md")
+    fetch("/prompts/correction-manual.md")
       .then((res) => res.text())
       .then(setCorrectionPrompt)
       .catch(() => {});
       
-    fetch("/prompts/viral-clips.md")
+    fetch("/prompts/viral-clips-manual.md")
       .then((res) => res.text())
       .then(setViralClipPrompt)
       .catch(() => {});
