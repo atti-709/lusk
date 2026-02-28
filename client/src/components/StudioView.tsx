@@ -40,6 +40,7 @@ interface StudioViewProps {
   onBack: () => void;
   renders: Record<string, ClipRenderState>;
   onClipUpdate: (clip: ViralClip) => void;
+  sourceAspectRatio?: number | null;
 }
 
 function clipKey(clip: { startMs: number; endMs: number }): string {
@@ -63,9 +64,11 @@ export function StudioView({
   onBack,
   renders,
   onClipUpdate,
+  sourceAspectRatio,
 }: StudioViewProps) {
   const playerRef = useRef<PlayerRef>(null);
   const outroConfig = useOutroConfig();
+  const isVerticalSource = sourceAspectRatio != null && sourceAspectRatio < 1;
 
   // Initialize from clip state if available
   const [offsetX, setOffsetX] = useState(clip.speakerOffsetX ?? 0);
@@ -294,6 +297,7 @@ export function StudioView({
                 startFrom: startFrame,
                 outroSrc: outroConfig?.outroSrc ?? "",
                 outroDurationInFrames,
+                sourceAspectRatio,
               }}
               compositionWidth={COMP_WIDTH}
               compositionHeight={COMP_HEIGHT}
@@ -374,6 +378,7 @@ export function StudioView({
           </div>
 
           {/* Speaker position */}
+          {!isVerticalSource && (
           <div className="control-group">
             <label className="control-label">
               Speaker position
@@ -389,6 +394,7 @@ export function StudioView({
               className="offset-slider"
             />
           </div>
+          )}
 
           {/* Caption Offset */}
         <div className="control-group">

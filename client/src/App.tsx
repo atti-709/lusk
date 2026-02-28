@@ -42,10 +42,15 @@ function App() {
 
   const isReady = state && state.state === "READY";
   const isStudio = selectedClip !== null && !!isReady;
-  
+
   // A process is "working" if the backend is actively munching on something
-  const isWorking = !!state && 
+  const isWorking = !!state &&
     ["TRANSCRIBING", "ALIGNING", "RENDERING"].includes(state.state);
+
+  const sourceAspectRatio = useMemo(() => {
+    if (!state?.videoWidth || !state?.videoHeight) return null;
+    return state.videoWidth / state.videoHeight;
+  }, [state?.videoWidth, state?.videoHeight]);
 
   // Show dashboard on mount and check whisperx availability
   useEffect(() => {
@@ -609,6 +614,7 @@ function App() {
                     captions: fullVideoCaptions,
                     offsetX: 0,
                     startFrom: 0,
+                    sourceAspectRatio,
                   }}
                   compositionWidth={COMP_WIDTH}
                   compositionHeight={COMP_HEIGHT}
@@ -717,6 +723,7 @@ function App() {
             onRender={handleRender}
             onBack={handleBackToClips}
             renders={state.renders ?? {}}
+            sourceAspectRatio={sourceAspectRatio}
             onClipUpdate={(updatedClip) => {
               // Update local state for persistence
               setViralClips((prev) =>
