@@ -17,6 +17,7 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [submitError, setSubmitError] = useState("");
   const [videoName, setVideoName] = useState("project");
+  const [prefillLoaded, setPrefillLoaded] = useState(false);
 
   // Fetch prompts on mount
   useEffect(() => {
@@ -61,7 +62,8 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
           setViralText(text);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setPrefillLoaded(true));
   }, [sessionId]);
 
   const handleDownloadTsv = useCallback(async () => {
@@ -154,13 +156,14 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
     }
   }, [sessionId]);
 
-  // Auto-start Gemini if available
+  // Auto-start Gemini only after prefill confirms there is no prior correction.
+  // This prevents re-triggering when navigating back from the review screen.
   useEffect(() => {
-    if (geminiAvailable && !runningGemini) {
+    if (prefillLoaded && geminiAvailable && !runningGemini && correctedTsv === "") {
       handleRunGemini();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [geminiAvailable]);
+  }, [prefillLoaded, geminiAvailable]);
 
   return (
     <div className="align-step">
