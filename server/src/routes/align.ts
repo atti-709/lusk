@@ -365,7 +365,9 @@ function formatSrtBlock(index: number, words: CaptionWord[]): string {
   const start = msToSrtTimestamp(words[0].startMs);
   const end = msToSrtTimestamp(words[words.length - 1].endMs);
   const text = words.map(w => w.text.trim()).join(" ");
-  return `${index}\n${start} --> ${end}\n${text}\n\n`;
+  // SRT requires blank line between blocks; use CRLF per SubRip spec
+  const crlf = "\r\n";
+  return `${index}${crlf}${start} --> ${end}${crlf}${text}${crlf}${crlf}`;
 }
 
 // ... inside alignRoute function ...
