@@ -49,7 +49,10 @@ class GeminiService {
   private async getClient(): Promise<GoogleGenAI> {
     const apiKey = await settingsService.getGeminiApiKey();
     if (!apiKey) throw new Error("Gemini API key not configured");
-    return new GoogleGenAI({ apiKey });
+    return new GoogleGenAI({
+      apiKey,
+      httpOptions: { timeout: 600 * 1000 }, // 10 minute timeout for large transcript chunks
+    });
   }
 
   private async getCorrectionPrompt(): Promise<string> {
