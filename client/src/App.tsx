@@ -725,7 +725,12 @@ function App() {
                   className="secondary"
                   onClick={async () => {
                     const url = `/api/projects/${sessionId}/captions.srt`;
-                    const filename = `${state.videoName || "project"}_captions.srt`;
+                    const projectName =
+                      state.videoName?.trim() ||
+                      (state.projectFilePath
+                        ? state.projectFilePath.replace(/\\/g, "/").split("/").pop()?.replace(/\.lusk$/i, "").trim() || "project"
+                        : "project");
+                    const filename = `${projectName}_captions.srt`;
 
                     if ("showSaveFilePicker" in window) {
                       try {
