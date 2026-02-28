@@ -5,6 +5,7 @@ import { Dashboard } from "./components/Dashboard";
 import { PipelineStepper, type ReadySubView } from "./components/PipelineStepper";
 import { ClipSelector } from "./components/ClipSelector";
 import { StudioView } from "./components/StudioView";
+import { useCancelPrompt } from "./contexts/CancelPromptContext";
 import {
   VideoComposition,
   COMP_WIDTH,
@@ -132,12 +133,27 @@ function App() {
     setPendingVideoPath(null);
   }, []);
 
+  const cancelPrompt = useCancelPrompt();
   const cancelProject = useCallback((id: string) => {
     fetch(`/api/projects/${id}/cancel`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     }).catch(() => {});
   }, []);
+
+  // Register working process as cancellable for Cmd+R (transcription, alignment, render)
+  useEffect(() => {
+    if (!cancelPrompt || !sessionId || !isWorking) return;
+    const label = state?.state === "TRANSCRIBING" ? "transcription"
+      : state?.state === "ALIGNING" ? "alignment"
+      : "render";
+    cancelPrompt.register({
+      id: "project-work",
+      label,
+      onCancel: () => cancelProject(sessionId),
+    });
+    return () => cancelPrompt.unregister("project-work");
+  }, [cancelPrompt, sessionId, isWorking, state?.state, cancelProject]);
 
   const handleNewProject = useCallback(async () => {
     const lusk = window.lusk;

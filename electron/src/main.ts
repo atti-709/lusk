@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, globalShortcut } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut } from "electron";
 import { spawn, execSync, ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -252,6 +252,28 @@ app.whenReady().then(async () => {
 
   createWindow();
 
+  // macOS: explicit app menu ensures Cmd+Q (Quit) works
+  if (process.platform === "darwin") {
+    const template: Electron.MenuItemConstructorOptions[] = [
+      {
+        label: app.name,
+        submenu: [
+          { role: "about" as const },
+          { type: "separator" as const },
+          { role: "quit" as const },
+        ],
+      },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  }
+
+  // Cmd+R: request cancel prompt during long-running processes (in-app overlay, not native dialog)
+  globalShortcut.register("CommandOrControl+R", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("request-cancel-prompt");
+    }
+  });
+
   // IPC handlers for native file dialogs
   ipcMain.handle("show-save-dialog", async (_event, options: any) => {
     if (!mainWindow) return { canceled: true, filePath: null };
@@ -296,5 +318,6 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  globalShortcut.unregisterAll();
   killServer();
 });

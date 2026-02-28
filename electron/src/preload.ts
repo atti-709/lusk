@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld("lusk", {
     ipcRenderer.on("open-session", (_event, sessionId: string) => callback(sessionId));
   },
 
+  onRequestCancelPrompt: (callback: () => void) => {
+    ipcRenderer.on("request-cancel-prompt", () => callback());
+  },
+
   showSaveDialog: (options?: {
     title?: string;
     defaultPath?: string;

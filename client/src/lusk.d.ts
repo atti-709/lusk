@@ -1,6 +1,7 @@
 interface LuskBridge {
   isElectron: true;
   onOpenSession: (callback: (sessionId: string) => void) => void;
+  onRequestCancelPrompt: (callback: () => void) => void;
   showSaveDialog: (options?: {
     title?: string;
     defaultPath?: string;

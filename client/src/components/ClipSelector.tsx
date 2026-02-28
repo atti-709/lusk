@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from "react";
 import type { ViralClip, ClipRenderState, CaptionWord } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
+import { useCancelPrompt } from "../contexts/CancelPromptContext";
 import "./ClipSelector.css";
 
 function formatMs(ms: number): string {
@@ -295,6 +296,27 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
     currentKey: string | null;
     currentWasRendering: boolean;
   } | null>(null);
+  const batchCancelledRef = useRef(false);
+
+  const cancelPrompt = useCancelPrompt();
+  const stopBatch = useCallback(() => {
+    batchCancelledRef.current = true;
+    batchRef.current = null;
+    setBatchState("idle");
+    setBatchError(null);
+  }, []);
+
+  // Register batch render as cancellable for Cmd+R
+  useEffect(() => {
+    if (!cancelPrompt || (batchState !== "rendering" && batchState !== "zipping")) return;
+    batchCancelledRef.current = false;
+    cancelPrompt.register({
+      id: "batch-render",
+      label: "batch render",
+      onCancel: stopBatch,
+    });
+    return () => cancelPrompt.unregister("batch-render");
+  }, [cancelPrompt, batchState, stopBatch]);
 
   // Advance the batch queue whenever renders state changes
   useEffect(() => {
@@ -325,10 +347,12 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
       setBatchState("zipping"); // Will rename to 'exporting' in next step
       downloadClipsToDirectory(sessionId, handle)
         .then(() => {
+          if (batchCancelledRef.current) return;
           setBatchState("done");
           setTimeout(() => setBatchState("idle"), 2000);
         })
         .catch((e: Error) => {
+          if (batchCancelledRef.current) return;
           setBatchError(e.message);
           setBatchState("idle");
         });
@@ -359,6 +383,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
 
   const handleRenderAll = useCallback(async () => {
     setBatchError(null);
+    batchCancelledRef.current = false;
 
     // Ask the server to validate exported render files — clears any whose
     // .mp4 was deleted while the server was running — and return the fresh map.
