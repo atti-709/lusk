@@ -3,9 +3,11 @@ import type { ViralClip } from "@lusk/shared";
 
 interface AlignStepProps {
   sessionId: string;
+  geminiAvailable?: boolean;
 }
 
-export function AlignStep({ sessionId }: AlignStepProps) {
+export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps) {
+  const [runningGemini, setRunningGemini] = useState(false);
   const [correctionCopied, setCorrectionCopied] = useState(false);
   const [viralCopied, setViralCopied] = useState(false);
   const [correctedTsv, setCorrectedTsv] = useState("");
@@ -143,9 +145,35 @@ export function AlignStep({ sessionId }: AlignStepProps) {
     }
   }, [sessionId, viralText, correctedTsv]);
 
+  const handleRunGemini = useCallback(async () => {
+    setRunningGemini(true);
+    try {
+      await fetch(`/api/projects/${sessionId}/run-gemini`, { method: "POST" });
+      // Server fires progress events — PipelineStepper will transition the UI
+    } catch {
+      setRunningGemini(false);
+    }
+  }, [sessionId]);
+
   return (
     <div className="align-step">
       <h2 className="align-step-title">Align & Analyze with Gemini</h2>
+
+      {geminiAvailable && (
+        <div className="align-section align-gemini-cta">
+          <p className="align-section-desc">Gemini API key is configured. Let Gemini handle the correction and clip detection automatically.</p>
+          <button className="primary" onClick={handleRunGemini} disabled={runningGemini}>
+            {runningGemini ? "Starting…" : (
+              <>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "0.4rem", verticalAlign: "middle" }}>
+                  <path d="M15 4V2" /><path d="M15 16v-2" /><path d="M8 9h2" /><path d="M20 9h2" /><path d="M17.8 11.8 19 13" /><path d="M15 9h.01" /><path d="M17.8 6.2 19 5" /><path d="m3 21 9-9" /><path d="M12.2 6.2 11 5" />
+                </svg>
+                Run with Gemini
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Section 1: Download TSV */}
       <div className="align-section">

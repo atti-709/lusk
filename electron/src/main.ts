@@ -6,6 +6,25 @@ import path from "node:path";
 
 const PORT = 3000;
 let serverProcess: ChildProcess | null = null;
+
+// ── Terminal color helpers ──────────────────────────────────────────────────
+const C = {
+  reset: "\x1b[0m",
+  dim:   "\x1b[2m",
+  cyan:  "\x1b[36m",
+  yellow:"\x1b[33m",
+  red:   "\x1b[31m",
+};
+
+function prefixLines(prefix: string, data: Buffer): string {
+  return data
+    .toString()
+    .trimEnd()
+    .split("\n")
+    .map((line) => `${prefix} ${line}`)
+    .join("\n");
+}
+
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
 let pendingFilePath: string | null = null;
@@ -125,13 +144,14 @@ async function startServer(): Promise<void> {
     }
   }
 
-  console.log(`[lusk] ffmpeg: ${ffmpegPath ?? "(server will resolve)"}`);
-  console.log(`[lusk] ffprobe: ${ffprobePath ?? "(server will resolve)"}`);
+  const lusk = `${C.yellow}[lusk]${C.reset}`;
+  console.log(`${lusk} ffmpeg:  ${ffmpegPath ?? `${C.dim}(server will resolve)${C.reset}`}`);
+  console.log(`${lusk} ffprobe: ${ffprobePath ?? `${C.dim}(server will resolve)${C.reset}`}`);
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: LOGIN_PATH, // ensure server can find python3, ffmpeg, etc.
-    NODE_ENV: "production",
+    NODE_ENV: app.isPackaged ? "production" : "development",
     LUSK_PORT: String(PORT),
     LUSK_TEMP_DIR: tempDir,
     LUSK_REGISTRY_DIR: path.join(app.getPath("userData")),
@@ -151,19 +171,21 @@ async function startServer(): Promise<void> {
   });
 
   let serverStderr = "";
+  const serverOut = `${C.cyan}[server]${C.reset}`;
+  const serverErr = `${C.red}[server]${C.reset}`;
 
   serverProcess.stdout?.on("data", (data: Buffer) => {
-    console.log(`[server] ${data.toString().trimEnd()}`);
+    console.log(prefixLines(serverOut, data));
   });
 
   serverProcess.stderr?.on("data", (data: Buffer) => {
     const text = data.toString().trimEnd();
-    console.error(`[server] ${text}`);
+    console.error(prefixLines(serverErr, data));
     serverStderr = (serverStderr + "\n" + text).slice(-2000);
   });
 
   serverProcess.on("exit", (code) => {
-    console.log(`Server process exited with code ${code}`);
+    console.log(`${C.yellow}[lusk]${C.reset} server exited (code ${code})`);
     if (isQuitting) return;
     if (mainWindow && !mainWindow.isDestroyed()) {
       dialog.showErrorBox(

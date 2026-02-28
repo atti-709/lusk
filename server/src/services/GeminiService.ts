@@ -28,6 +28,8 @@ function wordsToTsv(words: TranscriptWord[]): string {
   return words.map((w) => `${msToTimestamp(w.startMs)}\t${w.word}`).join("\n");
 }
 
+export { wordsToTsv };
+
 function extractCodeBlock(response: string): string {
   // Extract content from ```...``` code block
   const match = response.match(/```(?:tsv)?\s*\n([\s\S]*?)\n```/);

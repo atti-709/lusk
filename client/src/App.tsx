@@ -33,7 +33,7 @@ function App() {
   const [projectLoading, setProjectLoading] = useState(false);
   const [readySubView, setReadySubView] = useState<ReadySubView>("review");
   const [whisperxAvailable, setWhisperxAvailable] = useState<boolean>(true);
-  const [scriptText, setScriptText] = useState<string | null>(null);
+  const [geminiAvailable, setGeminiAvailable] = useState<boolean>(false);
   const [scriptFileName, setScriptFileName] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -48,6 +48,9 @@ function App() {
       .then((data) => {
         if (typeof data.whisperxAvailable === "boolean") {
           setWhisperxAvailable(data.whisperxAvailable);
+        }
+        if (typeof data.geminiApiKeySet === "boolean") {
+          setGeminiAvailable(data.geminiApiKeySet);
         }
       })
       .catch(() => {});
@@ -96,8 +99,8 @@ function App() {
     setViralClips([]);
     setSelectedClip(null);
     setReadySubView("review");
-    setScriptText(null);
     setScriptFileName(null);
+    setPendingVideoPath(null);
   }, []);
 
   const cancelTranscription = useCallback((id: string) => {
@@ -200,6 +203,8 @@ function App() {
   // Upload video to an existing IDLE session
   const [idleUploadError, setIdleUploadError] = useState<string | null>(null);
   const [idleDragOver, setIdleDragOver] = useState(false);
+  const [scriptDragOver, setScriptDragOver] = useState(false);
+  const [pendingVideoPath, setPendingVideoPath] = useState<string | null>(null);
 
   const VIDEO_EXTENSIONS = ["mp4", "mov", "mkv", "avi", "webm"];
 
@@ -229,8 +234,9 @@ function App() {
       filters: [{ name: "Video", extensions: VIDEO_EXTENSIONS }],
     });
     if (result.canceled || !result.filePath) return;
-    selectVideoForProject(result.filePath);
-  }, [selectVideoForProject]);
+    setIdleUploadError(null);
+    setPendingVideoPath(result.filePath);
+  }, []);
 
   const handleIdleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -247,8 +253,19 @@ function App() {
       setIdleUploadError(`Unsupported format. Use: ${VIDEO_EXTENSIONS.join(", ")}`);
       return;
     }
-    selectVideoForProject(filePath);
-  }, [selectVideoForProject]);
+    setIdleUploadError(null);
+    setPendingVideoPath(filePath);
+  }, []);
+
+  const handleIdleNext = useCallback(async () => {
+    if (!pendingVideoPath || !sessionId) return;
+    await selectVideoForProject(pendingVideoPath);
+    fetch("/api/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    }).catch(() => {});
+  }, [pendingVideoPath, sessionId, selectVideoForProject]);
 
   const handleScriptFile = useCallback(async (filePath: string) => {
     if (!sessionId) return;
@@ -265,7 +282,6 @@ function App() {
         body: JSON.stringify({ scriptText: content }),
       });
       if (res.ok) {
-        setScriptText(content);
         setScriptFileName(fileName);
       }
     } catch {
@@ -292,7 +308,6 @@ function App() {
           body: JSON.stringify({ scriptText: content }),
         });
         if (res.ok) {
-          setScriptText(content);
           setScriptFileName(file.name);
         }
       };
@@ -310,16 +325,6 @@ function App() {
     if (result.canceled || !result.filePath) return;
     handleScriptFile(result.filePath);
   }, [handleScriptFile]);
-
-  const handleTranscribe = useCallback(async () => {
-    if (!sessionId) return;
-
-    await fetch("/api/transcribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId }),
-    });
-  }, [sessionId]);
 
   const handleSelectClip = useCallback((clip: ViralClip) => {
     setSelectedClip(clip);
@@ -410,11 +415,24 @@ function App() {
     setView("dashboard");
   }, [view, sessionId, state?.state, cancelTranscription, resetSessionState]);
 
+  // Intercept Cmd+R to show the same guard as the logo click instead of reloading
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === "r") {
+        e.preventDefault();
+        handleLogoClick();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleLogoClick]);
+
   return (
     <div className="app">
       <header className="app-header">
-        <div 
-          className="logo-container" 
+        <div className="header-side" />
+        <div
+          className="logo-container"
           onClick={handleLogoClick}
           role="button"
           tabIndex={0}
@@ -423,19 +441,21 @@ function App() {
           <div className="logo-mark"><Logo /></div>
           <h1>Lusk</h1>
         </div>
-        <button
-          className="settings-btn"
-          onClick={() => setSettingsOpen(true)}
-          title="Settings"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
+        <div className="header-side header-actions">
+          <button
+            className="settings-btn"
+            onClick={() => setSettingsOpen(true)}
+            title="Settings"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        </div>
       </header>
 
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onKeySet={setGeminiAvailable} />
 
       {view === "loading" && <div className="connecting">Loading</div>}
 
@@ -458,8 +478,8 @@ function App() {
             videoUrl={state.videoUrl}
             sessionId={sessionId}
             readySubView={readySubView}
-            onTranscribe={handleTranscribe}
             whisperxAvailable={whisperxAvailable}
+            geminiAvailable={geminiAvailable}
           />
         </div>
       )}
@@ -481,22 +501,27 @@ function App() {
               </svg>
             </div>
             <h2>Add a source video</h2>
-            <p>Drag & drop a video file here, or click to browse.</p>
-            {state.videoName && (
+            {pendingVideoPath ? (
+              <p className="script-loaded">{pendingVideoPath.split("/").pop()}</p>
+            ) : (
+              <p>Drag & drop a video file here, or click to browse.</p>
+            )}
+            {state.videoName && !pendingVideoPath && (
               <p className="idle-filename-hint">
                 Looking for: <code>{state.videoName}.mp4</code>
               </p>
             )}
-            <button className="primary" onClick={handleIdleVideoSelect}>
+            <button className="secondary" onClick={handleIdleVideoSelect}>
               Browse files
             </button>
           </div>
 
           {/* Script drop zone */}
           <div
-            className="idle-notice idle-dropzone script-dropzone"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleScriptDrop}
+            className={`idle-notice idle-dropzone script-dropzone${scriptDragOver ? " drag-over" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); setScriptDragOver(true); }}
+            onDragLeave={() => setScriptDragOver(false)}
+            onDrop={(e) => { setScriptDragOver(false); handleScriptDrop(e); }}
           >
             <div className="upload-icon">
               <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -512,6 +537,9 @@ function App() {
             ) : (
               <p>Drag & drop a .md script for AI-powered transcript correction.</p>
             )}
+            {!geminiAvailable && (
+              <p className="settings-hint">No Gemini API key — configure in <button className="inline-link" onClick={() => setSettingsOpen(true)}>Settings</button></p>
+            )}
             <button className="secondary" onClick={handleScriptBrowse}>
               Browse scripts
             </button>
@@ -519,6 +547,17 @@ function App() {
 
           {idleUploadError && (
             <p className="idle-error">{idleUploadError}</p>
+          )}
+
+          {pendingVideoPath && (
+            <div className="idle-next-row">
+              <button className="primary" onClick={handleIdleNext}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 4V2" /><path d="M15 16v-2" /><path d="M8 9h2" /><path d="M20 9h2" /><path d="M17.8 11.8 19 13" /><path d="M15 9h.01" /><path d="M17.8 6.2 19 5" /><path d="m3 21 9-9" /><path d="M12.2 6.2 11 5" />
+                </svg>
+                Start
+              </button>
+            </div>
           )}
         </div>
       )}

@@ -8,14 +8,24 @@
 /* ── Header ── */
 .app-header {
   width: 100%;
-  padding: 1.5rem 2rem;
+  padding: 0.75rem 1.5rem;
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.75rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   -webkit-app-region: drag;
+}
+
+.header-side {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.header-actions {
+  justify-content: flex-end;
+  -webkit-app-region: no-drag;
 }
 
 .app-header h1 {
@@ -176,6 +186,19 @@
   color: var(--error);
   font-size: 0.8rem;
   margin: 0;
+}
+
+.idle-next-row {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+}
+
+.idle-next-row .primary {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .idle-filename-hint {
@@ -353,16 +376,16 @@
 
 /* ── Settings ── */
 .settings-btn {
-  position: absolute;
-  right: 1.5rem;
   background: none;
   border: none;
-  color: var(--text-dim);
+  color: var(--text-muted);
   cursor: pointer;
   padding: 0.4rem;
   border-radius: 8px;
   transition: color 0.2s, background 0.2s;
   -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
 }
 
 .settings-btn:hover {
@@ -430,8 +453,16 @@
   margin: 0.5rem 0 0;
 }
 
-.settings-hint a {
+.settings-hint a,
+.settings-hint .inline-link {
   color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .settings-actions {

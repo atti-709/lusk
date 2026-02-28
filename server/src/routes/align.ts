@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import archiver from "archiver";
 import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord } from "@lusk/shared";
+import { runGeminiAutomation } from "./transcribe.js";
 
 // ── Helpers ──
 
@@ -400,6 +401,34 @@ function formatSrtBlock(index: number, words: CaptionWord[]): string {
       }
 
       orchestrator.setScriptText(projectId, scriptText);
+      return { success: true as const };
+    }
+  );
+
+  // POST /api/projects/:projectId/run-gemini
+  // Trigger Gemini automation on a session already in ALIGNING state
+  app.post<{ Params: { projectId: string }; Reply: { success: true } | ErrorResponse }>(
+    "/api/projects/:projectId/run-gemini",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
+
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+      if (session.state !== "ALIGNING") {
+        return reply.status(409).send({ success: false, error: `Cannot run Gemini in state: ${session.state}` });
+      }
+      if (!session.transcript) {
+        return reply.status(409).send({ success: false, error: "No transcript available" });
+      }
+
+      // Reset progress so the UI shows the automation running
+      orchestrator.updateProgress(projectId, 0, "Starting Gemini...");
+
+      // Fire-and-forget — progress events update the client
+      runGeminiAutomation(projectId, app.log).catch(() => {});
+
       return { success: true as const };
     }
   );

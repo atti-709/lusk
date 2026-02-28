@@ -3,9 +3,10 @@ import { useState, useEffect, useCallback } from "react";
 interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
+  onKeySet?: (isSet: boolean) => void;
 }
 
-export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
+export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps) {
   const [apiKey, setApiKey] = useState("");
   const [isSet, setIsSet] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -36,6 +37,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       if (res.ok) {
         setIsSet(true);
         setStatus("Saved");
+        onKeySet?.(true);
         setTimeout(() => setStatus(null), 2000);
       }
     } catch {
