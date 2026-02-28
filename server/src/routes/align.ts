@@ -16,11 +16,20 @@ function msToTimestamp(ms: number): string {
 
 function timestampToMs(ts: string): number {
   const parts = ts.split(":");
-  if (parts.length !== 3) throw new Error(`Invalid timestamp: ${ts}`);
-  const h = parseFloat(parts[0]);
-  const m = parseFloat(parts[1]);
-  const s = parseFloat(parts[2]);
-  return Math.round((h * 3600 + m * 60 + s) * 1000);
+  if (parts.length === 3) {
+    // HH:MM:SS.mmm
+    const h = parseFloat(parts[0]);
+    const m = parseFloat(parts[1]);
+    const s = parseFloat(parts[2]);
+    return Math.round((h * 3600 + m * 60 + s) * 1000);
+  }
+  if (parts.length === 2) {
+    // MM:SS.mmm (Gemini sometimes abbreviates 00:00:11.260 as 00:11.260)
+    const m = parseFloat(parts[0]);
+    const s = parseFloat(parts[1]);
+    return Math.round((m * 60 + s) * 1000);
+  }
+  throw new Error(`Invalid timestamp: ${ts}`);
 }
 
 function wordsToTsv(words: TranscriptWord[]): string {
