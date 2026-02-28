@@ -106,6 +106,23 @@ function App() {
     return () => { isMounted = false; };
   }, [sessionId, isReady]);
 
+  // Fetch whisper captions when entering ALIGNING state (for preview during alignment)
+  useEffect(() => {
+    if (!sessionId || state?.state !== "ALIGNING" || captions.length > 0) return;
+
+    let isMounted = true;
+    fetch(`/api/projects/${sessionId}`)
+      .then((r) => r.json())
+      .then((data: ProjectState) => {
+        if (!isMounted || !data.captions) return;
+        setCaptions(data.captions);
+      })
+      .catch(() => {});
+
+    return () => { isMounted = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, state?.state]);
+
   const resetSessionState = useCallback(() => {
     setCaptions([]);
     setViralClips([]);
