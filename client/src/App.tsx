@@ -530,6 +530,8 @@ function App() {
             readySubView={readySubView}
             whisperxAvailable={whisperxAvailable}
             geminiAvailable={geminiAvailable}
+            captions={captions}
+            sourceAspectRatio={sourceAspectRatio}
           />
         </div>
       )}

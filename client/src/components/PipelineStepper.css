@@ -116,6 +116,17 @@
   display: block;
 }
 
+/* ── Align phase preview player ── */
+.align-preview-player {
+  width: 100%;
+  max-width: 400px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
 /* ── Progress area ── */
 .progress-area {
   width: 100%;
