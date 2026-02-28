@@ -2,6 +2,8 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
+import { geminiService } from "../services/GeminiService.js";
+import { parseTsv, parseViralClipText, wordsToCaptions } from "./align.js";
 import type { TranscribeRequest, ErrorResponse } from "@lusk/shared";
 
 type Logger = Pick<FastifyInstance["log"], "error">;
@@ -31,7 +33,57 @@ export async function doTranscribe(sessionId: string, log: Logger, signal?: Abor
   orchestrator.setCaptions(sessionId, captions);
 
   orchestrator.transition(sessionId, "ALIGNING");
-  orchestrator.updateProgress(sessionId, 100, "Transcript ready — download and correct with Gemini");
+
+  // Auto-run Gemini correction + viral clip detection if script and API key are available
+  const session = orchestrator.getSession(sessionId);
+  const hasScript = !!session?.scriptText;
+  const geminiAvailable = await geminiService.isAvailable();
+
+  if (hasScript && geminiAvailable && session) {
+    try {
+      orchestrator.updateProgress(sessionId, 5, "Starting Gemini correction...");
+
+      // 1. Correct transcript
+      const correctedTsv = await geminiService.correctTranscript(
+        transcript.words,
+        session.scriptText!,
+        (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
+        signal,
+      );
+
+      // Parse and apply corrected transcript
+      const lastWord = transcript.words.at(-1);
+      const fallbackEndMs = lastWord ? lastWord.endMs : 0;
+      const correctedWords = parseTsv(correctedTsv, fallbackEndMs);
+      const correctedTranscript = { text: "", words: correctedWords };
+
+      orchestrator.setTranscript(sessionId, correctedTranscript);
+      orchestrator.setCorrectedTranscriptRaw(sessionId, correctedTsv);
+      orchestrator.setCaptions(sessionId, wordsToCaptions(correctedWords));
+
+      // 2. Detect viral clips
+      const viralClipText = await geminiService.detectViralClips(
+        correctedTsv,
+        (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
+        signal,
+      );
+
+      const clips = viralClipText.trim() ? parseViralClipText(viralClipText) : [];
+      orchestrator.setViralClips(sessionId, clips);
+
+      // Transition to READY
+      orchestrator.transition(sessionId, "READY");
+      orchestrator.updateProgress(sessionId, 100, "Ready to review");
+    } catch (err: any) {
+      if (signal?.aborted) throw err; // re-throw cancellation
+      // Gemini failed — stay in ALIGNING for manual fallback
+      log.error(err, "Gemini automation failed, falling back to manual");
+      orchestrator.updateProgress(sessionId, 100, "Gemini failed — use manual workflow below");
+    }
+  } else {
+    // No script or no API key — manual workflow
+    orchestrator.updateProgress(sessionId, 100, "Transcript ready — download and correct with Gemini");
+  }
 }
 
 async function runTranscription(sessionId: string, log: Logger): Promise<void> {

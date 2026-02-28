@@ -26,7 +26,7 @@ function wordsToTsv(words: TranscriptWord[]): string {
   return words.map((w) => `${msToTimestamp(w.startMs)}\t${w.word}`).join("\n");
 }
 
-function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
+export function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
   const lines = tsv.trim().split("\n").filter((l) => l.trim());
   const words: TranscriptWord[] = [];
   for (const line of lines) {
@@ -42,7 +42,7 @@ function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
   return words;
 }
 
-function parseViralClipText(text: string): ViralClip[] {
+export function parseViralClipText(text: string): ViralClip[] {
   const clips: ViralClip[] = [];
   // Split on "CLIP N" headers
   const blocks = text.split(/^CLIP\s+\d+/im).filter((b) => b.trim());
@@ -65,7 +65,7 @@ function parseViralClipText(text: string): ViralClip[] {
   return clips;
 }
 
-function wordsToCaptions(words: TranscriptWord[]): CaptionWord[] {
+export function wordsToCaptions(words: TranscriptWord[]): CaptionWord[] {
   return words.map((w, i) => ({
     text: i === 0 ? w.word : ` ${w.word}`,
     startMs: w.startMs,
