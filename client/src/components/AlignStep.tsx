@@ -154,6 +154,14 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
     }
   }, [sessionId]);
 
+  // Auto-start Gemini if available
+  useEffect(() => {
+    if (geminiAvailable && !runningGemini) {
+      handleRunGemini();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geminiAvailable]);
+
   return (
     <div className="align-step">
       <h2 className="align-step-title">Align & Analyze with Gemini</h2>
