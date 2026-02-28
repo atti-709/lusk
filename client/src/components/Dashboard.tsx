@@ -21,6 +21,15 @@ function formatTime(iso: string): string {
   return d.toLocaleDateString();
 }
 
+/** Display name: videoName if set, otherwise basename of .lusk file without extension. */
+function getProjectDisplayName(p: RecentProject): string {
+  if (p.videoName?.trim()) return p.videoName;
+  const parts = p.projectPath.replace(/\\/g, "/").split("/");
+  const base = parts[parts.length - 1] ?? "project";
+  const name = base.replace(/\.lusk$/i, "").trim();
+  return name || "Untitled Project";
+}
+
 interface DashboardProps {
   onOpenProject: (projectId: string, projectPath: string) => void;
   onNewProject: () => void;
@@ -92,7 +101,7 @@ export function Dashboard({ onOpenProject, onNewProject, onOpenFile, whisperxAva
                   )}
                 </div>
                 <div className="project-card__info">
-                  <span className="project-card__name">{p.videoName}</span>
+                  <span className="project-card__name">{getProjectDisplayName(p)}</span>
                   <span className="project-card__meta">
                     <span className={`state-badge state-badge--${p.state.toLowerCase()}`}>
                       {STATE_LABELS[p.state] ?? p.state}

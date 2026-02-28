@@ -49,6 +49,7 @@ class Orchestrator extends EventEmitter {
       transcript: null,
       originalTranscript: null,
       correctedTranscriptRaw: null,
+      scriptText: null,
       captions: null,
       viralClips: null,
       outputUrl: null,
