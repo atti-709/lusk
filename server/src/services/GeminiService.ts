@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { GoogleGenAI } from "@google/genai";
 import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
+import { getClientPublicDir } from "../config/paths.js";
 
 // Increase global fetch timeouts to 15 minutes to prevent Headers Timeout Error
 // because undici defaults to 5 minutes (300_000ms) which breaks long Gemini streams.
@@ -68,14 +69,14 @@ class GeminiService {
 
   private async getCorrectionPrompt(): Promise<string> {
     if (this.correctionPromptCache) return this.correctionPromptCache;
-    const promptPath = join(process.cwd(), "..", "client", "public", "prompts", "correction-api.md");
+    const promptPath = join(getClientPublicDir(), "prompts", "correction-api.md");
     this.correctionPromptCache = await readFile(promptPath, "utf-8");
     return this.correctionPromptCache;
   }
 
   private async getViralClipPrompt(): Promise<string> {
     if (this.viralClipPromptCache) return this.viralClipPromptCache;
-    const promptPath = join(process.cwd(), "..", "client", "public", "prompts", "viral-clips-api.md");
+    const promptPath = join(getClientPublicDir(), "prompts", "viral-clips-api.md");
     this.viralClipPromptCache = await readFile(promptPath, "utf-8");
     return this.viralClipPromptCache;
   }
