@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { spawn, execSync, ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 const PORT = 3000;
@@ -252,6 +253,10 @@ app.whenReady().then(async () => {
       canceled: result.canceled,
       filePath: result.filePaths?.[0] ?? null,
     };
+  });
+
+  ipcMain.handle("read-file", async (_event, filePath: string) => {
+    return readFile(filePath, "utf-8");
   });
 
   app.on("activate", () => {

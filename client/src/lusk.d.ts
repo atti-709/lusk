@@ -12,6 +12,7 @@ interface LuskBridge {
     filters?: { name: string; extensions: string[] }[];
   }) => Promise<{ canceled: boolean; filePath: string | null }>;
   getFilePath: (file: File) => string;
+  readFile: (filePath: string) => Promise<string>;
 }
 
 declare global {

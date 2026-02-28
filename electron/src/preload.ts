@@ -20,4 +20,6 @@ contextBridge.exposeInMainWorld("lusk", {
   }) => ipcRenderer.invoke("show-open-dialog", options ?? {}),
 
   getFilePath: (file: File) => webUtils.getPathForFile(file),
+
+  readFile: (filePath: string) => ipcRenderer.invoke("read-file", filePath),
 });
