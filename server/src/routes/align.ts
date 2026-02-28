@@ -370,11 +370,37 @@ function formatSrtBlock(index: number, words: CaptionWord[]): string {
       }
 
       const srt = captionsToSrt(session.captions);
-      
+
       return reply
         .header("Content-Type", "application/x-subrip")
         .header("Content-Disposition", 'attachment; filename="captions.srt"')
         .send(srt);
+    }
+  );
+
+  // 5g. Upload reference script text
+  app.post<{
+    Params: { projectId: string };
+    Body: { scriptText: string };
+    Reply: { success: true } | ErrorResponse;
+  }>(
+    "/api/projects/:projectId/script",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
+
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+
+      const { scriptText } = (request.body ?? {}) as Partial<{ scriptText: string }>;
+
+      if (!scriptText || typeof scriptText !== "string") {
+        return reply.status(400).send({ success: false, error: "scriptText is required" });
+      }
+
+      orchestrator.setScriptText(projectId, scriptText);
+      return { success: true as const };
     }
   );
 }
