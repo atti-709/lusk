@@ -194,6 +194,29 @@
   border-radius: 5px;
 }
 
+.script-dropzone {
+  margin-top: 0;
+  border-style: dashed;
+  border-width: 1px;
+  padding: 1.5rem 2rem;
+}
+
+.optional-badge {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface);
+  padding: 0.15em 0.5em;
+  border-radius: 6px;
+  vertical-align: middle;
+  margin-left: 0.3em;
+}
+
+.script-loaded {
+  color: var(--accent) !important;
+  font-weight: 600;
+}
+
 /* ── Dashboard ── */
 .dashboard {
   max-width: 900px;

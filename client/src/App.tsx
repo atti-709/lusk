@@ -32,6 +32,8 @@ function App() {
   const [projectLoading, setProjectLoading] = useState(false);
   const [readySubView, setReadySubView] = useState<ReadySubView>("review");
   const [whisperxAvailable, setWhisperxAvailable] = useState<boolean>(true);
+  const [scriptText, setScriptText] = useState<string | null>(null);
+  const [scriptFileName, setScriptFileName] = useState<string | null>(null);
 
   const isReady = state && state.state === "READY";
   const isStudio = selectedClip !== null && !!isReady;
@@ -92,6 +94,8 @@ function App() {
     setViralClips([]);
     setSelectedClip(null);
     setReadySubView("review");
+    setScriptText(null);
+    setScriptFileName(null);
   }, []);
 
   const cancelTranscription = useCallback((id: string) => {
@@ -243,6 +247,67 @@ function App() {
     }
     selectVideoForProject(filePath);
   }, [selectVideoForProject]);
+
+  const handleScriptFile = useCallback(async (filePath: string) => {
+    if (!sessionId) return;
+    const fileName = filePath.split("/").pop() ?? filePath;
+    try {
+      const content = await window.lusk?.readFile?.(filePath);
+      if (!content) {
+        setIdleUploadError("Could not read script file");
+        return;
+      }
+      const res = await fetch(`/api/projects/${sessionId}/script`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scriptText: content }),
+      });
+      if (res.ok) {
+        setScriptText(content);
+        setScriptFileName(fileName);
+      }
+    } catch {
+      setIdleUploadError("Failed to upload script");
+    }
+  }, [sessionId]);
+
+  const handleScriptDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const filePath = window.lusk?.getFilePath?.(file) ?? "";
+    if (filePath) {
+      handleScriptFile(filePath);
+    } else {
+      // Browser fallback: read via FileReader
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const content = reader.result as string;
+        if (!sessionId) return;
+        const res = await fetch(`/api/projects/${sessionId}/script`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scriptText: content }),
+        });
+        if (res.ok) {
+          setScriptText(content);
+          setScriptFileName(file.name);
+        }
+      };
+      reader.readAsText(file);
+    }
+  }, [sessionId, handleScriptFile]);
+
+  const handleScriptBrowse = useCallback(async () => {
+    const lusk = window.lusk;
+    if (!lusk) return;
+    const result = await lusk.showOpenDialog({
+      title: "Select reference script",
+      filters: [{ name: "Markdown", extensions: ["md", "txt"] }],
+    });
+    if (result.canceled || !result.filePath) return;
+    handleScriptFile(result.filePath);
+  }, [handleScriptFile]);
 
   const handleTranscribe = useCallback(async () => {
     if (!sessionId) return;
@@ -411,10 +476,36 @@ function App() {
             <button className="primary" onClick={handleIdleVideoSelect}>
               Browse files
             </button>
-            {idleUploadError && (
-              <p className="idle-error">{idleUploadError}</p>
-            )}
           </div>
+
+          {/* Script drop zone */}
+          <div
+            className="idle-notice idle-dropzone script-dropzone"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleScriptDrop}
+          >
+            <div className="upload-icon">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+              </svg>
+            </div>
+            <h2>Add reference script <span className="optional-badge">optional</span></h2>
+            {scriptFileName ? (
+              <p className="script-loaded">{scriptFileName}</p>
+            ) : (
+              <p>Drag & drop a .md script for AI-powered transcript correction.</p>
+            )}
+            <button className="secondary" onClick={handleScriptBrowse}>
+              Browse scripts
+            </button>
+          </div>
+
+          {idleUploadError && (
+            <p className="idle-error">{idleUploadError}</p>
+          )}
         </div>
       )}
 
