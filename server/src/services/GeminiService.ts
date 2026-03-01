@@ -162,30 +162,23 @@ class GeminiService {
     const prompt = await this.getCorrectionPrompt();
     const fullTsv = wordsToTsv(words);
     const lines = fullTsv.split("\n");
+    const totalInputLines = lines.length;
 
-    // Chunk if needed
-    const chunks: string[] = [];
-    for (let i = 0; i < lines.length; i += CHUNK_SIZE) {
-      chunks.push(lines.slice(i, i + CHUNK_SIZE).join("\n"));
-    }
-    // Merge last chunk into previous if it's below minimum
-    // TODO: Remove in Task 3 — old chunking logic replaced by buildSlidingWindowChunks
-    const MIN_CHUNK_SIZE = OVERLAP;
-    if (chunks.length >= 2 && chunks[chunks.length - 1].split("\n").length < MIN_CHUNK_SIZE) {
-      const last = chunks.pop()!;
-      chunks[chunks.length - 1] = chunks[chunks.length - 1] + "\n" + last;
-    }
-
-    const correctedParts: string[] = [];
+    const chunks = buildSlidingWindowChunks(lines);
+    const correctedLines: string[] = [];
 
     for (let i = 0; i < chunks.length; i++) {
       if (signal?.aborted) throw new Error("Cancelled");
 
+      const chunk = chunks[i];
       const chunkLabel = chunks.length > 1 ? ` (chunk ${i + 1}/${chunks.length})` : "";
       onProgress(
         Math.round((i / chunks.length) * 80),
         `Correcting transcript with Gemini${chunkLabel}...`,
       );
+
+      const chunkLines = lines.slice(chunk.startIndex, chunk.endIndex);
+      const chunkTsv = chunkLines.join("\n");
 
       const userMessage = [
         prompt,
@@ -196,7 +189,7 @@ class GeminiService {
         "",
         "## Raw Transcription (.tsv):",
         "",
-        chunks[i],
+        chunkTsv,
       ].join("\n");
 
       let response;
@@ -213,10 +206,31 @@ class GeminiService {
       }
 
       const text = response.text ?? "";
-      correctedParts.push(extractCodeBlock(text));
+      const resultLines = extractCodeBlock(text).split("\n").filter((l) => l.trim());
+
+      // Validate: LLM must return exactly as many lines as we sent
+      const startTs = chunkLines[0]?.split("\t")[0] ?? "?";
+      const endTs = chunkLines[chunkLines.length - 1]?.split("\t")[0] ?? "?";
+      validateChunkRowCount(resultLines.length, chunkLines.length, i, chunks.length, startTs, endTs);
+
+      if (chunk.isFirst) {
+        correctedLines.push(...resultLines);
+      } else {
+        // Discard the overlap lines, keep only new lines
+        correctedLines.push(...resultLines.slice(OVERLAP));
+      }
     }
 
-    return correctedParts.join("\n");
+    // Final validation: total output must match total input
+    if (correctedLines.length !== totalInputLines) {
+      throw new Error(
+        `Final validation failed: input had ${totalInputLines} lines, ` +
+        `but corrected output has ${correctedLines.length} lines. ` +
+        `Pipeline halted.`,
+      );
+    }
+
+    return correctedLines.join("\n");
   }
 
   /**
