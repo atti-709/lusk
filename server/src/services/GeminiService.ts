@@ -148,6 +148,8 @@ class GeminiService {
       chunks.push(lines.slice(i, i + CHUNK_SIZE).join("\n"));
     }
     // Merge last chunk into previous if it's below minimum
+    // TODO: Remove in Task 3 — old chunking logic replaced by buildSlidingWindowChunks
+    const MIN_CHUNK_SIZE = OVERLAP;
     if (chunks.length >= 2 && chunks[chunks.length - 1].split("\n").length < MIN_CHUNK_SIZE) {
       const last = chunks.pop()!;
       chunks[chunks.length - 1] = chunks[chunks.length - 1] + "\n" + last;
