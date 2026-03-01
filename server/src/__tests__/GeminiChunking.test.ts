@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSlidingWindowChunks } from "../services/GeminiService.js";
+import { buildSlidingWindowChunks, validateChunkRowCount } from "../services/GeminiService.js";
 
 describe("buildSlidingWindowChunks", () => {
   const makeLines = (n: number) => Array.from({ length: n }, (_, i) => `line${i}`);
@@ -51,5 +51,23 @@ describe("buildSlidingWindowChunks", () => {
     expect(chunks).toHaveLength(2);
     expect(chunks[0]).toEqual({ startIndex: 0, endIndex: 500, isFirst: true });
     expect(chunks[1]).toEqual({ startIndex: 450, endIndex: 600, isFirst: false });
+  });
+});
+
+describe("validateChunkRowCount", () => {
+  it("does nothing when counts match", () => {
+    expect(() => validateChunkRowCount(500, 500, 0, 5, "00:00:00.000", "00:05:00.000")).not.toThrow();
+  });
+
+  it("throws when counts differ", () => {
+    expect(() => validateChunkRowCount(498, 500, 2, 5, "00:03:45.123", "00:07:52.456")).toThrow(
+      /Chunk validation failed: chunk 3\/5, expected 500 lines, got 498/,
+    );
+  });
+
+  it("includes timestamp range in error", () => {
+    expect(() => validateChunkRowCount(501, 500, 1, 3, "00:01:00.000", "00:03:00.000")).toThrow(
+      /00:01:00.000.*00:03:00.000/,
+    );
   });
 });

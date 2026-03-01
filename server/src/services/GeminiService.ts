@@ -66,6 +66,24 @@ export function buildSlidingWindowChunks(
   return chunks;
 }
 
+export function validateChunkRowCount(
+  actual: number,
+  expected: number,
+  chunkIndex: number,
+  totalChunks: number,
+  startTimestamp: string,
+  endTimestamp: string,
+): void {
+  if (actual !== expected) {
+    throw new Error(
+      `Chunk validation failed: chunk ${chunkIndex + 1}/${totalChunks}, ` +
+      `expected ${expected} lines, got ${actual}. ` +
+      `Timestamp range: ${startTimestamp} – ${endTimestamp}. ` +
+      `Pipeline halted. Investigate this segment manually.`,
+    );
+  }
+}
+
 // ── Helpers ──
 
 function msToTimestamp(ms: number): string {
