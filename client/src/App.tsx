@@ -457,6 +457,21 @@ function App() {
     Math.ceil((fullVideoClip.endMs / 1000) * COMP_FPS)
   );
 
+  // Memoize inputProps and style to prevent Remotion Player from resetting
+  // its internal animation state on parent re-renders.
+  const reviewPlayerInputProps = useMemo(
+    () => ({
+      videoUrl: state?.videoUrl ?? "",
+      captions: fullVideoCaptions,
+      offsetX: 0,
+      startFrom: 0,
+      sourceAspectRatio,
+    }),
+    [state?.videoUrl, fullVideoCaptions, sourceAspectRatio]
+  );
+
+  const reviewPlayerStyle = useMemo(() => ({ width: "100%" as const }), []);
+
   // Show step track when in session (both pre-READY and READY states)
   const showStepper = view === "session" && sessionId && state;
 
@@ -693,18 +708,12 @@ function App() {
               <div className="review-player">
                 <Player
                   component={VideoComposition}
-                  inputProps={{
-                    videoUrl: state.videoUrl,
-                    captions: fullVideoCaptions,
-                    offsetX: 0,
-                    startFrom: 0,
-                    sourceAspectRatio,
-                  }}
+                  inputProps={reviewPlayerInputProps}
                   compositionWidth={COMP_WIDTH}
                   compositionHeight={COMP_HEIGHT}
                   durationInFrames={fullVideoDurationFrames}
                   fps={COMP_FPS}
-                  style={{ width: "100%" }}
+                  style={reviewPlayerStyle}
                   controls
                   loop
                 />

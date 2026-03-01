@@ -95,10 +95,11 @@ function isRetryableError(err: unknown): boolean {
     // Gemini 503 / 429 / rate limit
     if (msg.includes("503") || msg.includes("429") || msg.includes("UNAVAILABLE") || msg.includes("RESOURCE_EXHAUSTED")) return true;
     // Our own row count validation failure
-    if (msg.includes("Chunk validation failed")) return true;
+    if (msg.includes("row mismatch")) return true;
   }
   return false;
 }
+
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -245,34 +246,54 @@ class GeminiService {
         chunkTsv,
       ].join("\n");
 
-      const startTs = chunkLines[0]?.split("\t")[0] ?? "?";
-      const endTs = chunkLines[chunkLines.length - 1]?.split("\t")[0] ?? "?";
       const expectedLines = chunkLines.filter((l) => l.trim()).length;
 
       let resultLines: string[] = [];
+      let retryFeedback: string | null = null; // mismatch feedback injected on retry
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         if (signal?.aborted) throw new Error("Cancelled");
 
         try {
+          // On retry after row mismatch, append correction feedback to the prompt
+          const contents = retryFeedback
+            ? userMessage + "\n\n" + retryFeedback
+            : userMessage;
+
           const response = await ai.models.generateContent({
             model: MODEL,
-            contents: userMessage,
-            config: { temperature: 0 },
+            contents,
           });
 
           const text = response.text ?? "";
           resultLines = extractCodeBlock(text).split("\n").filter((l) => l.trim());
 
           if (resultLines.length !== expectedLines) {
-            console.error(`[GeminiService] Row count mismatch in chunk ${i}: expected ${expectedLines}, got ${resultLines.length}`);
             const inputTimestamps = chunkLines.map((l) => l.split("\t")[0]);
             const outputTimestamps = resultLines.map((l) => l.split("\t")[0]);
             const missing = inputTimestamps.filter((ts) => !outputTimestamps.includes(ts));
             const extra = outputTimestamps.filter((ts) => !inputTimestamps.includes(ts));
-            if (missing.length) console.error(`[GeminiService] Missing timestamps:`, missing);
-            if (extra.length) console.error(`[GeminiService] Extra timestamps:`, extra);
-            // Throw so the retry logic below catches it
-            validateChunkRowCount(resultLines.length, expectedLines, i, chunks.length, startTs, endTs);
+
+            const detail = [
+              `Chunk ${i + 1}/${chunks.length} row mismatch: expected ${expectedLines}, got ${resultLines.length}.`,
+              missing.length ? `Missing timestamps: ${missing.join(", ")}` : null,
+              extra.length ? `Extra timestamps: ${extra.join(", ")}` : null,
+            ].filter(Boolean).join(" ");
+            console.error(`[GeminiService] ${detail}`);
+
+            // Build feedback for the next retry attempt
+            const feedbackParts = [
+              `## CORRECTION REQUIRED (your previous output had ${resultLines.length} rows instead of ${expectedLines}):`,
+              "You MUST output EXACTLY one row per input row. Do NOT merge or drop any rows.",
+            ];
+            if (missing.length) {
+              feedbackParts.push(`You DROPPED these timestamps — they MUST appear in your output:\n${missing.join("\n")}`);
+            }
+            if (extra.length) {
+              feedbackParts.push(`You ADDED these invalid timestamps — remove them:\n${extra.join("\n")}`);
+            }
+            retryFeedback = feedbackParts.join("\n\n");
+
+            throw new Error(detail);
           }
 
           // Validation passed — cache to disk and break out of retry loop
@@ -286,7 +307,7 @@ class GeminiService {
             console.warn(`[GeminiService] Chunk ${i} attempt ${attempt + 1} failed (${errObj.message}). Retrying in ${delay / 1000}s...`);
             onProgress(
               Math.round((i / chunks.length) * 80),
-              `Retrying chunk ${i + 1}/${chunks.length} (attempt ${attempt + 2}/${MAX_RETRIES + 1})...`,
+              `Chunk ${i + 1}/${chunks.length} failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${errObj.message}. Retrying in ${delay / 1000}s...`,
             );
             await sleep(delay);
             continue;
