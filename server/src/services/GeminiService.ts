@@ -1,9 +1,11 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { GoogleGenAI } from "@google/genai";
 import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
 import { getClientPublicDir } from "../config/paths.js";
+import { tempManager } from "./TempManager.js";
 
 // Increase global fetch timeouts to 15 minutes to prevent Headers Timeout Error
 // because undici defaults to 5 minutes (300_000ms) which breaks long Gemini streams.
@@ -19,6 +21,8 @@ const MODEL = "gemini-3-flash-preview";
 // const MODEL = "gemini-3.1-pro-preview";
 const CHUNK_SIZE = 250;   // lines per API call
 const OVERLAP = 30;       // lines of overlap from previous chunk
+const MAX_RETRIES = 3;    // retries per chunk on validation failure or transient API error
+const RETRY_DELAY_MS = 5000; // wait between retries
 
 type ProgressCallback = (percent: number, message: string) => void;
 
@@ -85,6 +89,21 @@ export function validateChunkRowCount(
   }
 }
 
+function isRetryableError(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message;
+    // Gemini 503 / 429 / rate limit
+    if (msg.includes("503") || msg.includes("429") || msg.includes("UNAVAILABLE") || msg.includes("RESOURCE_EXHAUSTED")) return true;
+    // Our own row count validation failure
+    if (msg.includes("Chunk validation failed")) return true;
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ── Helpers ──
 
 function msToTimestamp(ms: number): string {
@@ -121,6 +140,25 @@ class GeminiService {
   private correctionPromptCache: string | null = null;
   private viralClipPromptCache: string | null = null;
 
+  private chunkCacheDir(sessionId: string): string {
+    return join(tempManager.getSessionDir(sessionId), "chunk_cache");
+  }
+
+  private async getCachedChunk(sessionId: string, hash: string): Promise<string[] | null> {
+    try {
+      const data = await readFile(join(this.chunkCacheDir(sessionId), `${hash}.tsv`), "utf-8");
+      return data.split("\n").filter((l) => l.trim());
+    } catch {
+      return null;
+    }
+  }
+
+  private async setCachedChunk(sessionId: string, hash: string, lines: string[]): Promise<void> {
+    const dir = this.chunkCacheDir(sessionId);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${hash}.tsv`), lines.join("\n"), "utf-8");
+  }
+
   private async getClient(): Promise<GoogleGenAI> {
     const apiKey = await settingsService.getGeminiApiKey();
     if (!apiKey) throw new Error("Gemini API key not configured");
@@ -156,6 +194,7 @@ class GeminiService {
   async correctTranscript(
     words: TranscriptWord[],
     scriptText: string,
+    sessionId: string,
     onProgress: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<string> {
@@ -179,6 +218,20 @@ class GeminiService {
 
       const chunkLines = lines.slice(chunk.startIndex, chunk.endIndex);
       const chunkTsv = chunkLines.join("\n");
+      const chunkHash = createHash("md5").update(chunkTsv).digest("hex");
+
+      // Check cache — skip API call if this exact chunk was already corrected
+      const cached = await this.getCachedChunk(sessionId, chunkHash);
+      if (cached) {
+        console.log(`[GeminiService] Chunk ${i} cache hit, skipping API call`);
+        if (chunk.isFirst) {
+          correctedLines.push(...cached);
+        } else {
+          const overlapCount = chunks[i - 1].endIndex - chunk.startIndex;
+          correctedLines.push(...cached.slice(overlapCount));
+        }
+        continue;
+      }
 
       const userMessage = [
         prompt,
@@ -192,40 +245,57 @@ class GeminiService {
         chunkTsv,
       ].join("\n");
 
-      let response;
-      try {
-        response = await ai.models.generateContent({
-          model: MODEL,
-          contents: userMessage,
-        });
-      } catch (err: unknown) {
-        const errObj = err instanceof Error ? err : new Error(String(err));
-        console.error(`[GeminiService] Error during transcript correction chunk ${i}:`, errObj.message);
-        console.error(`[GeminiService] Request payload sample:`, userMessage.substring(0, 500) + "...");
-        throw errObj;
-      }
-
-      const text = response.text ?? "";
-      const resultLines = extractCodeBlock(text).split("\n").filter((l) => l.trim());
-
-      // Validate: LLM must return exactly as many lines as we sent
       const startTs = chunkLines[0]?.split("\t")[0] ?? "?";
       const endTs = chunkLines[chunkLines.length - 1]?.split("\t")[0] ?? "?";
       const expectedLines = chunkLines.filter((l) => l.trim()).length;
 
-      if (resultLines.length !== expectedLines) {
-        console.error(`[GeminiService] Row count mismatch in chunk ${i}: expected ${expectedLines}, got ${resultLines.length}`);
-        console.error(`[GeminiService] Raw response (first 2000 chars):`, text.substring(0, 2000));
-        // Find which input lines have no match in output by comparing timestamps
-        const inputTimestamps = chunkLines.map((l) => l.split("\t")[0]);
-        const outputTimestamps = resultLines.map((l) => l.split("\t")[0]);
-        const missing = inputTimestamps.filter((ts) => !outputTimestamps.includes(ts));
-        const extra = outputTimestamps.filter((ts) => !inputTimestamps.includes(ts));
-        if (missing.length) console.error(`[GeminiService] Missing timestamps:`, missing);
-        if (extra.length) console.error(`[GeminiService] Extra timestamps:`, extra);
-      }
+      let resultLines: string[] = [];
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        if (signal?.aborted) throw new Error("Cancelled");
 
-      validateChunkRowCount(resultLines.length, expectedLines, i, chunks.length, startTs, endTs);
+        try {
+          const response = await ai.models.generateContent({
+            model: MODEL,
+            contents: userMessage,
+          });
+
+          const text = response.text ?? "";
+          resultLines = extractCodeBlock(text).split("\n").filter((l) => l.trim());
+
+          if (resultLines.length !== expectedLines) {
+            console.error(`[GeminiService] Row count mismatch in chunk ${i}: expected ${expectedLines}, got ${resultLines.length}`);
+            const inputTimestamps = chunkLines.map((l) => l.split("\t")[0]);
+            const outputTimestamps = resultLines.map((l) => l.split("\t")[0]);
+            const missing = inputTimestamps.filter((ts) => !outputTimestamps.includes(ts));
+            const extra = outputTimestamps.filter((ts) => !inputTimestamps.includes(ts));
+            if (missing.length) console.error(`[GeminiService] Missing timestamps:`, missing);
+            if (extra.length) console.error(`[GeminiService] Extra timestamps:`, extra);
+            // Throw so the retry logic below catches it
+            validateChunkRowCount(resultLines.length, expectedLines, i, chunks.length, startTs, endTs);
+          }
+
+          // Validation passed — cache to disk and break out of retry loop
+          await this.setCachedChunk(sessionId, chunkHash, resultLines);
+          break;
+        } catch (err: unknown) {
+          const errObj = err instanceof Error ? err : new Error(String(err));
+
+          if (attempt < MAX_RETRIES && isRetryableError(errObj)) {
+            const delay = RETRY_DELAY_MS * (attempt + 1); // linear backoff
+            console.warn(`[GeminiService] Chunk ${i} attempt ${attempt + 1} failed (${errObj.message}). Retrying in ${delay / 1000}s...`);
+            onProgress(
+              Math.round((i / chunks.length) * 80),
+              `Retrying chunk ${i + 1}/${chunks.length} (attempt ${attempt + 2}/${MAX_RETRIES + 1})...`,
+            );
+            await sleep(delay);
+            continue;
+          }
+
+          // Non-retryable or exhausted retries
+          console.error(`[GeminiService] Chunk ${i} failed after ${attempt + 1} attempt(s):`, errObj.message);
+          throw errObj;
+        }
+      }
 
       if (chunk.isFirst) {
         correctedLines.push(...resultLines);

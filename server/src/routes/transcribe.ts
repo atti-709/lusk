@@ -70,6 +70,7 @@ export async function runGeminiAutomation(
       const correctedTsv = await geminiService.correctTranscript(
         rawTranscript.words,
         session.scriptText,
+        sessionId,
         (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
         signal,
       );
@@ -106,7 +107,12 @@ export async function runGeminiAutomation(
   } catch (err: any) {
     if (signal?.aborted) throw err; // re-throw cancellation
     log.error(err, "Gemini automation failed, falling back to manual");
-    orchestrator.updateProgress(sessionId, 100, "Gemini failed — use manual workflow below");
+    const reason = err?.message?.includes("503") || err?.message?.includes("UNAVAILABLE")
+      ? "Gemini is overloaded (503) — try again later or use manual workflow"
+      : err?.message?.includes("Chunk validation")
+        ? "Gemini returned wrong row count — try again or use manual workflow"
+        : "Gemini failed — use manual workflow below";
+    orchestrator.updateProgress(sessionId, 100, reason);
   }
 }
 
