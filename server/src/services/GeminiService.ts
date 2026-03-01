@@ -16,11 +16,52 @@ setGlobalDispatcher(
 );
 
 const MODEL = "gemini-3.1-pro-preview";
-const CHUNK_SIZE = 1000; // lines per chunk
-const MIN_CHUNK_SIZE = 500; // merge last chunk into previous if smaller
+const CHUNK_SIZE = 500;   // lines per API call
+const OVERLAP = 50;       // lines of overlap from previous chunk
 
 type ProgressCallback = (percent: number, message: string) => void;
 
+export interface ChunkWindow {
+  startIndex: number;  // inclusive
+  endIndex: number;    // exclusive
+  isFirst: boolean;
+}
+
+export function buildSlidingWindowChunks(
+  lines: string[],
+  chunkSize: number = CHUNK_SIZE,
+  overlap: number = OVERLAP,
+): ChunkWindow[] {
+  if (lines.length <= chunkSize) {
+    return [{ startIndex: 0, endIndex: lines.length, isFirst: true }];
+  }
+
+  const stride = chunkSize - overlap;
+  const chunks: ChunkWindow[] = [];
+
+  for (let start = 0; start < lines.length; start += stride) {
+    const end = Math.min(start + chunkSize, lines.length);
+    chunks.push({ startIndex: start, endIndex: end, isFirst: start === 0 });
+    if (end === lines.length) break;
+  }
+
+  // Merge tiny tail: if the last chunk's NEW portion (beyond previous chunk's coverage)
+  // is smaller than the overlap, absorb it into the previous chunk
+  if (chunks.length >= 2) {
+    const last = chunks[chunks.length - 1];
+    const prev = chunks[chunks.length - 2];
+    const newLines = last.endIndex - prev.endIndex;
+    if (newLines < overlap) {
+      chunks.pop();
+      chunks[chunks.length - 1] = {
+        ...prev,
+        endIndex: last.endIndex,
+      };
+    }
+  }
+
+  return chunks;
+}
 
 // ── Helpers ──
 
