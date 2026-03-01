@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import { spawn, execSync, ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
@@ -267,12 +267,6 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }
 
-  // Cmd+R: request cancel prompt during long-running processes (in-app overlay, not native dialog)
-  globalShortcut.register("CommandOrControl+R", () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("request-cancel-prompt");
-    }
-  });
 
   // IPC handlers for native file dialogs
   ipcMain.handle("show-save-dialog", async (_event, options: any) => {
@@ -322,6 +316,6 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
-  globalShortcut.unregisterAll();
+
   killServer();
 });

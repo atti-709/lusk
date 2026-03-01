@@ -486,17 +486,17 @@ function App() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey && e.key === "r") {
+        e.preventDefault();
         if (isWorking) {
-          e.preventDefault();
           if (window.confirm("A process is running. Reloading will stop it. Continue?")) {
             if (sessionId) cancelProject(sessionId);
             // Allow a tiny bit of time for the cancel request to fire before the page unloads
             setTimeout(() => window.location.reload(), 50);
           }
         } else {
-          // In Electron without native menu, Cmd+R does not naturally reload. Manual reload is needed.
-          e.preventDefault();
-          window.location.reload();
+          if (window.confirm("Reload the app?")) {
+            window.location.reload();
+          }
         }
       }
     };

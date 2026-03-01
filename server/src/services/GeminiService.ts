@@ -15,9 +15,10 @@ setGlobalDispatcher(
   })
 );
 
-const MODEL = "gemini-3.1-pro-preview";
-const CHUNK_SIZE = 500;   // lines per API call
-const OVERLAP = 50;       // lines of overlap from previous chunk
+const MODEL = "gemini-3-flash-preview";
+// const MODEL = "gemini-3.1-pro-preview";
+const CHUNK_SIZE = 250;   // lines per API call
+const OVERLAP = 30;       // lines of overlap from previous chunk
 
 type ProgressCallback = (percent: number, message: string) => void;
 
