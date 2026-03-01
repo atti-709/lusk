@@ -212,6 +212,19 @@ class GeminiService {
       const startTs = chunkLines[0]?.split("\t")[0] ?? "?";
       const endTs = chunkLines[chunkLines.length - 1]?.split("\t")[0] ?? "?";
       const expectedLines = chunkLines.filter((l) => l.trim()).length;
+
+      if (resultLines.length !== expectedLines) {
+        console.error(`[GeminiService] Row count mismatch in chunk ${i}: expected ${expectedLines}, got ${resultLines.length}`);
+        console.error(`[GeminiService] Raw response (first 2000 chars):`, text.substring(0, 2000));
+        // Find which input lines have no match in output by comparing timestamps
+        const inputTimestamps = chunkLines.map((l) => l.split("\t")[0]);
+        const outputTimestamps = resultLines.map((l) => l.split("\t")[0]);
+        const missing = inputTimestamps.filter((ts) => !outputTimestamps.includes(ts));
+        const extra = outputTimestamps.filter((ts) => !inputTimestamps.includes(ts));
+        if (missing.length) console.error(`[GeminiService] Missing timestamps:`, missing);
+        if (extra.length) console.error(`[GeminiService] Extra timestamps:`, extra);
+      }
+
       validateChunkRowCount(resultLines.length, expectedLines, i, chunks.length, startTs, endTs);
 
       if (chunk.isFirst) {
