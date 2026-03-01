@@ -316,6 +316,10 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
-
+  // Destroy the window directly to bypass the renderer's beforeunload guard,
+  // which would otherwise block Cmd+Q when a process is running.
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.destroy();
+  }
   killServer();
 });
