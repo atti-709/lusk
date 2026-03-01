@@ -52,6 +52,16 @@ describe("buildSlidingWindowChunks", () => {
     expect(chunks[0]).toEqual({ startIndex: 0, endIndex: 500, isFirst: true });
     expect(chunks[1]).toEqual({ startIndex: 450, endIndex: 600, isFirst: false });
   });
+
+  it("throws when overlap is equal to or greater than chunkSize", () => {
+    const lines = makeLines(100);
+    expect(() => buildSlidingWindowChunks(lines, 50, 50)).toThrow(
+      /overlap \(50\) must be less than chunkSize \(50\)/,
+    );
+    expect(() => buildSlidingWindowChunks(lines, 50, 60)).toThrow(
+      /overlap \(60\) must be less than chunkSize \(50\)/,
+    );
+  });
 });
 
 describe("validateChunkRowCount", () => {

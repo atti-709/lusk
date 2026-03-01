@@ -162,7 +162,6 @@ class GeminiService {
     const prompt = await this.getCorrectionPrompt();
     const fullTsv = wordsToTsv(words);
     const lines = fullTsv.split("\n");
-    const totalInputLines = lines.length;
 
     const chunks = buildSlidingWindowChunks(lines);
     const correctedLines: string[] = [];
