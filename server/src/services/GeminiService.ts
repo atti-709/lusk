@@ -211,20 +211,22 @@ class GeminiService {
       // Validate: LLM must return exactly as many lines as we sent
       const startTs = chunkLines[0]?.split("\t")[0] ?? "?";
       const endTs = chunkLines[chunkLines.length - 1]?.split("\t")[0] ?? "?";
-      validateChunkRowCount(resultLines.length, chunkLines.length, i, chunks.length, startTs, endTs);
+      const expectedLines = chunkLines.filter((l) => l.trim()).length;
+      validateChunkRowCount(resultLines.length, expectedLines, i, chunks.length, startTs, endTs);
 
       if (chunk.isFirst) {
         correctedLines.push(...resultLines);
       } else {
-        // Discard the overlap lines, keep only new lines
-        correctedLines.push(...resultLines.slice(OVERLAP));
+        const overlapCount = chunks[i - 1].endIndex - chunk.startIndex;
+        correctedLines.push(...resultLines.slice(overlapCount));
       }
     }
 
     // Final validation: total output must match total input
-    if (correctedLines.length !== totalInputLines) {
+    const expectedTotalLines = lines.filter((l) => l.trim()).length;
+    if (correctedLines.length !== expectedTotalLines) {
       throw new Error(
-        `Final validation failed: input had ${totalInputLines} lines, ` +
+        `Final validation failed: input had ${expectedTotalLines} lines, ` +
         `but corrected output has ${correctedLines.length} lines. ` +
         `Pipeline halted.`,
       );
