@@ -704,12 +704,7 @@ function App() {
                   compositionHeight={COMP_HEIGHT}
                   durationInFrames={fullVideoDurationFrames}
                   fps={COMP_FPS}
-                  style={{
-                    width: "100%",
-                    maxHeight: "65vh",
-                    borderRadius: 12,
-                    overflow: "hidden",
-                  }}
+                  style={{ width: "100%" }}
                   controls
                   loop
                 />
