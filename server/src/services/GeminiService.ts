@@ -348,7 +348,6 @@ class GeminiService {
       response = await ai.models.generateContent({
         model: MODEL,
         contents: userMessage,
-        config: { temperature: 0 },
       });
     } catch (err: unknown) {
       const errObj = err instanceof Error ? err : new Error(String(err));
