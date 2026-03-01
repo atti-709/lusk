@@ -127,6 +127,7 @@ export function PipelineStepper({
       {videoUrl && currentState === "ALIGNING" && remotionCaptions.length > 0 && (
         <div className="align-preview-player">
           <Player
+            key={sessionId}
             component={VideoComposition}
             inputProps={{
               videoUrl,
