@@ -139,12 +139,7 @@ export function PipelineStepper({
             compositionHeight={COMP_HEIGHT}
             durationInFrames={alignPreviewDurationInFrames}
             fps={COMP_FPS}
-            style={{
-              width: "100%",
-              maxHeight: "65vh",
-              borderRadius: 12,
-              overflow: "hidden",
-            }}
+            style={{ width: "100%" }}
             controls
             loop
           />
