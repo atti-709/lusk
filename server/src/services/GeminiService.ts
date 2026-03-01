@@ -32,6 +32,9 @@ export function buildSlidingWindowChunks(
   chunkSize: number = CHUNK_SIZE,
   overlap: number = OVERLAP,
 ): ChunkWindow[] {
+  if (overlap >= chunkSize) {
+    throw new Error(`overlap (${overlap}) must be less than chunkSize (${chunkSize})`);
+  }
   if (lines.length <= chunkSize) {
     return [{ startIndex: 0, endIndex: lines.length, isFirst: true }];
   }
