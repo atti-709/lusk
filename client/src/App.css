@@ -25,7 +25,6 @@
 
 .header-actions {
   justify-content: flex-end;
-  -webkit-app-region: no-drag;
 }
 
 .app-header h1 {
