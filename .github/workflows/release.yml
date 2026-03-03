@@ -26,8 +26,17 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Rebuild app-builder-bin for current arch
-        run: npm rebuild app-builder-bin
+      - name: Ensure app-builder binary
+        run: |
+          BINARY="node_modules/app-builder-bin/mac/app-builder_$(uname -m)"
+          if [ ! -f "$BINARY" ]; then
+            echo "Binary missing at $BINARY, reinstalling..."
+            npm pack app-builder-bin --pack-destination /tmp
+            tar -xzf /tmp/app-builder-bin-*.tgz -C /tmp
+            cp /tmp/package/mac/* node_modules/app-builder-bin/mac/
+          fi
+          chmod +x node_modules/app-builder-bin/mac/app-builder_*
+          ls -la node_modules/app-builder-bin/mac/
 
       - name: Bump version
         run: npm version patch -w electron
