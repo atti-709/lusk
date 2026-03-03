@@ -31,8 +31,8 @@ interface PipelineStepperProps {
   readySubView?: ReadySubView;
   whisperxAvailable?: boolean;
   geminiAvailable?: boolean;
-  captions?: CaptionWord[];           // whisper captions for align preview
-  sourceAspectRatio?: number | null;  // for correct video scaling
+  captions?: CaptionWord[];
+  sourceAspectRatio?: number | null;
 }
 
 function getActiveStepId(
@@ -74,6 +74,7 @@ export function PipelineStepper({
     (currentState === "RENDERING");
 
   const showAlignStep = currentState === "ALIGNING" && progress === 100;
+  const isAligningInProgress = currentState === "ALIGNING" && progress < 100;
   const activeStepId = getActiveStepId(currentState, readySubView);
 
   const remotionCaptions: Caption[] = useMemo(
@@ -94,8 +95,6 @@ export function PipelineStepper({
     return Math.max(1, Math.ceil(((last.endMs + 1000) / 1000) * COMP_FPS));
   }, [captions]);
 
-  // Memoize inputProps and style to prevent Remotion Player from resetting
-  // its internal animation state on every parent re-render (e.g. SSE progress events).
   const alignPlayerInputProps = useMemo(
     () => ({
       videoUrl: videoUrl ?? "",
@@ -131,15 +130,15 @@ export function PipelineStepper({
         })}
       </div>
 
-      {/* Video preview during UPLOADING/TRANSCRIBING (plain video, no captions yet) */}
-      {videoUrl && currentState !== "READY" && currentState !== "ALIGNING" && (
+      {/* Plain video preview during UPLOADING/TRANSCRIBING (no captions yet) */}
+      {videoUrl && currentState !== "READY" && !showAlignStep && !isAligningInProgress && (
         <div className="video-preview">
           <video src={videoUrl} controls />
         </div>
       )}
 
-      {/* Remotion Player with captions during ALIGNING (once captions are loaded) */}
-      {videoUrl && currentState === "ALIGNING" && remotionCaptions.length > 0 && (
+      {/* Remotion Player with captions during Gemini processing (ALIGNING in progress) */}
+      {videoUrl && isAligningInProgress && remotionCaptions.length > 0 && (
         <div className="align-preview-player">
           <Player
             key={sessionId}
@@ -157,7 +156,7 @@ export function PipelineStepper({
       )}
 
       {/* Fallback: plain video during ALIGNING while captions are still loading */}
-      {videoUrl && currentState === "ALIGNING" && remotionCaptions.length === 0 && (
+      {videoUrl && isAligningInProgress && remotionCaptions.length === 0 && (
         <div className="video-preview">
           <video src={videoUrl} controls />
         </div>

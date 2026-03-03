@@ -1,0 +1,61 @@
+{
+  "appId": "com.lusk.app",
+  "productName": "Lusk",
+  "directories": {
+    "output": "out",
+    "buildResources": "resources"
+  },
+  "files": [
+    "dist/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "bundle",
+      "to": "bundle",
+      "filter": ["**/*"]
+    }
+  ],
+  "mac": {
+    "category": "public.app-category.video",
+    "icon": "resources/icon.icns",
+    "target": [
+      { "target": "dmg", "arch": ["arm64"] },
+      { "target": "zip", "arch": ["arm64"] }
+    ],
+    "identity": null,
+    "extendInfo": {
+      "CFBundleDocumentTypes": [
+        {
+          "CFBundleTypeName": "Lusk Project",
+          "CFBundleTypeRole": "Editor",
+          "LSHandlerRank": "Owner",
+          "CFBundleTypeExtensions": ["lusk"],
+          "CFBundleTypeIconFile": "icon.icns",
+          "LSItemContentTypes": ["com.lusk.project"]
+        }
+      ],
+      "UTExportedTypeDeclarations": [
+        {
+          "UTTypeIdentifier": "com.lusk.project",
+          "UTTypeDescription": "Lusk Project",
+          "UTTypeConformsTo": ["public.data", "public.archive"],
+          "UTTypeTagSpecification": {
+            "public.filename-extension": ["lusk"]
+          },
+          "UTTypeIconFile": "icon.icns"
+        }
+      ]
+    }
+  },
+  "dmg": {
+    "icon": "resources/icon.icns",
+    "iconSize": 128,
+    "window": { "width": 540, "height": 380 },
+    "background": "resources/dmg-background.png"
+  },
+  "publish": {
+    "provider": "github",
+    "releaseType": "release"
+  }
+}

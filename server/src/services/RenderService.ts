@@ -12,6 +12,7 @@ import type { Caption } from "@remotion/captions";
 
 const execFileAsync = promisify(execFile);
 
+
 const COMP_FPS = 23.976;
 const COMPOSITION_ID = "LuskClip";
 const LUSK_SERVER_ORIGIN =
@@ -101,9 +102,13 @@ class RenderService {
     this.bundledWithOutro = outroPresent ?? false;
     onProgress?.(5, "Bundling composition...");
 
-    // When packaged, client/node_modules is not included in the bundle to save space.
-    // Tell webpack to resolve modules from server/node_modules (one level up from dist/).
+    // Resolve modules from both server and client node_modules.
+    // In packaged app: bundle/server/node_modules has Remotion/React,
+    // bundle/client/node_modules has @remotion/captions, @remotion/google-fonts, etc.
     const serverNodeModules = path.resolve(import.meta.dirname, "../node_modules");
+    const clientNodeModules = path.resolve(
+      this.entryPoint, "../../..", "node_modules"
+    );
 
     this.bundlePath = await bundle({
       entryPoint: this.entryPoint,
@@ -112,7 +117,7 @@ class RenderService {
         ...config,
         resolve: {
           ...config.resolve,
-          modules: ["node_modules", serverNodeModules],
+          modules: ["node_modules", serverNodeModules, clientNodeModules],
         },
       }),
       onProgress: (progress) => {

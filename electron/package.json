@@ -3,22 +3,26 @@
   "private": true,
   "version": "1.0.0",
   "description": "Lusk – Viral Shorts from Slovak Podcasts",
+  "author": "Attila Zsíros",
   "main": "dist/main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/atti-709/lusk.git"
+  },
   "scripts": {
     "build": "tsc",
-    "start": "electron-forge start",
-    "package": "electron-forge package",
-    "make": "electron-forge make"
+    "start": "electron .",
+    "bundle": "tsx scripts/bundle.ts",
+    "dist": "npm run bundle && electron-builder --publish never",
+    "release": "npm run bundle && GH_TOKEN=$(gh auth token) electron-builder --publish always"
   },
   "dependencies": {
-    "ffmpeg-static": "^5.2.0",
-    "ffprobe-static": "^3.1.0"
+    "electron-updater": "^6.3.0"
   },
   "devDependencies": {
-    "@electron-forge/cli": "^7.6.0",
-    "@electron-forge/maker-dmg": "^7.6.0",
-    "@electron-forge/maker-zip": "^7.6.0",
-    "electron": "^33.3.1",
+    "electron": "33.4.11",
+    "electron-builder": "^25.1.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.3"
   }
 }
