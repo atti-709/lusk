@@ -14,7 +14,7 @@
     "start": "electron .",
     "bundle": "tsx scripts/bundle.ts",
     "dist": "npm run bundle && electron-builder --publish never",
-    "release": "npm run bundle && electron-builder --publish always"
+    "release": "npm run bundle && GH_TOKEN=$(gh auth token) electron-builder --publish always"
   },
   "dependencies": {
     "electron-updater": "^6.3.0"
