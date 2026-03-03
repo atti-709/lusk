@@ -16,5 +16,6 @@
     "build:electron": "npm run build && npm run build -w @lusk/electron",
     "package": "npm run build:electron && npm run dist -w @lusk/electron",
     "release": "npm run build:electron && npm run release -w @lusk/electron"
-  }
+  },
+  "version": "0.0.1"
 }
