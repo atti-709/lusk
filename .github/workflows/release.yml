@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-13
+    runs-on: macos-latest
     permissions:
       contents: write
 
@@ -25,6 +25,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Rebuild app-builder-bin for current arch
+        run: npm rebuild app-builder-bin
 
       - name: Bump version
         run: npm version patch -w electron
