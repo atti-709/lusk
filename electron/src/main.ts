@@ -1,6 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu } from "electron";
+import { autoUpdater } from "electron-updater";
 import { spawn, execSync, ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -116,41 +116,16 @@ async function startServer(): Promise<void> {
   );
   const tempDir = path.join(app.getPath("userData"), "lusk_temp");
 
-  // Resolve ffmpeg/ffprobe from the bundled npm packages
-  let ffmpegPath: string | undefined;
-  let ffprobePath: string | undefined;
-  try {
-    ffmpegPath = require("ffmpeg-static");
-  } catch {
-    // Will be resolved by the server instead
-  }
-  try {
-    ffprobePath = require("ffprobe-static").path;
-  } catch {
-    // Will be resolved by the server instead
-  }
-
-  // Validate and fix binary permissions for packaged app
-  for (const binPath of [ffmpegPath, ffprobePath]) {
-    if (binPath && path.isAbsolute(binPath) && existsSync(binPath)) {
-      // macOS quarantine can prevent execution of downloaded binaries
-      try {
-        execSync(`xattr -dr com.apple.quarantine "${binPath}"`, {
-          stdio: "ignore",
-        });
-      } catch {
-        // Attribute may not exist — that's fine
-      }
-    }
-  }
-
+  // ffmpeg/ffprobe: let the server resolve them from its own node_modules
+  // (bundle/server/node_modules/ffmpeg-static). Don't pass paths from the
+  // Electron main process — they point inside the asar archive and fail
+  // with ENOTDIR when the server tries to exec them.
   const lusk = `${C.yellow}[lusk]${C.reset}`;
-  console.log(`${lusk} ffmpeg:  ${ffmpegPath ?? `${C.dim}(server will resolve)${C.reset}`}`);
-  console.log(`${lusk} ffprobe: ${ffprobePath ?? `${C.dim}(server will resolve)${C.reset}`}`);
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: LOGIN_PATH, // ensure server can find python3, ffmpeg, etc.
+    HOME: app.getPath("home"), // Finder-launched apps may have HOME=/ which breaks Remotion's ~/.remotion cache
     NODE_ENV: app.isPackaged ? "production" : "development",
     LUSK_PORT: String(PORT),
     LUSK_TEMP_DIR: tempDir,
@@ -159,14 +134,13 @@ async function startServer(): Promise<void> {
     LUSK_PUBLIC_DIR: publicDir,
     LUSK_REMOTION_ENTRY: remotionEntry,
     LUSK_SERVER_ORIGIN: `http://localhost:${PORT}`,
-    ...(ffmpegPath ? { FFMPEG_PATH: ffmpegPath } : {}),
-    ...(ffprobePath ? { FFPROBE_PATH: ffprobePath } : {}),
   };
 
   // Use Electron itself as the Node runtime (ELECTRON_RUN_AS_NODE=1).
   // This avoids needing a separate `node` binary in the packaged app.
   serverProcess = spawn(process.execPath, [serverEntry], {
     env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+    cwd: app.getPath("home"), // Ensure cwd is home dir so Remotion resolves ~/.remotion correctly
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -210,6 +184,78 @@ function killServer(): void {
   }
 }
 
+function setupAutoUpdater(): void {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("update-available", async (info) => {
+    if (!mainWindow) return;
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "Update Available",
+      message: `A new version (${info.version}) is available.`,
+      detail: "Would you like to download it now? The update will be installed when you restart.",
+      buttons: ["Download", "Later"],
+      defaultId: 0,
+    });
+    if (response === 0) {
+      autoUpdater.downloadUpdate();
+    }
+  });
+
+  autoUpdater.on("update-downloaded", async () => {
+    if (!mainWindow) return;
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "Update Ready",
+      message: "Update has been downloaded.",
+      detail: "Restart now to apply the update?",
+      buttons: ["Restart", "Later"],
+      defaultId: 0,
+    });
+    if (response === 0) {
+      autoUpdater.quitAndInstall();
+    }
+  });
+
+  autoUpdater.on("error", (err) => {
+    console.error("Auto-updater error:", err);
+  });
+
+  autoUpdater.checkForUpdates().catch((err) => {
+    console.log("Update check failed (offline?):", err.message);
+  });
+}
+
+async function checkDependencies(): Promise<void> {
+  try {
+    const res = await fetch(`http://localhost:${PORT}/api/health`);
+    const health = (await res.json()) as { whisperxAvailable: boolean };
+
+    if (!health.whisperxAvailable && mainWindow) {
+      const commands = "brew install python3\npip3 install whisperx";
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: "warning",
+        title: "Missing Dependencies",
+        message: "WhisperX is not installed",
+        detail:
+          "Lusk needs Python 3 and WhisperX for transcription.\n\n" +
+          "Run these commands in Terminal:\n\n" +
+          commands +
+          "\n\nTranscription won't work until these are installed.\n" +
+          "You can still use Lusk for editing and rendering.",
+        buttons: ["Copy Commands to Clipboard", "Continue"],
+        defaultId: 0,
+      });
+      if (response === 0) {
+        clipboard.writeText(commands);
+      }
+    }
+  } catch {
+    // Health check failed — server may still be starting, skip silently
+  }
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -224,14 +270,6 @@ function createWindow(): void {
   });
 
   mainWindow.loadURL(`http://localhost:${PORT}`);
-
-  // Once the page has loaded, process any file that was opened at launch
-  mainWindow.webContents.once("did-finish-load", () => {
-    if (pendingFilePath) {
-      openLuskFile(pendingFilePath).catch(console.error);
-      pendingFilePath = null;
-    }
-  });
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -252,6 +290,20 @@ app.whenReady().then(async () => {
 
   createWindow();
 
+  // Check for updates (only in packaged app — dev builds have no publish config)
+  if (app.isPackaged) {
+    setupAutoUpdater();
+  }
+
+  // Once the page has loaded, process pending files and check dependencies
+  mainWindow!.webContents.once("did-finish-load", async () => {
+    if (pendingFilePath) {
+      openLuskFile(pendingFilePath).catch(console.error);
+      pendingFilePath = null;
+    }
+    await checkDependencies();
+  });
+
   // macOS: explicit app menu ensures Cmd+Q (Quit) works
   if (process.platform === "darwin") {
     const template: Electron.MenuItemConstructorOptions[] = [
@@ -260,13 +312,19 @@ app.whenReady().then(async () => {
         submenu: [
           { role: "about" as const },
           { type: "separator" as const },
+          {
+            label: "Check for Updates\u2026",
+            click: () => {
+              autoUpdater.checkForUpdatesAndNotify().catch(console.error);
+            },
+          },
+          { type: "separator" as const },
           { role: "quit" as const },
         ],
       },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }
-
 
   // IPC handlers for native file dialogs
   ipcMain.handle("show-save-dialog", async (_event, options: any) => {

@@ -1,11 +1,19 @@
 import { FastifyInstance } from "fastify";
 import fs from "node:fs";
+import { appendFileSync } from "node:fs";
 import path from "node:path";
 import { makeCancelSignal } from "@remotion/renderer";
 import { orchestrator } from "../services/Orchestrator.js";
 import { tempManager } from "../services/TempManager.js";
 import { renderService } from "../services/RenderService.js";
 import type { RenderRequest, ErrorResponse, CaptionWord } from "@lusk/shared";
+
+const RENDER_LOG = "/tmp/lusk-render.log";
+function routeLog(msg: string): void {
+  const line = `[${new Date().toISOString()}] [route] ${msg}\n`;
+  console.log(`[render-route] ${msg}`);
+  try { appendFileSync(RENDER_LOG, line); } catch { /* ignore */ }
+}
 
 /** Active render cancel functions, keyed by sessionId (one render per session at a time). */
 const activeRenderCancels = new Map<string, { cancel: () => void; clipKey: string }>();
@@ -75,7 +83,12 @@ async function runRender(
     });
   } catch (err) {
     const isCancelled = err instanceof Error && err.message.includes("cancelled");
-    if (!isCancelled) log.error(err, "Render failed");
+    if (!isCancelled) {
+      log.error(err, "Render failed");
+      const errMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
+      console.error("[render] RENDER ERROR:", errMsg);
+      routeLog(`runRender ERROR: ${errMsg}`);
+    }
     // Delete the render entry so the clip appears retryable.
     const s = orchestrator.getSession(sessionId);
     if (s?.renders) {

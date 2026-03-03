@@ -14,6 +14,7 @@
     "dev:electron": "npm run build:electron && npm run start -w @lusk/electron",
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
     "build:electron": "npm run build && npm run build -w @lusk/electron",
-    "package": "npm run build:electron && npm run make -w @lusk/electron"
+    "package": "npm run build:electron && npm run dist -w @lusk/electron",
+    "release": "npm run build:electron && npm run release -w @lusk/electron"
   }
 }
