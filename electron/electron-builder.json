@@ -52,7 +52,11 @@
     "icon": "resources/icon.icns",
     "iconSize": 128,
     "window": { "width": 540, "height": 380 },
-    "background": "resources/dmg-background.png"
+    "background": "resources/dmg-background.png",
+    "contents": [
+      { "x": 160, "y": 170 },
+      { "x": 380, "y": 170, "type": "link", "path": "/Applications" }
+    ]
   },
   "publish": {
     "provider": "github",
