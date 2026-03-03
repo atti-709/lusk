@@ -194,17 +194,24 @@ function setupAutoUpdater(): void {
       type: "info",
       title: "Update Available",
       message: `A new version (${info.version}) is available.`,
-      detail: "Would you like to download it now? The update will be installed when you restart.",
+      detail: "Would you like to download it now?",
       buttons: ["Download", "Later"],
       defaultId: 0,
     });
     if (response === 0) {
+      mainWindow.setProgressBar(0);
       autoUpdater.downloadUpdate();
     }
   });
 
+  autoUpdater.on("download-progress", (progress) => {
+    if (!mainWindow) return;
+    mainWindow.setProgressBar(progress.percent / 100);
+  });
+
   autoUpdater.on("update-downloaded", async () => {
     if (!mainWindow) return;
+    mainWindow.setProgressBar(-1); // remove progress bar
     const { response } = await dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "Update Ready",
@@ -214,11 +221,15 @@ function setupAutoUpdater(): void {
       defaultId: 0,
     });
     if (response === 0) {
+      isQuitting = true;
+      killServer();
       autoUpdater.quitAndInstall();
     }
   });
 
   autoUpdater.on("error", (err) => {
+    if (!mainWindow) return;
+    mainWindow.setProgressBar(-1); // remove progress bar on error
     console.error("Auto-updater error:", err);
   });
 
