@@ -1,5 +1,14 @@
-import type { PipelineState } from "@lusk/shared";
+import { useMemo } from "react";
+import { Player } from "@remotion/player";
+import type { Caption } from "@remotion/captions";
+import type { PipelineState, CaptionWord } from "@lusk/shared";
 import { AlignStep } from "./AlignStep";
+import {
+  VideoComposition,
+  COMP_WIDTH,
+  COMP_HEIGHT,
+  COMP_FPS,
+} from "./VideoComposition";
 import "./PipelineStepper.css";
 
 export type ReadySubView = "review" | "clips";
@@ -22,6 +31,8 @@ interface PipelineStepperProps {
   readySubView?: ReadySubView;
   whisperxAvailable?: boolean;
   geminiAvailable?: boolean;
+  captions?: CaptionWord[];
+  sourceAspectRatio?: number | null;
 }
 
 function getActiveStepId(
@@ -54,6 +65,8 @@ export function PipelineStepper({
   readySubView,
   whisperxAvailable = true,
   geminiAvailable = false,
+  captions = [],
+  sourceAspectRatio,
 }: PipelineStepperProps) {
   const isProcessing =
     (currentState === "TRANSCRIBING") ||
@@ -61,7 +74,39 @@ export function PipelineStepper({
     (currentState === "RENDERING");
 
   const showAlignStep = currentState === "ALIGNING" && progress === 100;
+  const isAligningInProgress = currentState === "ALIGNING" && progress < 100;
   const activeStepId = getActiveStepId(currentState, readySubView);
+
+  const remotionCaptions: Caption[] = useMemo(
+    () =>
+      captions.map((c) => ({
+        text: c.text,
+        startMs: c.startMs,
+        endMs: c.endMs,
+        timestampMs: c.timestampMs,
+        confidence: c.confidence,
+      })),
+    [captions]
+  );
+
+  const alignPreviewDurationInFrames = useMemo(() => {
+    const last = captions.at(-1);
+    if (!last) return 1;
+    return Math.max(1, Math.ceil(((last.endMs + 1000) / 1000) * COMP_FPS));
+  }, [captions]);
+
+  const alignPlayerInputProps = useMemo(
+    () => ({
+      videoUrl: videoUrl ?? "",
+      captions: remotionCaptions,
+      offsetX: 0,
+      startFrom: 0,
+      sourceAspectRatio,
+    }),
+    [videoUrl, remotionCaptions, sourceAspectRatio]
+  );
+
+  const playerStyle = useMemo(() => ({ width: "100%" as const }), []);
 
   return (
     <div className="pipeline">
@@ -85,8 +130,33 @@ export function PipelineStepper({
         })}
       </div>
 
-      {/* Video preview during UPLOADING/TRANSCRIBING/ALIGNING-in-progress (plain video, no captions yet) */}
-      {videoUrl && currentState !== "READY" && !showAlignStep && (
+      {/* Plain video preview during UPLOADING/TRANSCRIBING (no captions yet) */}
+      {videoUrl && currentState !== "READY" && !showAlignStep && !isAligningInProgress && (
+        <div className="video-preview">
+          <video src={videoUrl} controls />
+        </div>
+      )}
+
+      {/* Remotion Player with captions during Gemini processing (ALIGNING in progress) */}
+      {videoUrl && isAligningInProgress && remotionCaptions.length > 0 && (
+        <div className="align-preview-player">
+          <Player
+            key={sessionId}
+            component={VideoComposition}
+            inputProps={alignPlayerInputProps}
+            compositionWidth={COMP_WIDTH}
+            compositionHeight={COMP_HEIGHT}
+            durationInFrames={alignPreviewDurationInFrames}
+            fps={COMP_FPS}
+            style={playerStyle}
+            controls
+            loop
+          />
+        </div>
+      )}
+
+      {/* Fallback: plain video during ALIGNING while captions are still loading */}
+      {videoUrl && isAligningInProgress && remotionCaptions.length === 0 && (
         <div className="video-preview">
           <video src={videoUrl} controls />
         </div>
