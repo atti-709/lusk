@@ -29,8 +29,13 @@ jobs:
       - name: Install electron-builder globally
         run: npm install -g electron-builder
 
-      - name: Bump version
-        run: npm version patch -w electron
+      - name: Bump version and tag
+        run: |
+          npm version patch -w electron --no-git-tag-version
+          VERSION=$(node -p "require('./electron/package.json').version")
+          git add electron/package.json
+          git commit -m "v$VERSION"
+          git tag "v$VERSION"
 
       - name: Build all workspaces including Electron
         run: npm run build:electron
