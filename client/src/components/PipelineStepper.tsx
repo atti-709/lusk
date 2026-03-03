@@ -94,6 +94,21 @@ export function PipelineStepper({
     return Math.max(1, Math.ceil(((last.endMs + 1000) / 1000) * COMP_FPS));
   }, [captions]);
 
+  // Memoize inputProps and style to prevent Remotion Player from resetting
+  // its internal animation state on every parent re-render (e.g. SSE progress events).
+  const alignPlayerInputProps = useMemo(
+    () => ({
+      videoUrl: videoUrl ?? "",
+      captions: remotionCaptions,
+      offsetX: 0,
+      startFrom: 0,
+      sourceAspectRatio,
+    }),
+    [videoUrl, remotionCaptions, sourceAspectRatio]
+  );
+
+  const playerStyle = useMemo(() => ({ width: "100%" as const }), []);
+
   return (
     <div className="pipeline">
       {/* Step track */}
@@ -127,24 +142,14 @@ export function PipelineStepper({
       {videoUrl && currentState === "ALIGNING" && remotionCaptions.length > 0 && (
         <div className="align-preview-player">
           <Player
+            key={sessionId}
             component={VideoComposition}
-            inputProps={{
-              videoUrl,
-              captions: remotionCaptions,
-              offsetX: 0,
-              startFrom: 0,
-              sourceAspectRatio,
-            }}
+            inputProps={alignPlayerInputProps}
             compositionWidth={COMP_WIDTH}
             compositionHeight={COMP_HEIGHT}
             durationInFrames={alignPreviewDurationInFrames}
             fps={COMP_FPS}
-            style={{
-              width: "100%",
-              maxHeight: "65vh",
-              borderRadius: 12,
-              overflow: "hidden",
-            }}
+            style={playerStyle}
             controls
             loop
           />

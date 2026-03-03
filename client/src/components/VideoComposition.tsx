@@ -39,8 +39,17 @@ function ClipVideo({
   );
 
   // Portrait source (aspect ratio < 1, e.g. 9:16): already fills the vertical frame.
-  // Landscape source (aspect ratio >= 1 or unknown): scale to 177.78% width to fill frame.
+  // Landscape source (aspect ratio >= 1 or unknown): scale width so the video fills the
+  // full composition height, then center with optional horizontal pan (offsetX).
   const isPortrait = sourceAspectRatio != null && sourceAspectRatio < 1;
+
+  // Width needed (as % of COMP_WIDTH) for a landscape video to fill the composition height:
+  //   COMP_HEIGHT * sourceAspectRatio / COMP_WIDTH * 100
+  // For 16:9 in 1080×1920 this is ~316%. Fall back to 316% (16:9 assumption) when unknown.
+  const landscapeWidthPct =
+    sourceAspectRatio != null
+      ? (COMP_HEIGHT * sourceAspectRatio / COMP_WIDTH) * 100
+      : (COMP_HEIGHT * (16 / 9) / COMP_WIDTH) * 100;
 
   const videoStyle = isPortrait
     ? {
@@ -52,7 +61,7 @@ function ClipVideo({
         top: 0,
       }
     : {
-        width: "177.78%",
+        width: `${landscapeWidthPct}%`,
         height: "100%",
         objectFit: "cover" as const,
         position: "absolute" as const,

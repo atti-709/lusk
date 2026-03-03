@@ -226,6 +226,43 @@ function clipRenderKey(clip: ViralClip): string {
   return `${effectiveStart}-${effectiveEnd}`;
 }
 
+/** Download a single rendered clip to the target directory (or trigger browser download). */
+async function downloadSingleClipToDirectory(
+  sessionId: string,
+  clip: ViralClip,
+  dirHandle: FileSystemDirectoryHandle | null
+): Promise<void> {
+  const key = clipRenderKey(clip);
+  const url = `/static/${sessionId}/output_${key}.mp4`;
+  const safeName = clip.title.replace(/[^\w\s\-]/g, "_").trim().slice(0, 60) || key;
+  const filename = `${safeName}.mp4`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to download ${filename}`);
+
+  if (dirHandle) {
+    const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+    const writable = await fileHandle.createWritable();
+    const reader = res.body!.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      await writable.write(value);
+    }
+    await writable.close();
+  } else {
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
 /** Download all rendered clips to the selected directory (or trigger individual downloads). */
 async function downloadClipsToDirectory(
   sessionId: string,
@@ -335,50 +372,50 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
     const failed = !renderState && batch.currentWasRendering;
     if (!finished && !failed) return;
 
-    // Advance to next clip
-    batch.index++;
-    setBatchDone(batch.index);
+    // Save the just-finished clip to directory immediately
+    const justFinishedClip = batch.queue[batch.index];
+    batch.currentKey = null; // prevent re-entry while saving
 
-    if (batch.index >= batch.queue.length) {
-      // All clips done — download to directory
-      batch.currentKey = null;
-      const handle = batch.dirHandle;
-      batchRef.current = null;
-      setBatchState("zipping"); // Will rename to 'exporting' in next step
-      downloadClipsToDirectory(sessionId, handle)
-        .then(() => {
-          if (batchCancelledRef.current) return;
-          setBatchState("done");
-          setTimeout(() => setBatchState("idle"), 2000);
-        })
-        .catch((e: Error) => {
-          if (batchCancelledRef.current) return;
-          setBatchError(e.message);
-          setBatchState("idle");
-        });
-      return;
-    }
+    const savePromise = finished
+      ? downloadSingleClipToDirectory(sessionId, justFinishedClip, batch.dirHandle)
+          .catch(() => {/* save error — file remains on server */})
+      : Promise.resolve();
 
-    // Trigger next clip render
-    const nextClip = batch.queue[batch.index];
-    batch.currentKey = clipRenderKey(nextClip);
-    batch.currentWasRendering = false;
+    savePromise.then(() => {
+      if (batchCancelledRef.current) return;
 
-    fetch("/api/render", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId,
-        clip: buildTrimmedClip(nextClip),
-        offsetX: nextClip.speakerOffsetX ?? 0,
-        captions: buildRemotionCaptions(nextClip, captions),
-      }),
-    }).then((res) => {
-      if (res.status === 409) {
-        // Already rendering — mark so the watcher detects when it clears
-        if (batchRef.current) batchRef.current.currentWasRendering = true;
+      // Advance to next clip
+      batch.index++;
+      setBatchDone(batch.index);
+
+      if (batch.index >= batch.queue.length) {
+        // All clips rendered and saved
+        batchRef.current = null;
+        setBatchState("done");
+        setTimeout(() => setBatchState("idle"), 2000);
+        return;
       }
-    }).catch(() => {/* network error — watcher will time out and advance */});
+
+      // Trigger next clip render
+      const nextClip = batch.queue[batch.index];
+      batch.currentKey = clipRenderKey(nextClip);
+      batch.currentWasRendering = false;
+
+      fetch("/api/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          clip: buildTrimmedClip(nextClip),
+          offsetX: nextClip.speakerOffsetX ?? 0,
+          captions: buildRemotionCaptions(nextClip, captions),
+        }),
+      }).then((res) => {
+        if (res.status === 409) {
+          if (batchRef.current) batchRef.current.currentWasRendering = true;
+        }
+      }).catch(() => {/* network error — watcher will time out and advance */});
+    });
   }, [renders, batchState, sessionId, captions, videoName]);
 
   const handleRenderAll = useCallback(async () => {

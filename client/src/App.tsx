@@ -457,6 +457,21 @@ function App() {
     Math.ceil((fullVideoClip.endMs / 1000) * COMP_FPS)
   );
 
+  // Memoize inputProps and style to prevent Remotion Player from resetting
+  // its internal animation state on parent re-renders.
+  const reviewPlayerInputProps = useMemo(
+    () => ({
+      videoUrl: state?.videoUrl ?? "",
+      captions: fullVideoCaptions,
+      offsetX: 0,
+      startFrom: 0,
+      sourceAspectRatio,
+    }),
+    [state?.videoUrl, fullVideoCaptions, sourceAspectRatio]
+  );
+
+  const reviewPlayerStyle = useMemo(() => ({ width: "100%" as const }), []);
+
   // Show step track when in session (both pre-READY and READY states)
   const showStepper = view === "session" && sessionId && state;
 
@@ -486,17 +501,17 @@ function App() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey && e.key === "r") {
+        e.preventDefault();
         if (isWorking) {
-          e.preventDefault();
           if (window.confirm("A process is running. Reloading will stop it. Continue?")) {
             if (sessionId) cancelProject(sessionId);
             // Allow a tiny bit of time for the cancel request to fire before the page unloads
             setTimeout(() => window.location.reload(), 50);
           }
         } else {
-          // In Electron without native menu, Cmd+R does not naturally reload. Manual reload is needed.
-          e.preventDefault();
-          window.location.reload();
+          if (window.confirm("Reload the app?")) {
+            window.location.reload();
+          }
         }
       }
     };
@@ -693,23 +708,12 @@ function App() {
               <div className="review-player">
                 <Player
                   component={VideoComposition}
-                  inputProps={{
-                    videoUrl: state.videoUrl,
-                    captions: fullVideoCaptions,
-                    offsetX: 0,
-                    startFrom: 0,
-                    sourceAspectRatio,
-                  }}
+                  inputProps={reviewPlayerInputProps}
                   compositionWidth={COMP_WIDTH}
                   compositionHeight={COMP_HEIGHT}
                   durationInFrames={fullVideoDurationFrames}
                   fps={COMP_FPS}
-                  style={{
-                    width: "100%",
-                    maxHeight: "65vh",
-                    borderRadius: 12,
-                    overflow: "hidden",
-                  }}
+                  style={reviewPlayerStyle}
                   controls
                   loop
                 />
