@@ -26,17 +26,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Ensure app-builder binary
-        run: |
-          BINARY="node_modules/app-builder-bin/mac/app-builder_$(uname -m)"
-          if [ ! -f "$BINARY" ]; then
-            echo "Binary missing at $BINARY, reinstalling..."
-            npm pack app-builder-bin --pack-destination /tmp
-            tar -xzf /tmp/app-builder-bin-*.tgz -C /tmp
-            cp /tmp/package/mac/* node_modules/app-builder-bin/mac/
-          fi
-          chmod +x node_modules/app-builder-bin/mac/app-builder_*
-          ls -la node_modules/app-builder-bin/mac/
+      - name: Install electron-builder globally
+        run: npm install -g electron-builder
 
       - name: Bump version
         run: npm version patch -w electron
@@ -48,7 +39,7 @@ jobs:
         working-directory: electron
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run bundle && npx electron-builder --publish always
+        run: npm run bundle && electron-builder --publish always
 
       - name: Push version and tag
         run: git push --follow-tags
