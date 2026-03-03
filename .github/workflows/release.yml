@@ -4,6 +4,17 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 jobs:
   build:
@@ -13,6 +24,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -23,19 +36,36 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Compute next version
+        id: version
+        run: |
+          BUMP=${{ github.event.inputs.bump || 'patch' }}
+          LATEST=$(git tag --sort=-v:refname | grep '^v' | head -1 | sed 's/^v//')
+          if [ -z "$LATEST" ]; then LATEST="0.0.0"; fi
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Next version: $VERSION"
+
+      - name: Set version in package.json
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('electron/package.json', 'utf8'));
+            pkg.version = '${{ steps.version.outputs.version }}';
+            fs.writeFileSync('electron/package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
       - name: Install dependencies
         run: npm install
 
       - name: Install electron-builder globally
         run: npm install -g electron-builder
-
-      - name: Bump version and tag
-        run: |
-          npm version patch -w electron --no-git-tag-version
-          VERSION=$(node -p "require('./electron/package.json').version")
-          git add electron/package.json
-          git commit -m "v$VERSION"
-          git tag "v$VERSION"
 
       - name: Build all workspaces including Electron
         run: npm run build:electron
@@ -46,5 +76,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run bundle && electron-builder --publish always
 
-      - name: Push version and tag
-        run: git push --follow-tags
+      - name: Tag and push
+        run: |
+          VERSION="v${{ steps.version.outputs.version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
