@@ -12,6 +12,8 @@ import { projectsRoute } from "./routes/projects.js";
 import { settingsRoute } from "./routes/settings.js";
 import { whisperService } from "./services/WhisperService.js";
 import { settingsService } from "./services/SettingsService.js";
+import { tempManager } from "./services/TempManager.js";
+import { projectFileService } from "./services/ProjectFileService.js";
 
 const server = Fastify({
   logger:
@@ -49,8 +51,10 @@ server.get("/api/health", async () => {
 
 const PORT = parseInt(process.env.LUSK_PORT ?? "3000", 10);
 
-// Projects are loaded on-demand when opened from the dashboard.
-// No startup session scanning needed.
+// Clean up orphaned temp directories (sessions no longer in the registry).
+const recentProjects = await projectFileService.getRecentProjects();
+const knownIds = new Set(recentProjects.map((p) => p.projectId));
+await tempManager.cleanupOrphaned(knownIds);
 
 try {
   await server.listen({ port: PORT, host: "0.0.0.0" });

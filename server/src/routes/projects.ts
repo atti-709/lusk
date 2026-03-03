@@ -10,6 +10,7 @@ import type {
 } from "@lusk/shared";
 import { orchestrator } from "../services/Orchestrator.js";
 import { projectFileService } from "../services/ProjectFileService.js";
+import { tempManager } from "../services/TempManager.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -135,7 +136,9 @@ export const projectsRoute: FastifyPluginAsync = async (server) => {
     Reply: { success: true } | ErrorResponse;
   }>("/api/projects/recent/:projectId", async (request, reply) => {
     try {
-      await projectFileService.removeFromRegistry(request.params.projectId);
+      const { projectId } = request.params;
+      await projectFileService.removeFromRegistry(projectId);
+      await tempManager.cleanupSession(projectId);
       return reply.send({ success: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

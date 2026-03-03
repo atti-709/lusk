@@ -34,6 +34,31 @@ class TempManager {
     }
   }
 
+  async cleanupSession(id: string): Promise<void> {
+    const dir = this.getSessionDir(id);
+    try {
+      await rm(dir, { recursive: true, force: true });
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * Remove temp directories that are not in the given set of known project IDs.
+   */
+  async cleanupOrphaned(knownIds: Set<string>): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(this.baseDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    await Promise.all(
+      entries
+        .filter((e) => e.isDirectory() && !knownIds.has(e.name))
+        .map((e) => rm(join(this.baseDir, e.name), { recursive: true, force: true }))
+    );
+  }
+
   async cleanupAll(): Promise<void> {
     let entries;
     try {
