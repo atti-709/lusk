@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 jobs:
   build:
@@ -16,8 +16,19 @@ jobs:
         with:
           node-version: 22
 
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Install dependencies
         run: npm install
+
+      - name: Bump version
+        run: npm version patch -w electron
+
+      - name: Push version and tag
+        run: git push --follow-tags
 
       - name: Build and publish
         working-directory: electron
