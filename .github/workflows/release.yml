@@ -32,6 +32,9 @@ jobs:
       - name: Push version and tag
         run: git push --follow-tags
 
+      - name: Build server, client and shared
+        run: npm run build
+
       - name: Build and publish
         working-directory: electron
         env:
