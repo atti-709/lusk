@@ -70,13 +70,26 @@ jobs:
       - name: Build all workspaces including Electron
         run: npm run build:electron
 
-      - name: Bundle, sign and publish
+      - name: Bundle and build (unsigned)
+        working-directory: electron
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run bundle && electron-builder --publish never
+
+      - name: Sign app with stable designated requirement
+        run: |
+          ulimit -n 65536
+          codesign --force --deep --sign - \
+            --requirements '=designated => identifier "com.lusk.app"' \
+            electron/out/mac-arm64/Lusk.app
+
+      - name: Repackage and publish
         working-directory: electron
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        run: ulimit -n 10240 && npm run bundle && electron-builder --publish always
+        run: |
+          rm -f out/*.dmg out/*.zip
+          electron-builder --publish always --prepackaged out/mac-arm64/Lusk.app
 
       - name: Tag and push
         run: |
