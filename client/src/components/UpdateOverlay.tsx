@@ -1,32 +1,39 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export function UpdateOverlay() {
   const [visible, setVisible] = useState(false);
   const [percent, setPercent] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const dismissTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     const lusk = window.lusk;
     if (!lusk) return;
 
-    lusk.onUpdateDownloading(() => {
+    const cleanupDownloading = lusk.onUpdateDownloading(() => {
       setVisible(true);
       setPercent(0);
       setError(null);
     });
 
-    lusk.onUpdateProgress((p) => {
+    const cleanupProgress = lusk.onUpdateProgress((p) => {
       setPercent(p);
     });
 
-    lusk.onUpdateError((msg) => {
+    const cleanupError = lusk.onUpdateError((msg) => {
       setError(msg);
-      // Auto-dismiss after 5 seconds on error
-      setTimeout(() => {
+      dismissTimeout.current = setTimeout(() => {
         setVisible(false);
         setError(null);
       }, 5000);
     });
+
+    return () => {
+      cleanupDownloading();
+      cleanupProgress();
+      cleanupError();
+      if (dismissTimeout.current) clearTimeout(dismissTimeout.current);
+    };
   }, []);
 
   if (!visible) return null;

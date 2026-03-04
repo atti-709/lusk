@@ -15,9 +15,9 @@ interface LuskBridge {
   getFilePath: (file: File) => string;
   readFile: (filePath: string) => Promise<string>;
   writeFile: (filePath: string, base64Data: string) => Promise<void>;
-  onUpdateDownloading: (callback: () => void) => void;
-  onUpdateProgress: (callback: (percent: number) => void) => void;
-  onUpdateError: (callback: (message: string) => void) => void;
+  onUpdateDownloading: (callback: () => void) => () => void;
+  onUpdateProgress: (callback: (percent: number) => void) => () => void;
+  onUpdateError: (callback: (message: string) => void) => () => void;
 }
 
 declare global {

@@ -213,9 +213,10 @@ function setupAutoUpdater(): void {
   autoUpdater.on("update-downloaded", () => {
     if (!mainWindow) return;
     mainWindow.setProgressBar(-1);
+    mainWindow.webContents.send("update-progress", 100);
     isQuitting = true;
     killServer();
-    autoUpdater.quitAndInstall(false, true);
+    setTimeout(() => autoUpdater.quitAndInstall(false, true), 1500);
   });
 
   autoUpdater.on("error", (err) => {

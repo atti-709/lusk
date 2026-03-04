@@ -31,14 +31,20 @@ contextBridge.exposeInMainWorld("lusk", {
     ipcRenderer.invoke("write-file", filePath, base64Data),
 
   onUpdateDownloading: (callback: () => void) => {
-    ipcRenderer.on("update-downloading", () => callback());
+    const handler = () => callback();
+    ipcRenderer.on("update-downloading", handler);
+    return () => { ipcRenderer.removeListener("update-downloading", handler); };
   },
 
   onUpdateProgress: (callback: (percent: number) => void) => {
-    ipcRenderer.on("update-progress", (_event, percent: number) => callback(percent));
+    const handler = (_event: Electron.IpcRendererEvent, percent: number) => callback(percent);
+    ipcRenderer.on("update-progress", handler);
+    return () => { ipcRenderer.removeListener("update-progress", handler); };
   },
 
   onUpdateError: (callback: (message: string) => void) => {
-    ipcRenderer.on("update-error", (_event, message: string) => callback(message));
+    const handler = (_event: Electron.IpcRendererEvent, message: string) => callback(message);
+    ipcRenderer.on("update-error", handler);
+    return () => { ipcRenderer.removeListener("update-error", handler); };
   },
 });
