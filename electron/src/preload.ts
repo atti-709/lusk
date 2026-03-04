@@ -29,4 +29,16 @@ contextBridge.exposeInMainWorld("lusk", {
 
   writeFile: (filePath: string, base64Data: string) =>
     ipcRenderer.invoke("write-file", filePath, base64Data),
+
+  onUpdateDownloading: (callback: () => void) => {
+    ipcRenderer.on("update-downloading", () => callback());
+  },
+
+  onUpdateProgress: (callback: (percent: number) => void) => {
+    ipcRenderer.on("update-progress", (_event, percent: number) => callback(percent));
+  },
+
+  onUpdateError: (callback: (message: string) => void) => {
+    ipcRenderer.on("update-error", (_event, message: string) => callback(message));
+  },
 });
