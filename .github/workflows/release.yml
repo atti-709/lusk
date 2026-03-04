@@ -70,11 +70,20 @@ jobs:
       - name: Build all workspaces including Electron
         run: npm run build:electron
 
-      - name: Bundle and publish
+      - name: Bundle and build
+        working-directory: electron
+        run: npm run bundle && electron-builder --publish never
+
+      - name: Ad-hoc codesign the app
+        run: codesign --force --deep --sign - electron/out/mac-arm64/Lusk.app
+
+      - name: Repackage and publish
         working-directory: electron
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run bundle && electron-builder --publish always
+        run: |
+          rm -f out/*.dmg out/*.zip
+          electron-builder --publish always --prepackaged out/mac-arm64/Lusk.app
 
       - name: Tag and push
         run: |
