@@ -186,7 +186,7 @@ function killServer(): void {
 
 function setupAutoUpdater(): void {
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
 
   autoUpdater.on("update-available", async (info) => {
     if (!mainWindow) return;
@@ -199,7 +199,7 @@ function setupAutoUpdater(): void {
       defaultId: 0,
     });
     if (response === 0) {
-      mainWindow.setProgressBar(0);
+      mainWindow.webContents.send("update-downloading");
       autoUpdater.downloadUpdate();
     }
   });
@@ -207,29 +207,21 @@ function setupAutoUpdater(): void {
   autoUpdater.on("download-progress", (progress) => {
     if (!mainWindow) return;
     mainWindow.setProgressBar(progress.percent / 100);
+    mainWindow.webContents.send("update-progress", progress.percent);
   });
 
-  autoUpdater.on("update-downloaded", async () => {
+  autoUpdater.on("update-downloaded", () => {
     if (!mainWindow) return;
-    mainWindow.setProgressBar(-1); // remove progress bar
-    const { response } = await dialog.showMessageBox(mainWindow, {
-      type: "info",
-      title: "Update Ready",
-      message: "Update has been downloaded.",
-      detail: "Restart now to apply the update?",
-      buttons: ["Restart", "Later"],
-      defaultId: 0,
-    });
-    if (response === 0) {
-      isQuitting = true;
-      killServer();
-      autoUpdater.quitAndInstall();
-    }
+    mainWindow.setProgressBar(-1);
+    isQuitting = true;
+    killServer();
+    autoUpdater.quitAndInstall(false, true);
   });
 
   autoUpdater.on("error", (err) => {
     if (!mainWindow) return;
-    mainWindow.setProgressBar(-1); // remove progress bar on error
+    mainWindow.setProgressBar(-1);
+    mainWindow.webContents.send("update-error", err.message ?? "Download failed");
     console.error("Auto-updater error:", err);
   });
 
