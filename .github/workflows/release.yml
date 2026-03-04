@@ -85,8 +85,8 @@ jobs:
           find "$APP" -name "*.dylib" -exec codesign --force --sign - {} \;
           # 2. Helper apps
           find "$APP/Contents/Frameworks" -name "*.app" -exec codesign --force --sign - {} \;
-          # 3. Electron framework
-          codesign --force --sign - "$APP/Contents/Frameworks/Electron Framework.framework"
+          # 3. All frameworks
+          find "$APP/Contents/Frameworks" -name "*.framework" -exec codesign --force --sign - {} \;
           # 4. Outer app with custom designated requirement
           codesign --force --sign - \
             --requirements '=designated => identifier "com.lusk.app"' \
