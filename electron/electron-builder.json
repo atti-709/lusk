@@ -53,8 +53,8 @@
     "iconSize": 80,
     "window": { "width": 400, "height": 300 },
     "contents": [
-      { "x": 120, "y": 150 },
-      { "x": 280, "y": 150, "type": "link", "path": "/Applications" }
+      { "x": 120, "y": 180 },
+      { "x": 280, "y": 180, "type": "link", "path": "/Applications" }
     ]
   },
   "publish": {
