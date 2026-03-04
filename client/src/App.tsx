@@ -14,6 +14,7 @@ import {
 } from "./components/VideoComposition";
 import { Logo } from "./components/Logo";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { UpdateOverlay } from "./components/UpdateOverlay";
 import { useSSE } from "./hooks/useSSE";
 import type {
   CaptionWord,
@@ -531,6 +532,7 @@ function App() {
 
   return (
     <div className="app">
+      <UpdateOverlay />
       <header className="app-header">
         <div className="header-side" />
         <div

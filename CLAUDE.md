@@ -111,6 +111,46 @@ npm run dev          # starts server (port 3000) + client (port 5173) concurrent
 | ffmpeg | Audio extraction, video probing | `brew install ffmpeg` |
 | Python 3 + WhisperX | Transcription + word alignment | `pip3 install whisperx` |
 
+## **Distribution (Electron)**
+
+### Packaging
+
+* **Tool:** electron-builder (`electron/electron-builder.json`).
+* **Targets:** macOS DMG + ZIP (arm64). ZIP is required for auto-updates.
+* **Code signing:** Disabled (`"identity": null`) — no Apple Developer account.
+* **Entry point:** `electron/src/main.ts` → compiled to `electron/dist/main.js`.
+* **Bundle script:** `electron/scripts/bundle.ts` assembles server dist, client dist/src/public, shared types, and production `node_modules` into `electron/bundle/`.
+
+### CI/CD (GitHub Actions)
+
+* **Workflow:** `.github/workflows/release.yml`.
+* **Trigger:** Every push to `main` (auto patch bump) or manual `workflow_dispatch` (choose patch/minor/major).
+* **Versioning:** Derived from the latest `v*` git tag — `electron/package.json` version is overwritten at build time and not committed back. Tags are the source of truth.
+* **Publishing:** `electron-builder --publish always` uploads DMG, ZIP, and `latest-mac.yml` to a GitHub Release. Uses `GITHUB_TOKEN` (automatic).
+* **Note:** `electron-builder` is installed globally in CI to avoid `app-builder-bin` arm64 binary issues with npm workspace hoisting.
+
+### Auto-Updater
+
+* **Library:** `electron-updater` reads `latest-mac.yml` from GitHub Releases.
+* **Behavior:** On app launch, checks for updates. If available, prompts user to download. Shows progress bar in the dock icon during download. After download, prompts to restart.
+* **Menu:** "Check for Updates…" in the app menu triggers manual check.
+* **Config:** `autoDownload: false`, `autoInstallOnAppQuit: true`.
+
+### User Data Paths (macOS)
+
+* **App data:** `~/Library/Application Support/Lusk/` — persists across installs/updates.
+  * `config.json` — user settings (Gemini API key).
+  * `recent-projects.json` — registry of recent projects (max 20, LRU).
+  * `lusk_temp/{projectId}/` — session temp files (video symlinks, rendered clips).
+* **Temp cleanup:** Orphaned temp directories (not in registry) are pruned on server startup. Deleting a project from the dashboard also deletes its temp folder.
+
+### First Launch (Gatekeeper)
+
+Since the app is unsigned, macOS blocks it. Users must run once:
+```bash
+xattr -cr /Applications/Lusk.app
+```
+
 ## **User Instructions**
 
 * When asking for code, specify if it belongs in the **/server** or **/client** directory.
