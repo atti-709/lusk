@@ -23,7 +23,6 @@
       { "target": "dmg", "arch": ["arm64"] },
       { "target": "zip", "arch": ["arm64"] }
     ],
-    "identity": null,
     "extendInfo": {
       "CFBundleDocumentTypes": [
         {
