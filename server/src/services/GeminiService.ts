@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
 import { getClientPublicDir } from "../config/paths.js";
@@ -17,8 +17,7 @@ setGlobalDispatcher(
   })
 );
 
-const MODEL = "gemini-3-flash-preview";
-// const MODEL = "gemini-3.1-pro-preview";
+const MODEL = "gemini-3.1-flash-lite-preview";
 const CHUNK_SIZE = 250;   // lines per API call
 const OVERLAP = 30;       // lines of overlap from previous chunk
 const MAX_RETRIES = 3;    // retries per chunk on validation failure or transient API error
@@ -262,6 +261,11 @@ class GeminiService {
           const response = await ai.models.generateContent({
             model: MODEL,
             contents,
+            config: {
+              thinkingConfig: {
+                thinkingLevel: ThinkingLevel.MINIMAL,
+              }
+            }
           });
 
           const text = response.text ?? "";
