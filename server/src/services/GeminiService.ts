@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
-import { getClientPublicDir } from "../config/paths.js";
 import { tempManager } from "./TempManager.js";
 
 // Increase global fetch timeouts to 15 minutes to prevent Headers Timeout Error
@@ -137,9 +136,6 @@ function extractCodeBlock(response: string): string {
 // ── Service ──
 
 class GeminiService {
-  private correctionPromptCache: string | null = null;
-  private viralClipPromptCache: string | null = null;
-
   private chunkCacheDir(sessionId: string): string {
     return join(tempManager.getSessionDir(sessionId), "chunk_cache");
   }
@@ -169,17 +165,11 @@ class GeminiService {
   }
 
   private async getCorrectionPrompt(): Promise<string> {
-    if (this.correctionPromptCache) return this.correctionPromptCache;
-    const promptPath = join(getClientPublicDir(), "prompts", "correction-api.md");
-    this.correctionPromptCache = await readFile(promptPath, "utf-8");
-    return this.correctionPromptCache;
+    return settingsService.getCorrectionPrompt();
   }
 
   private async getViralClipPrompt(): Promise<string> {
-    if (this.viralClipPromptCache) return this.viralClipPromptCache;
-    const promptPath = join(getClientPublicDir(), "prompts", "viral-clips-api.md");
-    this.viralClipPromptCache = await readFile(promptPath, "utf-8");
-    return this.viralClipPromptCache;
+    return settingsService.getViralClipsPrompt();
   }
 
   async isAvailable(): Promise<boolean> {

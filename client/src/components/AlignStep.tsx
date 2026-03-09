@@ -19,17 +19,28 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
   const [videoName, setVideoName] = useState("project");
   const [prefillLoaded, setPrefillLoaded] = useState(false);
 
-  // Fetch prompts on mount
+  // Fetch prompts: use custom prompts from settings, fall back to static defaults
   useEffect(() => {
-    fetch("/prompts/correction-manual.md")
-      .then((res) => res.text())
-      .then(setCorrectionPrompt)
-      .catch(() => {});
-      
-    fetch("/prompts/viral-clips-manual.md")
-      .then((res) => res.text())
-      .then(setViralClipPrompt)
-      .catch(() => {});
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((settings) => {
+        const fetchDefault = (path: string) => fetch(path).then((r) => r.text());
+        if (settings.correctionPrompt) {
+          setCorrectionPrompt(settings.correctionPrompt);
+        } else {
+          fetchDefault("/prompts/correction-manual.md").then(setCorrectionPrompt).catch(() => {});
+        }
+        if (settings.viralClipsPrompt) {
+          setViralClipPrompt(settings.viralClipsPrompt);
+        } else {
+          fetchDefault("/prompts/viral-clips-manual.md").then(setViralClipPrompt).catch(() => {});
+        }
+      })
+      .catch(() => {
+        // Fallback: load static defaults
+        fetch("/prompts/correction-manual.md").then((r) => r.text()).then(setCorrectionPrompt).catch(() => {});
+        fetch("/prompts/viral-clips-manual.md").then((r) => r.text()).then(setViralClipPrompt).catch(() => {});
+      });
   }, []);
 
   // Prefill data from session

@@ -479,6 +479,76 @@
   margin-right: auto;
 }
 
+.settings-prompt-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.settings-prompt-toggle {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  user-select: none;
+}
+
+.settings-prompt-arrow {
+  font-size: 0.7rem;
+  color: var(--text-secondary, #888);
+  width: 1rem;
+  flex-shrink: 0;
+  margin-right: 0.3rem;
+}
+
+.settings-badge {
+  font-size: 0.65rem;
+  background: var(--accent, #4f8cff);
+  color: #fff;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-left: 0.3rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.settings-reset-btn {
+  font-size: 0.75rem;
+  background: none;
+  border: 1px solid var(--border, #333);
+  color: var(--text-secondary, #888);
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.settings-reset-btn:hover {
+  color: var(--text, #fff);
+  border-color: var(--text-secondary, #888);
+}
+
+.settings-prompt-textarea {
+  width: 100%;
+  min-height: 200px;
+  background: var(--bg-input, #1a1a2e);
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  color: var(--text, #fff);
+  font-family: monospace;
+  font-size: 0.8rem;
+  padding: 0.75rem;
+  resize: vertical;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+
+.settings-prompt-textarea:focus {
+  outline: none;
+  border-color: var(--accent, #4f8cff);
+}
+
 /* ── Cmd+R cancel prompt overlay (in-app, not native — keeps Cmd+Q working) ── */
 .cancel-prompt-overlay {
   position: fixed;

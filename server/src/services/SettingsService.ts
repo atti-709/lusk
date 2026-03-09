@@ -1,12 +1,15 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { getClientPublicDir } from "../config/paths.js";
 
 export type TranscriptionLanguage = "sk" | "cs" | "en";
 
 export interface AppSettings {
   geminiApiKey?: string;
   transcriptionLanguage?: TranscriptionLanguage;
+  correctionPrompt?: string;
+  viralClipsPrompt?: string;
 }
 
 function getConfigPath(): string {
@@ -45,6 +48,28 @@ class SettingsService {
   async getTranscriptionLanguage(): Promise<TranscriptionLanguage> {
     const settings = await this.load();
     return settings.transcriptionLanguage ?? "sk";
+  }
+
+  async getCorrectionPrompt(): Promise<string> {
+    const settings = await this.load();
+    if (settings.correctionPrompt) return settings.correctionPrompt;
+    return this.getDefaultCorrectionPrompt();
+  }
+
+  async getViralClipsPrompt(): Promise<string> {
+    const settings = await this.load();
+    if (settings.viralClipsPrompt) return settings.viralClipsPrompt;
+    return this.getDefaultViralClipsPrompt();
+  }
+
+  async getDefaultCorrectionPrompt(): Promise<string> {
+    const promptPath = join(getClientPublicDir(), "prompts", "correction-api.md");
+    return readFile(promptPath, "utf-8");
+  }
+
+  async getDefaultViralClipsPrompt(): Promise<string> {
+    const promptPath = join(getClientPublicDir(), "prompts", "viral-clips-api.md");
+    return readFile(promptPath, "utf-8");
   }
 }
 
