@@ -86,29 +86,15 @@ function App() {
     });
   }, []);
 
-  // Fetch project data when reaching READY state
+  // Sync captions and viral clips from SSE state whenever it updates to READY.
+  // The SSE payload already contains the full project data, so we can read
+  // directly from it — no separate fetch needed, avoiding race conditions.
   useEffect(() => {
-    if (!sessionId || !isReady) return;
-
-    let isMounted = true;
-    const fetchProject = async () => {
-      setProjectLoading(true);
-      try {
-        const r = await fetch(`/api/projects/${sessionId}`);
-        const data: ProjectState = await r.json();
-        if (!isMounted) return;
-        if (data.captions) setCaptions(data.captions);
-        if (data.viralClips) setViralClips(data.viralClips);
-      } catch {
-        // ignore errors
-      } finally {
-        if (isMounted) setProjectLoading(false);
-      }
-    };
-    fetchProject();
-
-    return () => { isMounted = false; };
-  }, [sessionId, isReady]);
+    if (!state || state.state !== "READY") return;
+    if (state.captions) setCaptions(state.captions);
+    if (state.viralClips) setViralClips(state.viralClips);
+    setProjectLoading(false);
+  }, [state]);
 
   // Fetch whisper captions when entering ALIGNING state (for preview during alignment)
   useEffect(() => {

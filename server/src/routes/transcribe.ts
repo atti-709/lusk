@@ -87,8 +87,9 @@ export async function runGeminiAutomation(
       tsvForClips = correctedTsv;
     } else {
       // No script — use raw transcript TSV directly
-      orchestrator.updateProgress(sessionId, 5, "Starting Gemini viral clip detection...");
       tsvForClips = wordsToTsv(rawTranscript.words);
+      orchestrator.setCorrectedTranscriptRaw(sessionId, tsvForClips);
+      orchestrator.updateProgress(sessionId, 5, "Starting Gemini viral clip detection...");
     }
 
     // 2. Detect viral clips
