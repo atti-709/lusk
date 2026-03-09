@@ -223,6 +223,14 @@
   padding: 1.5rem 2rem;
 }
 
+.script-dropzone.disabled {
+  opacity: 0.5;
+}
+
+.script-dropzone.disabled .upload-icon {
+  opacity: 0.4;
+}
+
 .optional-badge {
   font-size: 0.7rem;
   font-weight: 500;

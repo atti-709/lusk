@@ -653,10 +653,10 @@ function App() {
 
           {/* Script drop zone */}
           <div
-            className={`idle-notice idle-dropzone script-dropzone${scriptDragOver ? " drag-over" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setScriptDragOver(true); }}
+            className={`idle-notice idle-dropzone script-dropzone${scriptDragOver ? " drag-over" : ""}${!geminiAvailable ? " disabled" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); if (geminiAvailable) setScriptDragOver(true); }}
             onDragLeave={() => setScriptDragOver(false)}
-            onDrop={(e) => { setScriptDragOver(false); handleScriptDrop(e); }}
+            onDrop={(e) => { setScriptDragOver(false); if (geminiAvailable) handleScriptDrop(e); }}
           >
             <div className="upload-icon">
               <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -667,15 +667,14 @@ function App() {
               </svg>
             </div>
             <h2>Add reference script <span className="optional-badge">optional</span></h2>
-            {scriptFileName ? (
+            {!geminiAvailable ? (
+              <p className="settings-hint">Requires Gemini API key — configure in <button className="inline-link" onClick={() => setSettingsOpen(true)}>Settings</button></p>
+            ) : scriptFileName ? (
               <p className="script-loaded">{scriptFileName}</p>
             ) : (
               <p>Drag & drop a .md script for AI-powered transcript correction.</p>
             )}
-            {!geminiAvailable && (
-              <p className="settings-hint">No Gemini API key — configure in <button className="inline-link" onClick={() => setSettingsOpen(true)}>Settings</button></p>
-            )}
-            <button className="secondary" onClick={handleScriptBrowse}>
+            <button className="secondary" onClick={handleScriptBrowse} disabled={!geminiAvailable}>
               Browse scripts
             </button>
           </div>
