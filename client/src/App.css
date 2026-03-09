@@ -430,7 +430,8 @@
   color: var(--text);
 }
 
-.settings-field input {
+.settings-field input,
+.settings-field select {
   width: 100%;
   padding: 0.6rem 0.8rem;
   border: 1px solid var(--border);
@@ -441,7 +442,8 @@
   box-sizing: border-box;
 }
 
-.settings-field input:focus {
+.settings-field input:focus,
+.settings-field select:focus {
   outline: none;
   border-color: var(--accent);
 }

@@ -6,9 +6,16 @@ interface SettingsDialogProps {
   onKeySet?: (isSet: boolean) => void;
 }
 
+const LANGUAGES = [
+  { value: "sk", label: "Slovenčina" },
+  { value: "cs", label: "Čeština" },
+  { value: "en", label: "English" },
+] as const;
+
 export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps) {
   const [apiKey, setApiKey] = useState("");
   const [isSet, setIsSet] = useState(false);
+  const [language, setLanguage] = useState("sk");
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -21,6 +28,9 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
         if (data.geminiApiKeySet) {
           setApiKey(""); // Don't show the actual key
         }
+        if (data.transcriptionLanguage) {
+          setLanguage(data.transcriptionLanguage);
+        }
       })
       .catch(() => {});
   }, [open]);
@@ -29,15 +39,19 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
     setSaving(true);
     setStatus(null);
     try {
+      const body: Record<string, string> = { transcriptionLanguage: language };
+      if (apiKey.trim()) body.geminiApiKey = apiKey;
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ geminiApiKey: apiKey }),
+        body: JSON.stringify(body),
       });
       if (res.ok) {
-        setIsSet(true);
+        if (apiKey.trim()) {
+          setIsSet(true);
+          onKeySet?.(true);
+        }
         setStatus("Saved");
-        onKeySet?.(true);
         setTimeout(() => setStatus(null), 2000);
       }
     } catch {
@@ -45,7 +59,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
     } finally {
       setSaving(false);
     }
-  }, [apiKey]);
+  }, [apiKey, language]);
 
   if (!open) return null;
 
@@ -53,6 +67,21 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings-dialog" onClick={(e) => e.stopPropagation()}>
         <h2>Settings</h2>
+        <div className="settings-field">
+          <label htmlFor="transcription-language">Transcription Language</label>
+          <select
+            id="transcription-language"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+          >
+            {LANGUAGES.map((l) => (
+              <option key={l.value} value={l.value}>{l.label}</option>
+            ))}
+          </select>
+          <p className="settings-hint">
+            Language used for WhisperX transcription and alignment
+          </p>
+        </div>
         <div className="settings-field">
           <label htmlFor="gemini-key">Gemini API Key</label>
           <input
@@ -69,7 +98,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
         <div className="settings-actions">
           {status && <span className="settings-status">{status}</span>}
           <button className="secondary" onClick={onClose}>Close</button>
-          <button className="primary" onClick={handleSave} disabled={saving || !apiKey.trim()}>
+          <button className="primary" onClick={handleSave} disabled={saving}>
             {saving ? "Saving..." : "Save"}
           </button>
         </div>

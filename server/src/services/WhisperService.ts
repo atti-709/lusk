@@ -4,6 +4,7 @@ import { execSync, execFileSync, spawn } from "node:child_process";
 import { access, readFile, unlink } from "node:fs/promises";
 import type { TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
 import { getFFmpegPath } from "../config/ffmpeg.js";
+import { settingsService } from "./SettingsService.js";
 
 const WHISPERX_MODEL = "large-v3-turbo";
 
@@ -125,6 +126,7 @@ class WhisperService {
     outputDir: string,
     python3: string,
     ffmpegPath: string,
+    language: string,
     onProgress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<WhisperXOutput> {
@@ -133,7 +135,7 @@ class WhisperService {
         "-m", "whisperx",
         audioPath,
         "--model", WHISPERX_MODEL,
-        "--language", "sk",
+        "--language", language,
         "--compute_type", "int8",
         "--output_format", "json",
         "--output_dir", outputDir,
@@ -242,8 +244,9 @@ class WhisperService {
     if (signal?.aborted) throw new Error("Transcription cancelled");
 
     // Step 3: Run WhisperX (transcription + forced alignment)
+    const language = await settingsService.getTranscriptionLanguage();
     onProgress?.(10, "Starting WhisperX...");
-    const whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, onProgress, signal);
+    const whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, language, onProgress, signal);
 
     onProgress?.(96, "Processing results...");
 

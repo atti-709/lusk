@@ -2,8 +2,11 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
+export type TranscriptionLanguage = "sk" | "cs" | "en";
+
 export interface AppSettings {
   geminiApiKey?: string;
+  transcriptionLanguage?: TranscriptionLanguage;
 }
 
 function getConfigPath(): string {
@@ -37,6 +40,11 @@ class SettingsService {
     if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
     const settings = await this.load();
     return settings.geminiApiKey ?? null;
+  }
+
+  async getTranscriptionLanguage(): Promise<TranscriptionLanguage> {
+    const settings = await this.load();
+    return settings.transcriptionLanguage ?? "sk";
   }
 }
 
