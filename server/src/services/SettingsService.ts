@@ -10,10 +10,16 @@ export interface AppSettings {
   transcriptionLanguage?: TranscriptionLanguage;
   correctionPrompt?: string;
   viralClipsPrompt?: string;
+  fps?: number;
+  outroOverlapFrames?: number;
+}
+
+export function getConfigDir(): string {
+  return process.env.LUSK_REGISTRY_DIR ?? join(homedir(), ".lusk");
 }
 
 function getConfigPath(): string {
-  return join(process.env.LUSK_REGISTRY_DIR ?? join(homedir(), ".lusk"), "config.json");
+  return join(getConfigDir(), "config.json");
 }
 
 class SettingsService {
@@ -70,6 +76,16 @@ class SettingsService {
   async getDefaultViralClipsPrompt(): Promise<string> {
     const promptPath = join(getClientPublicDir(), "prompts", "viral-clips-api.md");
     return readFile(promptPath, "utf-8");
+  }
+
+  async getFps(): Promise<number> {
+    const settings = await this.load();
+    return settings.fps ?? 23.976;
+  }
+
+  async getOutroOverlapFrames(): Promise<number> {
+    const settings = await this.load();
+    return settings.outroOverlapFrames ?? 4;
   }
 }
 

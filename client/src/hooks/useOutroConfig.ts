@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 export interface OutroConfig {
   outroSrc: string;
   outroDurationInFrames: number;
+  outroOverlapFrames: number;
 }
 
 /**

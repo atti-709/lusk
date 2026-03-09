@@ -6,11 +6,11 @@ import { PipelineStepper, type ReadySubView } from "./components/PipelineStepper
 import { ClipSelector } from "./components/ClipSelector";
 import { StudioView } from "./components/StudioView";
 import { useCancelPrompt } from "./contexts/CancelPromptContext";
+import { useAppSettings } from "./contexts/AppSettingsContext";
 import {
   VideoComposition,
   COMP_WIDTH,
   COMP_HEIGHT,
-  COMP_FPS,
 } from "./components/VideoComposition";
 import { Logo } from "./components/Logo";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -28,6 +28,7 @@ type AppView = "loading" | "dashboard" | "session";
 function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("loading");
+  const { fps } = useAppSettings();
   const { state } = useSSE(sessionId);
   const [captions, setCaptions] = useState<CaptionWord[]>([]);
   const [viralClips, setViralClips] = useState<ViralClip[]>([]);
@@ -455,7 +456,7 @@ function App() {
 
   const fullVideoDurationFrames = Math.max(
     1,
-    Math.ceil((fullVideoClip.endMs / 1000) * COMP_FPS)
+    Math.ceil((fullVideoClip.endMs / 1000) * fps)
   );
 
   // Memoize inputProps and style to prevent Remotion Player from resetting
@@ -714,7 +715,7 @@ function App() {
                   compositionWidth={COMP_WIDTH}
                   compositionHeight={COMP_HEIGHT}
                   durationInFrames={fullVideoDurationFrames}
-                  fps={COMP_FPS}
+                  fps={fps}
                   style={reviewPlayerStyle}
                   controls
                   loop

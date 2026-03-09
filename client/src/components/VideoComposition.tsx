@@ -30,7 +30,8 @@ function ClipVideo({
   sourceAspectRatio?: number | null;
 }) {
   const frame = useCurrentFrame();
-  const fadeStartFrame = clipDurationInFrames - Math.round(COMP_FPS);
+  const { fps } = useVideoConfig();
+  const fadeStartFrame = clipDurationInFrames - Math.round(fps);
   const volume = interpolate(
     frame,
     [fadeStartFrame, clipDurationInFrames - 1],
@@ -98,6 +99,7 @@ export type VideoCompositionProps = {
   startFrom?: number;
   outroSrc?: string;
   outroDurationInFrames?: number;
+  outroOverlapFrames?: number;
   sourceAspectRatio?: number | null;  // videoWidth / videoHeight; null → assume landscape
 };
 
@@ -108,12 +110,13 @@ export function VideoComposition({
   startFrom = 0,
   outroSrc,
   outroDurationInFrames = 0,
+  outroOverlapFrames = OUTRO_OVERLAP_FRAMES,
   sourceAspectRatio,
 }: VideoCompositionProps) {
   const { durationInFrames } = useVideoConfig();
 
   const hasOutro = !!outroSrc && outroDurationInFrames > 0;
-  const overlap = hasOutro ? OUTRO_OVERLAP_FRAMES : 0;
+  const overlap = hasOutro ? outroOverlapFrames : 0;
 
   // total duration = clipDuration + outroDuration - overlap
   const clipDurationInFrames = hasOutro

@@ -640,3 +640,28 @@
   color: var(--accent) !important;
   margin-top: 1rem !important;
 }
+
+/* ── Settings outro ── */
+.settings-outro-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #888);
+  margin-bottom: 0.5rem;
+}
+
+.settings-outro-status.active {
+  color: var(--accent, #4f8cff);
+}
+
+.settings-outro-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.settings-outro-actions input[type="file"] {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #888);
+}

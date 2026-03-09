@@ -7,8 +7,8 @@ import {
   VideoComposition,
   COMP_WIDTH,
   COMP_HEIGHT,
-  COMP_FPS,
 } from "./VideoComposition";
+import { useAppSettings } from "../contexts/AppSettingsContext";
 import "./PipelineStepper.css";
 
 export type ReadySubView = "review" | "clips";
@@ -68,6 +68,8 @@ export function PipelineStepper({
   captions = [],
   sourceAspectRatio,
 }: PipelineStepperProps) {
+  const { fps } = useAppSettings();
+
   const isProcessing =
     (currentState === "TRANSCRIBING") ||
     (currentState === "ALIGNING" && progress < 100) ||
@@ -92,8 +94,8 @@ export function PipelineStepper({
   const alignPreviewDurationInFrames = useMemo(() => {
     const last = captions.at(-1);
     if (!last) return 1;
-    return Math.max(1, Math.ceil(((last.endMs + 1000) / 1000) * COMP_FPS));
-  }, [captions]);
+    return Math.max(1, Math.ceil(((last.endMs + 1000) / 1000) * fps));
+  }, [captions, fps]);
 
   const alignPlayerInputProps = useMemo(
     () => ({
@@ -147,7 +149,7 @@ export function PipelineStepper({
             compositionWidth={COMP_WIDTH}
             compositionHeight={COMP_HEIGHT}
             durationInFrames={alignPreviewDurationInFrames}
-            fps={COMP_FPS}
+            fps={fps}
             style={playerStyle}
             controls
             loop

@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback, type FormEvent } from "react"
 import type { ViralClip, ClipRenderState, CaptionWord } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
 import { useCancelPrompt } from "../contexts/CancelPromptContext";
+import { useAppSettings } from "../contexts/AppSettingsContext";
 import "./ClipSelector.css";
 
 function formatMs(ms: number): string {
@@ -180,10 +181,9 @@ function AddClipForm({ onAdd, onCancel }: { onAdd: (clip: ViralClip) => void; on
 // ── Batch render helpers ─────────────────────────────────────────────────
 
 const CAPTION_DELAY_MS_BATCH = 900; // matches StudioView's CAPTION_DELAY_MS
-const COMP_FPS_BATCH = 23.976;      // matches VideoComposition's COMP_FPS
 
 /** Compute Remotion-format captions for a clip, applying stored edits and offset. */
-function buildRemotionCaptions(clip: ViralClip, allCaptions: CaptionWord[]): Caption[] {
+function buildRemotionCaptions(clip: ViralClip, allCaptions: CaptionWord[], fps: number): Caption[] {
   const trimStartDelta = clip.trimStartDelta ?? 0;
   const trimEndDelta = clip.trimEndDelta ?? CAPTION_DELAY_MS_BATCH;
   const captionOffset = clip.captionOffset ?? 0;
@@ -193,8 +193,8 @@ function buildRemotionCaptions(clip: ViralClip, allCaptions: CaptionWord[]): Cap
   const effectiveEndMs = clip.endMs + trimEndDelta;
 
   // Frame-align the start (matches RenderService logic)
-  const startFrame = Math.round((effectiveStartMs / 1000) * COMP_FPS_BATCH);
-  const actualStartMs = (startFrame / COMP_FPS_BATCH) * 1000;
+  const startFrame = Math.round((effectiveStartMs / 1000) * fps);
+  const actualStartMs = (startFrame / fps) * 1000;
 
   return allCaptions
     .map((c, globalIndex) => ({ c, globalIndex }))
@@ -317,6 +317,7 @@ interface ClipSelectorProps {
 }
 
 export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, captions, onSelect, onBack, onAddClip }: ClipSelectorProps) {
+  const { fps } = useAppSettings();
   const [showForm, setShowForm] = useState(false);
   // ── Batch render state ─────────────────────────────────────────────────
   type BatchState = "idle" | "rendering" | "zipping" | "done";
@@ -408,7 +409,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
           sessionId,
           clip: buildTrimmedClip(nextClip),
           offsetX: nextClip.speakerOffsetX ?? 0,
-          captions: buildRemotionCaptions(nextClip, captions),
+          captions: buildRemotionCaptions(nextClip, captions, fps),
         }),
       }).then((res) => {
         if (res.status === 409) {
@@ -416,7 +417,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
         }
       }).catch(() => {/* network error — watcher will time out and advance */});
     });
-  }, [renders, batchState, sessionId, captions, videoName]);
+  }, [renders, batchState, sessionId, captions, videoName, fps]);
 
   const handleRenderAll = useCallback(async () => {
     setBatchError(null);
@@ -497,7 +498,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
         sessionId,
         clip: buildTrimmedClip(firstClip),
         offsetX: firstClip.speakerOffsetX ?? 0,
-        captions: buildRemotionCaptions(firstClip, captions),
+        captions: buildRemotionCaptions(firstClip, captions, fps),
       }),
     }).then((res) => {
       if (res.status === 409) {
@@ -505,7 +506,7 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
         if (batchRef.current) batchRef.current.currentWasRendering = true;
       }
     }).catch(() => {/* network error ignored — watcher handles stall */});
-  }, [clips, renders, sessionId, captions, videoName]);
+  }, [clips, renders, sessionId, captions, videoName, fps]);
 
   const handleAdd = useCallback((clip: ViralClip) => {
     onAddClip(clip);

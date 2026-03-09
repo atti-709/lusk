@@ -6,10 +6,9 @@ import {
   VideoComposition,
   COMP_WIDTH,
   COMP_HEIGHT,
-  COMP_FPS,
-  OUTRO_OVERLAP_FRAMES,
 } from "./VideoComposition";
 import { useOutroConfig } from "../hooks/useOutroConfig";
+import { useAppSettings } from "../contexts/AppSettingsContext";
 import "./StudioView.css";
 
 // Whisper timestamps tend to be slightly early; this offset ensures
@@ -68,6 +67,7 @@ export function StudioView({
 }: StudioViewProps) {
   const playerRef = useRef<PlayerRef>(null);
   const outroConfig = useOutroConfig();
+  const { fps } = useAppSettings();
   const isVerticalSource = sourceAspectRatio != null && sourceAspectRatio < 1;
 
   // Initialize from clip state if available
@@ -116,16 +116,17 @@ export function StudioView({
       .finally(() => setPendingSaveDestination(null));
   }, [renderState?.status, outputUrl, pendingSaveDestination, suggestedFilename]);
 
-  const startFrame = Math.round((effectiveStartMs / 1000) * COMP_FPS);
-  const actualStartMs = (startFrame / COMP_FPS) * 1000;
-  
+  const startFrame = Math.round((effectiveStartMs / 1000) * fps);
+  const actualStartMs = (startFrame / fps) * 1000;
+
   const clipDurationInFrames = Math.max(
     1,
-    Math.ceil(((effectiveEndMs - actualStartMs) / 1000) * COMP_FPS)
+    Math.ceil(((effectiveEndMs - actualStartMs) / 1000) * fps)
   );
 
   const outroDurationInFrames = outroConfig?.outroDurationInFrames ?? 0;
-  const overlap = outroDurationInFrames > 0 ? OUTRO_OVERLAP_FRAMES : 0;
+  const outroOverlap = outroConfig?.outroOverlapFrames ?? 4;
+  const overlap = outroDurationInFrames > 0 ? outroOverlap : 0;
   const durationInFrames = clipDurationInFrames + outroDurationInFrames - overlap;
 
 
@@ -262,7 +263,7 @@ export function StudioView({
   // Max trim range: ±5 seconds from original boundaries
   const maxTrimMs = 5000;
   const clipDurationSec = ((effectiveEndMs - effectiveStartMs) / 1000).toFixed(1);
-  const totalDurationSec = (durationInFrames / COMP_FPS).toFixed(1);
+  const totalDurationSec = (durationInFrames / fps).toFixed(1);
 
   const handleRender = useCallback(async () => {
     const destination = await promptForSaveDestination(suggestedFilename);
@@ -302,12 +303,13 @@ export function StudioView({
                 startFrom: startFrame,
                 outroSrc: outroConfig?.outroSrc ?? "",
                 outroDurationInFrames,
+                outroOverlapFrames: outroOverlap,
                 sourceAspectRatio,
               }}
               compositionWidth={COMP_WIDTH}
               compositionHeight={COMP_HEIGHT}
               durationInFrames={durationInFrames}
-              fps={COMP_FPS}
+              fps={fps}
               style={{
                 width: "100%",
                 borderRadius: 12,

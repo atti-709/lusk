@@ -6,6 +6,7 @@ import { makeCancelSignal } from "@remotion/renderer";
 import { orchestrator } from "../services/Orchestrator.js";
 import { tempManager } from "../services/TempManager.js";
 import { renderService } from "../services/RenderService.js";
+import { settingsService } from "../services/SettingsService.js";
 import type { RenderRequest, ErrorResponse, CaptionWord } from "@lusk/shared";
 
 const RENDER_LOG = "/tmp/lusk-render.log";
@@ -104,7 +105,12 @@ export async function renderRoute(app: FastifyInstance) {
   // Outro config endpoint: returns file paths + durations for client-side preview
   app.get("/api/outro-config", async () => {
     const config = await renderService.detectOutroConfig();
-    return config ?? { outroSrc: "", outroDurationInFrames: 0 };
+    const outroOverlapFrames = await settingsService.getOutroOverlapFrames();
+    return {
+      outroSrc: config?.outroSrc ?? "",
+      outroDurationInFrames: config?.outroDurationInFrames ?? 0,
+      outroOverlapFrames,
+    };
   });
 
   app.post<{ Body: RenderRequest; Reply: { success: true } | ErrorResponse }>(
