@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
-import { geminiService, wordsToTsv } from "../services/GeminiService.js";
+import { geminiService, wordsToTsv, msToTimestamp } from "../services/GeminiService.js";
 import { parseTsv, parseViralClipText, wordsToCaptions } from "./align.js";
 import type { TranscribeRequest, ErrorResponse } from "@lusk/shared";
 
@@ -76,8 +76,8 @@ export async function runGeminiAutomation(
       );
 
       // Parse and apply corrected transcript
-      const lastWord = rawTranscript.words.at(-1);
-      const fallbackEndMs = lastWord ? lastWord.endMs : 0;
+      const last = rawTranscript.words.at(-1);
+      const fallbackEndMs = last ? last.endMs : 0;
       const correctedWords = parseTsv(correctedTsv, fallbackEndMs);
 
       orchestrator.setTranscript(sessionId, { text: "", words: correctedWords });
@@ -93,13 +93,29 @@ export async function runGeminiAutomation(
     }
 
     // 2. Detect viral clips
+    const lastWord = rawTranscript.words.at(-1);
+    const transcriptEndMs = lastWord ? lastWord.endMs : 0;
+    const lastTimestamp = msToTimestamp(transcriptEndMs);
+
     const viralClipText = await geminiService.detectViralClips(
       tsvForClips,
+      lastTimestamp,
       (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
       signal,
     );
 
-    const clips = viralClipText.trim() ? parseViralClipText(viralClipText) : [];
+    const rawClips = viralClipText.trim() ? parseViralClipText(viralClipText) : [];
+
+    // Filter out clips with invalid time ranges
+    const clips = rawClips.filter(c => {
+      if (c.startMs < 0 || c.endMs <= c.startMs) return false;
+      if (c.endMs > transcriptEndMs) return false;
+      return true;
+    });
+    if (clips.length < rawClips.length) {
+      console.log(`[runGeminiAutomation] Filtered out ${rawClips.length - clips.length} clips exceeding transcript duration (${lastTimestamp})`);
+    }
+
     orchestrator.setViralClips(sessionId, clips);
 
     // Transition to READY

@@ -123,7 +123,7 @@ function wordsToTsv(words: TranscriptWord[]): string {
   return words.map((w) => `${msToTimestamp(w.startMs)}\t${w.word}`).join("\n");
 }
 
-export { wordsToTsv };
+export { wordsToTsv, msToTimestamp };
 
 function extractCodeBlock(response: string): string {
   // Extract content from ```...``` code block
@@ -340,6 +340,7 @@ class GeminiService {
    */
   async detectViralClips(
     correctedTsv: string,
+    lastTimestamp: string,
     onProgress: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<string> {
@@ -352,6 +353,8 @@ class GeminiService {
 
     const userMessage = [
       prompt,
+      "",
+      `CONSTRAINT: The transcript ends at ${lastTimestamp}. All Start and End timestamps MUST fall within 00:00:00.000 – ${lastTimestamp}. Do NOT suggest clips that extend beyond this range.`,
       "",
       "## Corrected Transcript (.tsv):",
       "",
