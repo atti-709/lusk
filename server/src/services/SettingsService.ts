@@ -12,6 +12,15 @@ export interface AppSettings {
   viralClipsPrompt?: string;
   fps?: number;
   outroOverlapFrames?: number;
+  outroEnabled?: boolean;
+  captionStyles?: {
+    fontSize?: number;
+    highlightColor?: string;
+    textColor?: string;
+    textTransform?: "uppercase" | "none" | "capitalize";
+    captionPosition?: number;
+    fontWeight?: 800 | 900;
+  };
 }
 
 export function getConfigDir(): string {
@@ -86,6 +95,11 @@ class SettingsService {
   async getOutroOverlapFrames(): Promise<number> {
     const settings = await this.load();
     return settings.outroOverlapFrames ?? 4;
+  }
+
+  async getCaptionStyles(): Promise<AppSettings["captionStyles"]> {
+    const settings = await this.load();
+    return settings.captionStyles;
   }
 }
 

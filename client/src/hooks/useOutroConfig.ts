@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 export interface OutroConfig {
   outroSrc: string;
@@ -10,17 +10,21 @@ export interface OutroConfig {
  * Fetches the outro configuration from the server.
  * Returns null while loading or if no outro assets are configured.
  */
-export function useOutroConfig(): OutroConfig | null {
+export function useOutroConfig(): { config: OutroConfig | null; reload: () => void } {
   const [config, setConfig] = useState<OutroConfig | null>(null);
+  const [trigger, setTrigger] = useState(0);
 
   useEffect(() => {
     fetch("/api/outro-config")
       .then((r) => r.json())
       .then((data: OutroConfig) => {
         if (data.outroSrc) setConfig(data);
+        else setConfig(null);
       })
       .catch(() => {});
-  }, []);
+  }, [trigger]);
 
-  return config;
+  const reload = useCallback(() => setTrigger((t) => t + 1), []);
+
+  return { config, reload };
 }

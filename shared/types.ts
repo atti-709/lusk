@@ -65,6 +65,24 @@ export interface CaptionWord {
   confidence: number | null;
 }
 
+export interface CaptionStyles {
+  fontSize: number;
+  highlightColor: string;
+  textColor: string;
+  textTransform: "uppercase" | "none" | "capitalize";
+  captionPosition: number;
+  fontWeight: 800 | 900;
+}
+
+export const DEFAULT_CAPTION_STYLES: CaptionStyles = {
+  fontSize: 56,
+  highlightColor: "#F77205",
+  textColor: "#ffffff",
+  textTransform: "uppercase",
+  captionPosition: 340,
+  fontWeight: 900,
+};
+
 export interface ClipRenderState {
   status: 'rendering' | 'exported';
   progress: number;

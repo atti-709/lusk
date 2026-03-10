@@ -33,6 +33,8 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
       fps: settings.fps ?? 23.976,
       outroOverlapFrames: settings.outroOverlapFrames ?? 4,
       outroSet,
+      outroEnabled: settings.outroEnabled ?? true,
+      captionStyles: settings.captionStyles ?? null,
     };
   });
 
@@ -52,10 +54,19 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
       viralClipsPrompt?: string | null;
       fps?: number;
       outroOverlapFrames?: number;
+      outroEnabled?: boolean;
+      captionStyles?: {
+        fontSize?: number;
+        highlightColor?: string;
+        textColor?: string;
+        textTransform?: "uppercase" | "none" | "capitalize";
+        captionPosition?: number;
+        fontWeight?: 800 | 900;
+      } | null;
     };
   }>("/api/settings", async (request) => {
     const current = await settingsService.load();
-    const { geminiApiKey, transcriptionLanguage, correctionPrompt, viralClipsPrompt, fps, outroOverlapFrames } =
+    const { geminiApiKey, transcriptionLanguage, correctionPrompt, viralClipsPrompt, fps, outroOverlapFrames, outroEnabled, captionStyles } =
       request.body ?? {};
 
     if (geminiApiKey !== undefined) {
@@ -79,6 +90,14 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
       if (Number.isInteger(val) && val >= 0 && val <= 30) {
         current.outroOverlapFrames = val;
       }
+    }
+
+    if (outroEnabled !== undefined) {
+      current.outroEnabled = outroEnabled;
+    }
+
+    if (captionStyles !== undefined) {
+      current.captionStyles = captionStyles ?? undefined;
     }
 
     await settingsService.save(current);

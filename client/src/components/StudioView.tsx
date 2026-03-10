@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
 import type { Caption } from "@remotion/captions";
-import type { CaptionWord, ViralClip, ClipRenderState } from "@lusk/shared";
+import type { CaptionWord, ViralClip, ClipRenderState, CaptionStyles } from "@lusk/shared";
+import { DEFAULT_CAPTION_STYLES } from "@lusk/shared";
 import {
   VideoComposition,
   COMP_WIDTH,
@@ -66,9 +67,13 @@ export function StudioView({
   sourceAspectRatio,
 }: StudioViewProps) {
   const playerRef = useRef<PlayerRef>(null);
-  const outroConfig = useOutroConfig();
-  const { fps } = useAppSettings();
+  const { config: outroConfig, reload: reloadOutro } = useOutroConfig();
+  const { fps, captionStyles, updateCaptionStyles, outroEnabled, setOutroEnabled } = useAppSettings();
   const isVerticalSource = sourceAspectRatio != null && sourceAspectRatio < 1;
+
+  const [stylesOpen, setStylesOpen] = useState(false);
+  const [outroOpen, setOutroOpen] = useState(false);
+  const [outroUploading, setOutroUploading] = useState(false);
 
   // Initialize from clip state if available
   const [offsetX, setOffsetX] = useState(clip.speakerOffsetX ?? 0);
@@ -124,8 +129,9 @@ export function StudioView({
     Math.ceil(((effectiveEndMs - actualStartMs) / 1000) * fps)
   );
 
-  const outroDurationInFrames = outroConfig?.outroDurationInFrames ?? 0;
-  const outroOverlap = outroConfig?.outroOverlapFrames ?? 4;
+  const outroActive = outroEnabled && outroConfig != null;
+  const outroDurationInFrames = outroActive ? outroConfig.outroDurationInFrames : 0;
+  const outroOverlap = outroActive ? outroConfig.outroOverlapFrames : 4;
   const overlap = outroDurationInFrames > 0 ? outroOverlap : 0;
   const durationInFrames = clipDurationInFrames + outroDurationInFrames - overlap;
 
@@ -247,6 +253,44 @@ export function StudioView({
     }
   }, [updateCaptionEdits]);
 
+  const handleOutroUpload = useCallback(async (file: File) => {
+    setOutroUploading(true);
+    const formData = new FormData();
+    formData.append("outro", file);
+    try {
+      const res = await fetch("/api/settings/outro", { method: "POST", body: formData });
+      if (res.ok) reloadOutro();
+    } catch { /* ignore */ }
+    finally { setOutroUploading(false); }
+  }, [reloadOutro]);
+
+  const handleOutroDelete = useCallback(async () => {
+    try {
+      const res = await fetch("/api/settings/outro", { method: "DELETE" });
+      if (res.ok) reloadOutro();
+    } catch { /* ignore */ }
+  }, [reloadOutro]);
+
+  const handleOverlapChange = useCallback(async (val: number) => {
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outroOverlapFrames: val }),
+    });
+    reloadOutro();
+  }, [reloadOutro]);
+
+  const handleStyleChange = useCallback(<K extends keyof CaptionStyles>(key: K, value: CaptionStyles[K]) => {
+    const updated = { ...captionStyles, [key]: value };
+    updateCaptionStyles(updated);
+  }, [captionStyles, updateCaptionStyles]);
+
+  const handleResetStyles = useCallback(() => {
+    updateCaptionStyles(DEFAULT_CAPTION_STYLES);
+  }, [updateCaptionStyles]);
+
+  const isStylesModified = JSON.stringify(captionStyles) !== JSON.stringify(DEFAULT_CAPTION_STYLES);
+
   // Build remotion captions with edits applied
   const remotionCaptions: Caption[] = useMemo(
     () =>
@@ -301,10 +345,11 @@ export function StudioView({
                 captions: remotionCaptions,
                 offsetX,
                 startFrom: startFrame,
-                outroSrc: outroConfig?.outroSrc ?? "",
+                outroSrc: outroActive ? outroConfig.outroSrc : "",
                 outroDurationInFrames,
                 outroOverlapFrames: outroOverlap,
                 sourceAspectRatio,
+                captionStyles,
               }}
               compositionWidth={COMP_WIDTH}
               compositionHeight={COMP_HEIGHT}
@@ -342,9 +387,67 @@ export function StudioView({
               className="caption-editor"
               value={captionText}
               onChange={(e) => handleCaptionTextChange(e.target.value)}
-              rows={6}
+              rows={4}
             />
           </div>
+
+          {/* Caption Styles */}
+          <div className="control-group">
+            <div className="collapsible-header" onClick={() => setStylesOpen(!stylesOpen)}>
+              <span className="control-label">
+                <svg className={`collapsible-chevron${stylesOpen ? " open" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+                Caption Styles
+              </span>
+              {isStylesModified && (
+                <button className="collapsible-reset-btn" onClick={(e) => { e.stopPropagation(); handleResetStyles(); }} title="Reset to defaults">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2.5 2v6h6" />
+                    <path d="M2.66 15.57a10 10 0 1 0 .57-8.38" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {stylesOpen && (
+              <div className="collapsible-body">
+                <div className="style-row">
+                  <label>Size</label>
+                  <input type="range" className="offset-slider" min={32} max={80} step={1} value={captionStyles.fontSize} onChange={(e) => handleStyleChange("fontSize", Number(e.target.value))} />
+                  <span className="control-value">{captionStyles.fontSize}</span>
+                </div>
+                <div className="style-row">
+                  <label>Highlight</label>
+                  <input type="color" value={captionStyles.highlightColor} onChange={(e) => handleStyleChange("highlightColor", e.target.value)} />
+                </div>
+                <div className="style-row">
+                  <label>Text color</label>
+                  <input type="color" value={captionStyles.textColor} onChange={(e) => handleStyleChange("textColor", e.target.value)} />
+                </div>
+                <div className="style-row">
+                  <label>Transform</label>
+                  <select value={captionStyles.textTransform} onChange={(e) => handleStyleChange("textTransform", e.target.value as CaptionStyles["textTransform"])}>
+                    <option value="uppercase">UPPERCASE</option>
+                    <option value="none">None</option>
+                    <option value="capitalize">Capitalize</option>
+                  </select>
+                </div>
+                <div className="style-row">
+                  <label>Weight</label>
+                  <select value={captionStyles.fontWeight} onChange={(e) => handleStyleChange("fontWeight", Number(e.target.value) as 800 | 900)}>
+                    <option value={900}>900 (Bold)</option>
+                    <option value={800}>800 (Heavy)</option>
+                  </select>
+                </div>
+                <div className="style-row">
+                  <label>Position</label>
+                  <input type="range" className="offset-slider" min={100} max={600} step={10} value={captionStyles.captionPosition} onChange={(e) => handleStyleChange("captionPosition", Number(e.target.value))} />
+                  <span className="control-value">{captionStyles.captionPosition}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Trim Start */}
           <div className="control-group">
             <label className="control-label">
@@ -418,6 +521,50 @@ export function StudioView({
             onChange={(e) => updateCaptionOffset(Number(e.target.value))}
             className="offset-slider"
           />
+        </div>
+
+        {/* Outro */}
+        <div className="control-group">
+          <div className="collapsible-header" onClick={() => setOutroOpen(!outroOpen)}>
+            <span className="control-label">
+              <svg className={`collapsible-chevron${outroOpen ? " open" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              Outro
+            </span>
+            {outroConfig && (
+              <label className="toggle-switch" onClick={(e) => e.stopPropagation()}>
+                <input type="checkbox" checked={outroEnabled} onChange={(e) => setOutroEnabled(e.target.checked)} />
+                <span className="toggle-track" />
+              </label>
+            )}
+          </div>
+          {outroOpen && (
+            <div className="collapsible-body">
+              <div className="outro-actions">
+                <input
+                  type="file"
+                  accept="video/mp4"
+                  disabled={outroUploading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleOutroUpload(file);
+                    e.target.value = "";
+                  }}
+                />
+                {outroConfig && (
+                  <button className="secondary" onClick={handleOutroDelete}>Remove</button>
+                )}
+              </div>
+              {outroConfig && (
+                <div className="style-row">
+                  <label>Overlap</label>
+                  <input type="range" className="offset-slider" min={0} max={30} step={1} value={outroConfig.outroOverlapFrames} onChange={(e) => handleOverlapChange(Number(e.target.value))} />
+                  <span className="control-value">{outroConfig.outroOverlapFrames}f</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Render progress */}
