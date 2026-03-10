@@ -385,12 +385,29 @@ class ProjectFileService {
 
     writeLuskFile(session.projectFilePath, data);
 
-    // Update registry
-    await updateRegistryEntry(session.projectFilePath, {
+    // Update registry — also repair missing thumbnail if video is available
+    const patch: Partial<Omit<RecentProject, "projectId" | "projectPath">> = {
       videoName: data.videoName,
       state: data.state,
       updatedAt: data.updatedAt,
-    });
+    };
+
+    {
+      const entries = await readRegistry();
+      const existing = entries.find((e) => e.projectPath === session.projectFilePath);
+      if (existing && !existing.thumbnail) {
+        // Try original video path first, then fall back to cached copy in temp dir
+        const cachePath = join(tempManager.getSessionDir(session.projectId), "input.mp4");
+        const videoPath = (data.videoPath && await fileExists(data.videoPath))
+          ? data.videoPath
+          : (await fileExists(cachePath) ? cachePath : null);
+        if (videoPath) {
+          patch.thumbnail = generateThumbnail(videoPath);
+        }
+      }
+    }
+
+    await updateRegistryEntry(session.projectFilePath, patch);
   }
 
   // -------------------------------------------------------------------------
@@ -414,10 +431,14 @@ class ProjectFileService {
           updatedEntry.state = data.state || updatedEntry.state;
           updatedEntry.updatedAt = data.updatedAt || updatedEntry.updatedAt;
           
-          if (!updatedEntry.thumbnail && data.videoPath) {
-             const videoExists = await fileExists(data.videoPath);
-             if (videoExists) {
-               updatedEntry.thumbnail = generateThumbnail(data.videoPath);
+          if (!updatedEntry.thumbnail) {
+             // Try original video path, then cached copy in temp dir
+             const cachePath = join(tempManager.getSessionDir(data.projectId), "input.mp4");
+             const videoPath = (data.videoPath && await fileExists(data.videoPath))
+               ? data.videoPath
+               : (await fileExists(cachePath) ? cachePath : null);
+             if (videoPath) {
+               updatedEntry.thumbnail = generateThumbnail(videoPath);
              }
           }
           needsSave = true;
