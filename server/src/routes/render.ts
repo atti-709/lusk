@@ -47,7 +47,8 @@ async function runRender(
   activeRenderCancels.set(sessionId, { cancel, clipKey: key });
 
   try {
-    const outroConfig = await renderService.detectOutroConfig();
+    const settings = await settingsService.load();
+    const outroConfig = (settings.outroEnabled ?? true) ? await renderService.detectOutroConfig() : null;
 
     const sourceAspectRatio =
       session.videoWidth != null && session.videoHeight != null

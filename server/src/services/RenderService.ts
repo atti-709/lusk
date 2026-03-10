@@ -169,6 +169,7 @@ class RenderService {
 
     const fps = await settingsService.getFps();
     const outroOverlapFrames = await settingsService.getOutroOverlapFrames();
+    const captionStyles = await settingsService.getCaptionStyles();
 
     const startFrame = Math.round((clip.startMs / 1000) * fps);
     const actualStartMs = (startFrame / fps) * 1000;
@@ -205,6 +206,7 @@ class RenderService {
       outroDurationInFrames,
       outroOverlapFrames,
       sourceAspectRatio: sourceAspectRatio ?? null,
+      captionStyles: captionStyles ?? undefined,
     };
 
     const totalDurationInFrames =

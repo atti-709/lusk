@@ -8,6 +8,7 @@ import {
 } from "remotion";
 import type { Caption } from "@remotion/captions";
 import { CaptionOverlay } from "./CaptionOverlay";
+import type { CaptionStyles } from "@lusk/shared";
 
 export const COMP_WIDTH = 1080;
 export const COMP_HEIGHT = 1920;
@@ -101,6 +102,7 @@ export type VideoCompositionProps = {
   outroDurationInFrames?: number;
   outroOverlapFrames?: number;
   sourceAspectRatio?: number | null;  // videoWidth / videoHeight; null → assume landscape
+  captionStyles?: CaptionStyles;
 };
 
 export function VideoComposition({
@@ -112,6 +114,7 @@ export function VideoComposition({
   outroDurationInFrames = 0,
   outroOverlapFrames = OUTRO_OVERLAP_FRAMES,
   sourceAspectRatio,
+  captionStyles,
 }: VideoCompositionProps) {
   const { durationInFrames } = useVideoConfig();
 
@@ -141,7 +144,7 @@ export function VideoComposition({
             />
           )}
         </AbsoluteFill>
-        {captions.length > 0 && <CaptionOverlay captions={captions} />}
+        {captions.length > 0 && <CaptionOverlay captions={captions} captionStyles={captionStyles} />}
       </Sequence>
 
       {/* Outro video — starts OUTRO_OVERLAP_FRAMES before clip ends, audio fades out */}

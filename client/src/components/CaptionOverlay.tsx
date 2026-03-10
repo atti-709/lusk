@@ -8,6 +8,8 @@ import {
 import { createTikTokStyleCaptions } from "@remotion/captions";
 import type { TikTokPage, Caption } from "@remotion/captions";
 import { loadFont } from "@remotion/google-fonts/Montserrat";
+import type { CaptionStyles } from "@lusk/shared";
+import { DEFAULT_CAPTION_STYLES } from "@lusk/shared";
 
 const { fontFamily } = loadFont("normal", {
   weights: ["800", "900"],
@@ -16,12 +18,10 @@ const { fontFamily } = loadFont("normal", {
 
 // How often captions switch — controls words per page
 const SWITCH_CAPTIONS_EVERY_MS = 1200;
-const HIGHLIGHT_COLOR = "#F77205";
-const TEXT_COLOR = "#ffffff";
 const SHADOW =
   "0 2px 8px rgba(0,0,0,0.9), 0 0 24px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4)";
 
-function CaptionPage({ page }: { page: TikTokPage }) {
+function CaptionPage({ page, styles }: { page: TikTokPage; styles: CaptionStyles }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -36,16 +36,16 @@ function CaptionPage({ page }: { page: TikTokPage }) {
         justifyContent: "flex-end",
         alignItems: "center",
         // Lower third: ~75-80% down the 1920px frame
-        paddingBottom: 340,
+        paddingBottom: styles.captionPosition,
       }}
     >
       <div
         style={{
-          fontSize: 56,
-          fontWeight: 900,
+          fontSize: styles.fontSize,
+          fontWeight: styles.fontWeight,
           fontFamily,
           textAlign: "center",
-          textTransform: "uppercase",
+          textTransform: styles.textTransform,
           letterSpacing: "0.02em",
           whiteSpace: "pre-wrap",
           textShadow: SHADOW,
@@ -61,7 +61,7 @@ function CaptionPage({ page }: { page: TikTokPage }) {
             <span
               key={token.fromMs}
               style={{
-                color: isActive ? HIGHLIGHT_COLOR : TEXT_COLOR,
+                color: isActive ? styles.highlightColor : styles.textColor,
                 transform: isActive ? "scale(1.12)" : "scale(1)",
                 display: "inline",
                 transition: "transform 0.08s ease, color 0.05s ease",
@@ -78,6 +78,7 @@ function CaptionPage({ page }: { page: TikTokPage }) {
 
 export type CaptionOverlayProps = {
   captions: Caption[];
+  captionStyles?: CaptionStyles;
 };
 
 /**
@@ -130,7 +131,8 @@ function splitAtSentenceBoundaries(pages: TikTokPage[]): TikTokPage[] {
   return result;
 }
 
-export function CaptionOverlay({ captions }: CaptionOverlayProps) {
+export function CaptionOverlay({ captions, captionStyles }: CaptionOverlayProps) {
+  const styles = captionStyles ?? DEFAULT_CAPTION_STYLES;
   const { fps } = useVideoConfig();
 
   const pages = useMemo(() => {
@@ -163,7 +165,7 @@ export function CaptionOverlay({ captions }: CaptionOverlayProps) {
             from={startFrame}
             durationInFrames={durationInFrames}
           >
-            <CaptionPage page={page} />
+            <CaptionPage page={page} styles={styles} />
           </Sequence>
         );
       })}
