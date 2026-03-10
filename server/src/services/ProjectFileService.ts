@@ -22,8 +22,6 @@ import type {
 import { tempManager } from "./TempManager.js";
 
 const MAX_RECENT = 20;
-const LUSK_SERVER_ORIGIN =
-  process.env.LUSK_SERVER_ORIGIN ?? "http://localhost:3000";
 
 // ---------------------------------------------------------------------------
 // Helpers
