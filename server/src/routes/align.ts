@@ -318,56 +318,51 @@ function msToSrtTimestamp(ms: number): string {
 }
 
 function captionsToSrt(captions: CaptionWord[]): string {
-  let srt = "";
-  let index = 1;
-  const GROUP_SIZE = 4000; // ~4 seconds per subtitle block? 
-  // Wait, `CaptionWord` is word-level. We need to group them into sentences or meaningful blocks for SRT?
-  // User just said "corrected subtitles for youtube". YouTube handles SRTs well.
-  // If we just dump 1 word per line it's terrible.
-  // BUT the "captions" we have in `orchestrator` are `CaptionWord[]`.
-  // We need to group them.
-  // Actually, let's keep it simple: group by ~3-5 seconds or sentence endings?
-  // Ideally, we'd use the original `Whisper` segments if we had them. But we only have words.
-  // Let's implement a simple greedy packer: max 42 chars per line, max 2 lines per subtitle.
-  
-  // Simple strategy: Group words into blocks until gap > 1s OR max chars reached.
-  
+  const MAX_CHARS = 35;
+  const GAP_MS = 1000;
+  const crlf = "\r\n";
+
+  // Step 1: Group words into short blocks (by gap or char limit)
+  const groups: CaptionWord[][] = [];
   let currentBlock: CaptionWord[] = [];
   let lastEnd = 0;
-  
+
   for (const word of captions) {
-    // If gap is too large, start new block
-    if (currentBlock.length > 0 && word.startMs - lastEnd > 1000) {
-       srt += formatSrtBlock(index++, currentBlock);
-       currentBlock = [];
+    if (currentBlock.length > 0 && word.startMs - lastEnd > GAP_MS) {
+      groups.push(currentBlock);
+      currentBlock = [];
     }
-    
+
     currentBlock.push(word);
     lastEnd = word.endMs;
-    
-    // Check length limit (rough heuristic: 80 chars)
+
     const textLen = currentBlock.reduce((acc, w) => acc + w.text.trim().length + 1, 0);
-    if (textLen > 80) {
-       srt += formatSrtBlock(index++, currentBlock);
-       currentBlock = [];
+    if (textLen > MAX_CHARS) {
+      groups.push(currentBlock);
+      currentBlock = [];
     }
   }
-  
   if (currentBlock.length > 0) {
-    srt += formatSrtBlock(index++, currentBlock);
+    groups.push(currentBlock);
   }
-  
-  return srt;
-}
 
-function formatSrtBlock(index: number, words: CaptionWord[]): string {
-  if (words.length === 0) return "";
-  const start = msToSrtTimestamp(words[0].startMs);
-  const end = msToSrtTimestamp(words[words.length - 1].endMs);
-  const text = words.map(w => w.text.trim()).join(" ");
-  // SRT requires blank line between blocks; use CRLF per SubRip spec
-  const crlf = "\r\n";
-  return `${index}${crlf}${start} --> ${end}${crlf}${text}${crlf}${crlf}`;
+  // Step 2: For each group, emit progressive SRT cues (word-by-word reveal)
+  let srt = "";
+  let index = 1;
+
+  for (const group of groups) {
+    for (let i = 0; i < group.length; i++) {
+      const start = msToSrtTimestamp(group[i].startMs);
+      const end = i < group.length - 1
+        ? msToSrtTimestamp(group[i + 1].startMs)
+        : msToSrtTimestamp(group[group.length - 1].endMs);
+      const text = group.slice(0, i + 1).map(w => w.text.trim()).join(" ");
+      srt += `${index}${crlf}${start} --> ${end}${crlf}${text}${crlf}${crlf}`;
+      index++;
+    }
+  }
+
+  return srt;
 }
 
 // ... inside alignRoute function ...
