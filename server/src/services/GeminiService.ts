@@ -138,10 +138,31 @@ function editDistance(a: string, b: string): number {
 function isSimilar(normA: string, normB: string): boolean {
   if (normA === normB) return true;
   if (normA.length === 0 || normB.length === 0) return false;
+  // Short words (≤3 chars): require exact match after normalization.
+  // Slovak has many 1-2 char words (a, i, v, k, s, o, z, u, je, na, sa, to, do...)
+  // that are completely different words despite low edit distance.
+  if (normA.length <= 3 || normB.length <= 3) return false;
   const maxLen = Math.max(normA.length, normB.length);
   // Allow up to ~40% edit distance (generous for Slovak diacritics/spelling)
-  const threshold = Math.max(2, Math.ceil(maxLen * 0.4));
+  const threshold = Math.ceil(maxLen * 0.4);
   return editDistance(normA, normB) <= threshold;
+}
+
+/**
+ * When Gemini returns the correct row count, replace its (possibly mangled)
+ * timestamps with the original input timestamps. Takes words positionally.
+ */
+function restoreTimestamps(inputLines: string[], outputLines: string[]): string[] {
+  const inputs = inputLines.filter((l) => l.trim());
+  const result: string[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const ts = inputs[i].split("\t")[0].trim();
+    const outputWord = i < outputLines.length
+      ? (() => { const tab = outputLines[i].indexOf("\t"); return tab >= 0 ? outputLines[i].substring(tab + 1) : outputLines[i]; })()
+      : inputs[i].split("\t").slice(1).join("\t");
+    result.push(`${ts}\t${outputWord}`);
+  }
+  return result;
 }
 
 /**
@@ -352,6 +373,8 @@ class GeminiService {
         continue;
       }
 
+      const expectedLines = chunkLines.filter((l) => l.trim()).length;
+
       const userMessage = [
         prompt,
         "",
@@ -359,12 +382,12 @@ class GeminiService {
         "",
         scriptText,
         "",
-        "## Raw Transcription (.tsv):",
+        `## Raw Transcription (.tsv) — exactly ${expectedLines} rows:`,
         "",
         chunkTsv,
+        "",
+        `REMINDER: Your output MUST contain exactly ${expectedLines} rows. Do not merge, split, or drop any rows. Preserve all timestamps exactly as written (HH:MM:SS.mmm format).`,
       ].join("\n");
-
-      const expectedLines = chunkLines.filter((l) => l.trim()).length;
 
       let resultLines: string[] = [];
       let retryFeedback: string | null = null; // mismatch feedback injected on retry
@@ -423,7 +446,9 @@ class GeminiService {
             throw new Error(detail);
           }
 
-          // Validation passed — cache to disk and break out of retry loop
+          // Validation passed — restore original timestamps (Gemini may reformat them)
+          // and cache to disk
+          resultLines = restoreTimestamps(chunkLines, resultLines);
           await this.setCachedChunk(sessionId, chunkHash, resultLines);
           break;
         } catch (err: unknown) {
