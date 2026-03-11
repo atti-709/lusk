@@ -57,7 +57,7 @@ function ClipVideo({
     ? {
         width: "100%",
         height: "100%",
-        objectFit: "cover" as const,
+        objectFit: "contain" as const,
         position: "absolute" as const,
         left: 0,
         top: 0,
