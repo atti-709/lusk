@@ -19,7 +19,8 @@ setGlobalDispatcher(
 const MODEL = "gemini-3.1-flash-lite-preview";
 const CHUNK_SIZE = 250;   // lines per API call
 const OVERLAP = 30;       // lines of overlap from previous chunk
-const MAX_RETRIES = 3;    // retries per chunk on validation failure or transient API error
+const MAX_RETRIES = 3;    // retries per chunk on transient API error
+const MAX_ROW_MISMATCH_RETRIES = 1; // row mismatch gets 1 retry, then auto-repair
 const RETRY_DELAY_MS = 5000; // wait between retries
 
 type ProgressCallback = (percent: number, message: string) => void;
@@ -92,10 +93,73 @@ function isRetryableError(err: unknown): boolean {
     const msg = err.message;
     // Gemini 503 / 429 / rate limit
     if (msg.includes("503") || msg.includes("429") || msg.includes("UNAVAILABLE") || msg.includes("RESOURCE_EXHAUSTED")) return true;
-    // Our own row count validation failure
-    if (msg.includes("row mismatch")) return true;
   }
   return false;
+}
+
+function isRowMismatchError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("row mismatch");
+}
+
+/**
+ * Parse a timestamp string (HH:MM:SS.mmm or MM:SS.mmm or SS.mmm) to
+ * total milliseconds for fuzzy matching. Returns NaN if unparseable.
+ */
+function timestampToMs(ts: string): number {
+  const parts = ts.split(":");
+  let h = 0, m = 0, s = 0;
+  if (parts.length === 3) {
+    h = Number(parts[0]);
+    m = Number(parts[1]);
+    s = Number(parts[2]);
+  } else if (parts.length === 2) {
+    m = Number(parts[0]);
+    s = Number(parts[1]);
+  } else {
+    s = Number(parts[0]);
+  }
+  return Math.round((h * 3600 + m * 60 + s) * 1000);
+}
+
+/**
+ * Repair a Gemini response that has the wrong number of rows by matching
+ * on timestamps (converted to ms to handle format differences like
+ * Gemini outputting "01:00.417" instead of "00:11:00.417").
+ * Missing rows fall back to the original input; extra rows are dropped.
+ */
+function repairChunkOutput(inputLines: string[], outputLines: string[]): string[] {
+  // Build a map from timestamp-as-ms -> corrected word
+  const correctedByMs = new Map<number, string>();
+  for (const line of outputLines) {
+    const [ts, ...rest] = line.split("\t");
+    if (ts) {
+      const ms = timestampToMs(ts.trim());
+      if (!isNaN(ms)) correctedByMs.set(ms, rest.join("\t"));
+    }
+  }
+
+  // Walk through input lines and use corrected word if available, else keep original
+  const repaired: string[] = [];
+  let matched = 0;
+  for (const line of inputLines) {
+    if (!line.trim()) continue;
+    const [ts, ...rest] = line.split("\t");
+    const trimmedTs = ts.trim();
+    const ms = timestampToMs(trimmedTs);
+    const corrected = !isNaN(ms) ? correctedByMs.get(ms) : undefined;
+    if (corrected !== undefined) {
+      repaired.push(`${trimmedTs}\t${corrected}`);
+      matched++;
+    } else {
+      // Keep original uncorrected word
+      repaired.push(`${trimmedTs}\t${rest.join("\t")}`);
+    }
+  }
+
+  const total = inputLines.filter((l) => l.trim()).length;
+  console.log(`[GeminiService] Auto-repair: matched ${matched}/${total} rows by timestamp, kept ${total - matched} original`);
+
+  return repaired;
 }
 
 
@@ -239,6 +303,7 @@ class GeminiService {
 
       let resultLines: string[] = [];
       let retryFeedback: string | null = null; // mismatch feedback injected on retry
+      let rowMismatchAttempts = 0;
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         if (signal?.aborted) throw new Error("Cancelled");
 
@@ -262,28 +327,54 @@ class GeminiService {
           resultLines = extractCodeBlock(text).split("\n").filter((l) => l.trim());
 
           if (resultLines.length !== expectedLines) {
-            const inputTimestamps = chunkLines.map((l) => l.split("\t")[0]);
-            const outputTimestamps = resultLines.map((l) => l.split("\t")[0]);
-            const missing = inputTimestamps.filter((ts) => !outputTimestamps.includes(ts));
-            const extra = outputTimestamps.filter((ts) => !inputTimestamps.includes(ts));
+            // Use ms-based comparison to avoid false positives from Gemini
+            // reformatting timestamps (e.g. "00:11:00.417" → "01:00.417")
+            const inputMsSet = new Set(
+              chunkLines.filter((l) => l.trim()).map((l) => timestampToMs(l.split("\t")[0].trim())),
+            );
+            const outputMsSet = new Set(
+              resultLines.map((l) => timestampToMs(l.split("\t")[0].trim())),
+            );
+            const missingMs = [...inputMsSet].filter((ms) => !isNaN(ms) && !outputMsSet.has(ms));
+            const extraMs = [...outputMsSet].filter((ms) => !isNaN(ms) && !inputMsSet.has(ms));
 
             const detail = [
               `Chunk ${i + 1}/${chunks.length} row mismatch: expected ${expectedLines}, got ${resultLines.length}.`,
-              missing.length ? `Missing timestamps: ${missing.join(", ")}` : null,
-              extra.length ? `Extra timestamps: ${extra.join(", ")}` : null,
+              missingMs.length ? `${missingMs.length} genuinely missing rows.` : null,
+              extraMs.length ? `${extraMs.length} extra rows.` : null,
+              (resultLines.length - expectedLines + missingMs.length - extraMs.length) !== 0
+                ? `(${resultLines.length - expectedLines - extraMs.length + missingMs.length} from timestamp reformatting)`
+                : null,
             ].filter(Boolean).join(" ");
+
+            rowMismatchAttempts++;
+
+            // After MAX_ROW_MISMATCH_RETRIES, auto-repair instead of retrying again
+            if (rowMismatchAttempts > MAX_ROW_MISMATCH_RETRIES) {
+              console.warn(`[GeminiService] ${detail} — auto-repairing`);
+              onProgress(
+                Math.round((i / chunks.length) * 80),
+                `Chunk ${i + 1}/${chunks.length}: row mismatch, auto-repairing...`,
+              );
+              resultLines = repairChunkOutput(chunkLines, resultLines);
+              await this.setCachedChunk(sessionId, chunkHash, resultLines);
+              break;
+            }
+
             console.error(`[GeminiService] ${detail}`);
 
-            // Build feedback for the next retry attempt
+            // Build feedback for the retry — only mention genuinely missing/extra rows
             const feedbackParts = [
               `## CORRECTION REQUIRED (your previous output had ${resultLines.length} rows instead of ${expectedLines}):`,
               "You MUST output EXACTLY one row per input row. Do NOT merge or drop any rows.",
+              "IMPORTANT: Preserve timestamps EXACTLY as given (HH:MM:SS.mmm format). Do NOT reformat them.",
             ];
-            if (missing.length) {
-              feedbackParts.push(`You DROPPED these timestamps — they MUST appear in your output:\n${missing.join("\n")}`);
-            }
-            if (extra.length) {
-              feedbackParts.push(`You ADDED these invalid timestamps — remove them:\n${extra.join("\n")}`);
+            if (missingMs.length) {
+              const missingTimestamps = chunkLines
+                .filter((l) => l.trim())
+                .map((l) => l.split("\t")[0].trim())
+                .filter((ts) => missingMs.includes(timestampToMs(ts)));
+              feedbackParts.push(`You DROPPED these timestamps — they MUST appear in your output:\n${missingTimestamps.join("\n")}`);
             }
             retryFeedback = feedbackParts.join("\n\n");
 
@@ -296,7 +387,7 @@ class GeminiService {
         } catch (err: unknown) {
           const errObj = err instanceof Error ? err : new Error(String(err));
 
-          if (attempt < MAX_RETRIES && isRetryableError(errObj)) {
+          if (attempt < MAX_RETRIES && (isRetryableError(errObj) || isRowMismatchError(errObj))) {
             const delay = RETRY_DELAY_MS * (attempt + 1); // linear backoff
             console.warn(`[GeminiService] Chunk ${i} attempt ${attempt + 1} failed (${errObj.message}). Retrying in ${delay / 1000}s...`);
             onProgress(
