@@ -150,6 +150,26 @@ export const projectsRoute: FastifyPluginAsync = async (server) => {
   });
 
   // -------------------------------------------------------------------------
+  // DELETE /api/projects/:projectId/cache
+  // -------------------------------------------------------------------------
+  server.delete<{
+    Params: { projectId: string };
+    Reply: { success: true } | ErrorResponse;
+  }>("/api/projects/:projectId/cache", async (request, reply) => {
+    try {
+      const { projectId } = request.params;
+      await tempManager.cleanupSessionCache(projectId);
+      return reply.send({ success: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      request.log.error(err, "Failed to clear cache");
+      return reply
+        .status(500)
+        .send({ success: false, error: message });
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // POST /api/projects/:projectId/select-video
   // -------------------------------------------------------------------------
   server.post<{

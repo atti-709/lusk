@@ -56,6 +56,15 @@ export function Dashboard({ onOpenProject, onNewProject, onOpenFile, whisperxAva
     setProjects((prev) => prev.filter((p) => p.projectId !== projectId));
   };
 
+  const handleClearCache = async (projectId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await fetch(`/api/projects/${projectId}/cache`, { method: "DELETE" });
+    (e.target as HTMLButtonElement).textContent = "Cleared!";
+    setTimeout(() => {
+      (e.target as HTMLButtonElement).textContent = "Clear cache";
+    }, 2000);
+  };
+
   if (loading) return <div className="connecting">Loading</div>;
 
   return (
@@ -109,6 +118,14 @@ export function Dashboard({ onOpenProject, onNewProject, onOpenFile, whisperxAva
                     <span className="project-card__time">{formatTime(p.updatedAt)}</span>
                   </span>
                 </div>
+                {!p.missing && (
+                  <button
+                    className="project-card__clear-cache"
+                    onClick={(e) => handleClearCache(p.projectId, e)}
+                  >
+                    Clear cache
+                  </button>
+                )}
                 {p.missing && (
                   <div className="project-card__missing">
                     <span>File not found</span>

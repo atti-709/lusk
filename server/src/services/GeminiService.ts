@@ -20,7 +20,7 @@ const MODEL = "gemini-3.1-flash-lite-preview";
 const CHUNK_SIZE = 250;   // lines per API call
 const OVERLAP = 30;       // lines of overlap from previous chunk
 const MAX_RETRIES = 3;    // retries per chunk on transient API error
-const MAX_ROW_MISMATCH_RETRIES = 1; // row mismatch gets 1 retry, then auto-repair
+const ROW_MISMATCH_RETRY_THRESHOLD = 0.90; // only retry if output is below 90% of expected rows
 const RETRY_DELAY_MS = 5000; // wait between retries
 
 type ProgressCallback = (percent: number, message: string) => void;
@@ -102,62 +102,127 @@ function isRowMismatchError(err: unknown): boolean {
 }
 
 /**
- * Parse a timestamp string (HH:MM:SS.mmm or MM:SS.mmm or SS.mmm) to
- * total milliseconds for fuzzy matching. Returns NaN if unparseable.
+ * Normalize a word for fuzzy comparison: strip diacritics, lowercase,
+ * remove non-alphanumeric characters.
  */
-function timestampToMs(ts: string): number {
-  const parts = ts.split(":");
-  let h = 0, m = 0, s = 0;
-  if (parts.length === 3) {
-    h = Number(parts[0]);
-    m = Number(parts[1]);
-    s = Number(parts[2]);
-  } else if (parts.length === 2) {
-    m = Number(parts[0]);
-    s = Number(parts[1]);
-  } else {
-    s = Number(parts[0]);
-  }
-  return Math.round((h * 3600 + m * 60 + s) * 1000);
+function normalizeWord(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
 }
 
 /**
- * Repair a Gemini response that has the wrong number of rows by matching
- * on timestamps (converted to ms to handle format differences like
- * Gemini outputting "01:00.417" instead of "00:11:00.417").
- * Missing rows fall back to the original input; extra rows are dropped.
+ * Levenshtein edit distance between two strings.
+ */
+function editDistance(a: string, b: string): number {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix: number[][] = [];
+  for (let i = 0; i <= a.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost,
+      );
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
+/**
+ * Check if two normalized words are similar enough to be a correction
+ * (not a completely different word from a dropped row).
+ */
+function isSimilar(normA: string, normB: string): boolean {
+  if (normA === normB) return true;
+  if (normA.length === 0 || normB.length === 0) return false;
+  const maxLen = Math.max(normA.length, normB.length);
+  // Allow up to ~40% edit distance (generous for Slovak diacritics/spelling)
+  const threshold = Math.max(2, Math.ceil(maxLen * 0.4));
+  return editDistance(normA, normB) <= threshold;
+}
+
+/**
+ * Repair a Gemini response that has the wrong number of rows.
+ * Ignores Gemini's timestamps entirely (they may be mangled) and aligns
+ * output words to input words using normalized text matching.
+ * Uses greedy lookahead to handle dropped/extra rows without drifting.
  */
 function repairChunkOutput(inputLines: string[], outputLines: string[]): string[] {
-  // Build a map from timestamp-as-ms -> corrected word
-  const correctedByMs = new Map<number, string>();
-  for (const line of outputLines) {
-    const [ts, ...rest] = line.split("\t");
-    if (ts) {
-      const ms = timestampToMs(ts.trim());
-      if (!isNaN(ms)) correctedByMs.set(ms, rest.join("\t"));
-    }
-  }
+  const WINDOW = 5;
 
-  // Walk through input lines and use corrected word if available, else keep original
+  // Parse input: keep original timestamps, extract words
+  const inputs = inputLines.filter((l) => l.trim()).map((l) => {
+    const [ts, ...rest] = l.split("\t");
+    return { ts: ts.trim(), word: rest.join("\t"), norm: normalizeWord(rest.join("\t")) };
+  });
+
+  // Parse output: ignore timestamps, extract corrected words only
+  const outputs = outputLines.map((l) => {
+    const tab = l.indexOf("\t");
+    const word = tab >= 0 ? l.substring(tab + 1) : l;
+    return { word, norm: normalizeWord(word) };
+  });
+
   const repaired: string[] = [];
+  let outIdx = 0;
   let matched = 0;
-  for (const line of inputLines) {
-    if (!line.trim()) continue;
-    const [ts, ...rest] = line.split("\t");
-    const trimmedTs = ts.trim();
-    const ms = timestampToMs(trimmedTs);
-    const corrected = !isNaN(ms) ? correctedByMs.get(ms) : undefined;
-    if (corrected !== undefined) {
-      repaired.push(`${trimmedTs}\t${corrected}`);
+
+  for (let inIdx = 0; inIdx < inputs.length; inIdx++) {
+    const inp = inputs[inIdx];
+
+    if (outIdx >= outputs.length) {
+      // No more output rows — keep original
+      repaired.push(`${inp.ts}\t${inp.word}`);
+      continue;
+    }
+
+    // Fast path: normalized words match at current position
+    if (outputs[outIdx].norm === inp.norm) {
+      repaired.push(`${inp.ts}\t${outputs[outIdx].word}`);
+      outIdx++;
+      matched++;
+      continue;
+    }
+
+    // Look ahead in output for this input word (output has extra rows)
+    let outLook = -1;
+    for (let j = 1; j < WINDOW && outIdx + j < outputs.length; j++) {
+      if (outputs[outIdx + j].norm === inp.norm) { outLook = j; break; }
+    }
+
+    // Look ahead in input for this output word (input row was dropped)
+    let inLook = -1;
+    for (let j = 1; j < WINDOW && inIdx + j < inputs.length; j++) {
+      if (inputs[inIdx + j].norm === outputs[outIdx].norm) { inLook = j; break; }
+    }
+
+    if (inLook >= 0 && (outLook < 0 || inLook <= outLook)) {
+      // Current output word matches a later input word → this input row was dropped
+      repaired.push(`${inp.ts}\t${inp.word}`);
+      // Don't advance outIdx
+    } else if (outLook >= 0) {
+      // Current input word matches a later output word → skip extra output rows
+      repaired.push(`${inp.ts}\t${outputs[outIdx + outLook].word}`);
+      outIdx += outLook + 1;
+      matched++;
+    } else if (isSimilar(inp.norm, outputs[outIdx].norm)) {
+      // Words are similar enough — this is a genuine correction
+      repaired.push(`${inp.ts}\t${outputs[outIdx].word}`);
+      outIdx++;
       matched++;
     } else {
-      // Keep original uncorrected word
-      repaired.push(`${trimmedTs}\t${rest.join("\t")}`);
+      // Words are completely different — this input row was likely dropped
+      // and the output word belongs to a later input row
+      repaired.push(`${inp.ts}\t${inp.word}`);
+      // Don't advance outIdx
     }
   }
 
-  const total = inputLines.filter((l) => l.trim()).length;
-  console.log(`[GeminiService] Auto-repair: matched ${matched}/${total} rows by timestamp, kept ${total - matched} original`);
+  const total = inputs.length;
+  console.log(`[GeminiService] Auto-repair: aligned ${matched}/${total} rows by word matching, kept ${total - matched} original`);
 
   return repaired;
 }
@@ -327,56 +392,33 @@ class GeminiService {
           resultLines = extractCodeBlock(text).split("\n").filter((l) => l.trim());
 
           if (resultLines.length !== expectedLines) {
-            // Use ms-based comparison to avoid false positives from Gemini
-            // reformatting timestamps (e.g. "00:11:00.417" → "01:00.417")
-            const inputMsSet = new Set(
-              chunkLines.filter((l) => l.trim()).map((l) => timestampToMs(l.split("\t")[0].trim())),
-            );
-            const outputMsSet = new Set(
-              resultLines.map((l) => timestampToMs(l.split("\t")[0].trim())),
-            );
-            const missingMs = [...inputMsSet].filter((ms) => !isNaN(ms) && !outputMsSet.has(ms));
-            const extraMs = [...outputMsSet].filter((ms) => !isNaN(ms) && !inputMsSet.has(ms));
-
-            const detail = [
-              `Chunk ${i + 1}/${chunks.length} row mismatch: expected ${expectedLines}, got ${resultLines.length}.`,
-              missingMs.length ? `${missingMs.length} genuinely missing rows.` : null,
-              extraMs.length ? `${extraMs.length} extra rows.` : null,
-              (resultLines.length - expectedLines + missingMs.length - extraMs.length) !== 0
-                ? `(${resultLines.length - expectedLines - extraMs.length + missingMs.length} from timestamp reformatting)`
-                : null,
-            ].filter(Boolean).join(" ");
+            const ratio = resultLines.length / expectedLines;
+            const detail = `Chunk ${i + 1}/${chunks.length} row mismatch: expected ${expectedLines}, got ${resultLines.length}.`;
 
             rowMismatchAttempts++;
 
-            // After MAX_ROW_MISMATCH_RETRIES, auto-repair instead of retrying again
-            if (rowMismatchAttempts > MAX_ROW_MISMATCH_RETRIES) {
-              console.warn(`[GeminiService] ${detail} — auto-repairing`);
+            // Auto-repair immediately for small mismatches (>=90% rows present).
+            // Only retry if the output is severely truncated (<90%) and we haven't retried yet.
+            const shouldRetry = ratio < ROW_MISMATCH_RETRY_THRESHOLD && rowMismatchAttempts <= 1;
+
+            if (!shouldRetry) {
+              console.warn(`[GeminiService] ${detail} Auto-repairing via word alignment.`);
               onProgress(
                 Math.round((i / chunks.length) * 80),
-                `Chunk ${i + 1}/${chunks.length}: row mismatch, auto-repairing...`,
+                `Chunk ${i + 1}/${chunks.length}: row mismatch (${resultLines.length}/${expectedLines}), auto-repairing...`,
               );
               resultLines = repairChunkOutput(chunkLines, resultLines);
               await this.setCachedChunk(sessionId, chunkHash, resultLines);
               break;
             }
 
-            console.error(`[GeminiService] ${detail}`);
+            console.error(`[GeminiService] ${detail} Retrying (output severely truncated).`);
 
-            // Build feedback for the retry — only mention genuinely missing/extra rows
-            const feedbackParts = [
+            retryFeedback = [
               `## CORRECTION REQUIRED (your previous output had ${resultLines.length} rows instead of ${expectedLines}):`,
               "You MUST output EXACTLY one row per input row. Do NOT merge or drop any rows.",
               "IMPORTANT: Preserve timestamps EXACTLY as given (HH:MM:SS.mmm format). Do NOT reformat them.",
-            ];
-            if (missingMs.length) {
-              const missingTimestamps = chunkLines
-                .filter((l) => l.trim())
-                .map((l) => l.split("\t")[0].trim())
-                .filter((ts) => missingMs.includes(timestampToMs(ts)));
-              feedbackParts.push(`You DROPPED these timestamps — they MUST appear in your output:\n${missingTimestamps.join("\n")}`);
-            }
-            retryFeedback = feedbackParts.join("\n\n");
+            ].join("\n\n");
 
             throw new Error(detail);
           }

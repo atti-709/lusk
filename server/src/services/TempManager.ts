@@ -34,6 +34,13 @@ class TempManager {
     }
   }
 
+  async cleanupSessionCache(id: string): Promise<void> {
+    const cacheDir = join(this.getSessionDir(id), "chunk_cache");
+    try {
+      await rm(cacheDir, { recursive: true, force: true });
+    } catch { /* ignore */ }
+  }
+
   async cleanupSession(id: string): Promise<void> {
     const dir = this.getSessionDir(id);
     try {
