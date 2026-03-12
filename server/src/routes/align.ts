@@ -309,57 +309,165 @@ export async function alignRoute(app: FastifyInstance) {
   );
 // Helper to format SRT timestamp: HH:MM:SS,mmm
 function msToSrtTimestamp(ms: number): string {
-  const date = new Date(ms);
   const h = String(Math.floor(ms / 3600000)).padStart(2, "0");
-  const m = String(date.getUTCMinutes()).padStart(2, "0");
-  const s = String(date.getUTCSeconds()).padStart(2, "0");
-  const msStr = String(date.getUTCMilliseconds()).padStart(3, "0");
+  const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, "0");
+  const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, "0");
+  const msStr = String(ms % 1000).padStart(3, "0");
   return `${h}:${m}:${s},${msStr}`;
 }
 
+// Words that should not start a new line / subtitle (keep with preceding word)
+const SK_NO_BREAK_BEFORE = new Set([
+  // Single-char prepositions and conjunctions that cliticize to the next word
+  "a", "i", "v", "k", "s", "z", "u", "o",
+]);
+
+// Words that are good break points (start a new segment before these)
+const SK_BREAK_BEFORE = new Set([
+  // Conjunctions (excluding single-char "a"/"i" — those are in SK_NO_BREAK_BEFORE)
+  "ale", "alebo", "že", "keď", "aby", "pretože", "lebo", "ak",
+  "ani", "no", "však", "teda", "takže", "preto", "hoci", "kde", "keďže",
+  // Relative / interrogative
+  "ktorý", "ktorá", "ktoré", "ktorí", "ktorým", "ktorých", "čo", "kto",
+  // Common prepositions (longer ones — safe to break before)
+  "na", "do", "od", "pre", "pri", "po", "za", "bez", "cez", "nad", "pod", "medzi",
+]);
+
+function isBreakPoint(word: string): boolean {
+  const w = word.toLowerCase().replace(/[.,;:!?"""()–—]/g, "");
+  return SK_BREAK_BEFORE.has(w);
+}
+
+function endsWithPunctuation(word: string): boolean {
+  return /[.,;:!?"""()–—]$/.test(word.trim());
+}
+
+function blockTextLength(words: CaptionWord[]): number {
+  return words.reduce((acc, w) => acc + w.text.trim().length + 1, 0) - 1;
+}
+
+// Apply the pyramid rule: split into 2 lines where top line ≤ bottom line,
+// preferring phrase-boundary breaks.
+function applyPyramidRule(words: CaptionWord[], maxLineChars: number): string {
+  const full = words.map(w => w.text.trim()).join(" ");
+  if (full.length <= maxLineChars) return full;
+
+  const texts = words.map(w => w.text.trim());
+  const totalLen = full.length;
+  const idealTop = Math.floor(totalLen / 2); // aim for top ≤ bottom
+
+  let bestSplit = -1;
+  let bestScore = Infinity;
+
+  let runLen = 0;
+  for (let i = 0; i < texts.length - 1; i++) {
+    runLen += texts[i].length + (i > 0 ? 1 : 0);
+    const bottomLen = totalLen - runLen - 1;
+
+    // Pyramid: top must be ≤ bottom, and both ≤ maxLineChars
+    if (runLen > maxLineChars || bottomLen > maxLineChars) continue;
+    if (runLen > bottomLen) continue; // violates pyramid
+
+    // Don't break before a clitic (short preposition/conjunction that belongs with next word)
+    if (i + 1 < texts.length && SK_NO_BREAK_BEFORE.has(texts[i + 1].toLowerCase().replace(/[.,;:!?]/g, ""))) continue;
+
+    // Score: prefer breaks at phrase boundaries, then closest to ideal split
+    let score = Math.abs(runLen - idealTop);
+    if (endsWithPunctuation(texts[i])) score -= 20; // strong preference
+    if (i + 1 < texts.length && isBreakPoint(texts[i + 1])) score -= 10; // good break point
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestSplit = i;
+    }
+  }
+
+  if (bestSplit === -1) return full; // can't split well, keep single line
+
+  const top = texts.slice(0, bestSplit + 1).join(" ");
+  const bottom = texts.slice(bestSplit + 1).join(" ");
+  return `${top}\n${bottom}`;
+}
+
 function captionsToSrt(captions: CaptionWord[]): string {
-  const MAX_CHARS = 35;
-  const GAP_MS = 1000;
+  const MAX_LINE_CHARS = 42;
+  const MAX_BLOCK_CHARS = 84; // 2 lines
+  const MIN_DISPLAY_MS = 1000;
+  const MIN_GAP_MS = 80; // ~2 frames at 25fps, so viewer perceives subtitle change
+  const SILENCE_GAP_MS = 1000;
   const crlf = "\r\n";
 
-  // Step 1: Group words into short blocks (by gap or char limit)
+  // Step 1: Group words into subtitle blocks respecting phrase boundaries
   const groups: CaptionWord[][] = [];
   let currentBlock: CaptionWord[] = [];
-  let lastEnd = 0;
 
-  for (const word of captions) {
-    if (currentBlock.length > 0 && word.startMs - lastEnd > GAP_MS) {
+  for (let wi = 0; wi < captions.length; wi++) {
+    const word = captions[wi];
+    const prevEnd = currentBlock.length > 0 ? currentBlock[currentBlock.length - 1].endMs : 0;
+
+    // Force break on silence gap
+    if (currentBlock.length > 0 && word.startMs - prevEnd > SILENCE_GAP_MS) {
       groups.push(currentBlock);
       currentBlock = [];
+    }
+
+    // Check if adding this word would exceed max block size
+    const projectedLen = currentBlock.length > 0
+      ? blockTextLength(currentBlock) + 1 + word.text.trim().length
+      : word.text.trim().length;
+
+    if (currentBlock.length > 0 && projectedLen > MAX_BLOCK_CHARS) {
+      groups.push(currentBlock);
+      currentBlock = [];
+    }
+
+    // Prefer breaking at phrase boundaries when block is getting long enough
+    if (currentBlock.length >= 4 && projectedLen > MAX_LINE_CHARS) {
+      const prevWord = currentBlock[currentBlock.length - 1].text.trim();
+      const currWord = word.text.trim().toLowerCase().replace(/[.,;:!?]/g, "");
+
+      if (endsWithPunctuation(prevWord) || isBreakPoint(currWord)) {
+        // Don't break if current word is a clitic that should stay with next word
+        if (!SK_NO_BREAK_BEFORE.has(currWord)) {
+          groups.push(currentBlock);
+          currentBlock = [];
+        }
+      }
     }
 
     currentBlock.push(word);
-    lastEnd = word.endMs;
-
-    const textLen = currentBlock.reduce((acc, w) => acc + w.text.trim().length + 1, 0);
-    if (textLen > MAX_CHARS) {
-      groups.push(currentBlock);
-      currentBlock = [];
-    }
   }
   if (currentBlock.length > 0) {
     groups.push(currentBlock);
   }
 
-  // Step 2: For each group, emit progressive SRT cues (word-by-word reveal)
+  // Step 2: Format SRT with pyramid rule, minimum display time, and inter-subtitle gaps
   let srt = "";
   let index = 1;
 
-  for (const group of groups) {
-    for (let i = 0; i < group.length; i++) {
-      const start = msToSrtTimestamp(group[i].startMs);
-      const end = i < group.length - 1
-        ? msToSrtTimestamp(group[i + 1].startMs)
-        : msToSrtTimestamp(group[group.length - 1].endMs);
-      const text = group.slice(0, i + 1).map(w => w.text.trim()).join(" ");
-      srt += `${index}${crlf}${start} --> ${end}${crlf}${text}${crlf}${crlf}`;
-      index++;
+  for (let gi = 0; gi < groups.length; gi++) {
+    const group = groups[gi];
+    const startMs = group[0].startMs;
+    let endMs = group[group.length - 1].endMs;
+
+    // Enforce minimum 1s display time
+    if (endMs - startMs < MIN_DISPLAY_MS) {
+      endMs = startMs + MIN_DISPLAY_MS;
     }
+
+    // Enforce minimum gap: trim end so it doesn't overlap with next subtitle start
+    if (gi + 1 < groups.length) {
+      const nextStart = groups[gi + 1][0].startMs;
+      if (endMs > nextStart - MIN_GAP_MS) {
+        endMs = Math.max(startMs + MIN_DISPLAY_MS, nextStart - MIN_GAP_MS);
+      }
+    }
+
+    const start = msToSrtTimestamp(startMs);
+    const end = msToSrtTimestamp(endMs);
+    const text = applyPyramidRule(group, MAX_LINE_CHARS);
+    srt += `${index}${crlf}${start} --> ${end}${crlf}${text}${crlf}${crlf}`;
+    index++;
   }
 
   return srt;
@@ -378,12 +486,7 @@ function captionsToSrt(captions: CaptionWord[]): string {
         return reply.status(404).send({ success: false, error: "Session not found" });
       }
       if (!session.captions) {
-         // Fallback to transcript words if captions not set? 
-         // But `captions` should be set by align/viral-clips steps.
-         // If we are in REVIEW, captions exist.
-         // If they don't, try correct transcript?
          if (session.transcript) {
-            // Convert transcript words to captions format on the fly if needed
             session.captions = wordsToCaptions(session.transcript.words);
          } else {
             return reply.status(400).send({ success: false, error: "No captions available" });
