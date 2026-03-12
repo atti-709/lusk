@@ -3,7 +3,7 @@ import { orchestrator } from "../services/Orchestrator.js";
 import { settingsService, type TranscriptionLanguage } from "../services/SettingsService.js";
 import archiver from "archiver";
 import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord, TranslatedBlock } from "@lusk/shared";
-import { runGeminiAutomation } from "./transcribe.js";
+import { runGeminiAutomation, activeGeminiOperations } from "./transcribe.js";
 
 // ── Helpers ──
 
@@ -592,8 +592,13 @@ export async function alignRoute(app: FastifyInstance) {
       }
       const original = session.originalTranscript;
 
-      // Fire-and-forget — progress events update the client
-      runGeminiAutomation(projectId, original, app.log).catch(() => {});
+      // Track with AbortController so cancellation works
+      const controller = new AbortController();
+      activeGeminiOperations.set(projectId, controller);
+
+      runGeminiAutomation(projectId, original, app.log, controller.signal)
+        .catch(() => {})
+        .finally(() => activeGeminiOperations.delete(projectId));
 
       return { success: true as const };
     }

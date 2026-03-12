@@ -12,6 +12,9 @@ type Logger = Pick<FastifyInstance["log"], "error">;
 /** Active transcription abort controllers, keyed by sessionId. */
 const activeTranscriptions = new Map<string, AbortController>();
 
+/** Active Gemini automation abort controllers (from manual "Run Gemini"), keyed by sessionId. */
+export const activeGeminiOperations = new Map<string, AbortController>();
+
 /**
  * Core transcription work — does not perform the UPLOADING→TRANSCRIBING
  * transition so it can be called both from the HTTP handler (which does the
@@ -223,12 +226,12 @@ export async function transcribeRoute(app: FastifyInstance) {
     async (request, reply) => {
       const { projectId } = request.params;
 
-      const controller = activeTranscriptions.get(projectId);
-      if (!controller) {
-        return reply.send({ success: true }); // nothing to cancel
-      }
+      const transcription = activeTranscriptions.get(projectId);
+      const gemini = activeGeminiOperations.get(projectId);
 
-      controller.abort();
+      if (transcription) transcription.abort();
+      if (gemini) gemini.abort();
+
       return reply.send({ success: true });
     }
   );
