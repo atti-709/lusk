@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
+import { settingsService, type TranscriptionLanguage } from "../services/SettingsService.js";
 import archiver from "archiver";
 import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord } from "@lusk/shared";
 import { runGeminiAutomation } from "./transcribe.js";
@@ -316,26 +317,47 @@ function msToSrtTimestamp(ms: number): string {
   return `${h}:${m}:${s},${msStr}`;
 }
 
-// Words that should not start a new line / subtitle (keep with preceding word)
-const SK_NO_BREAK_BEFORE = new Set([
-  // Single-char prepositions and conjunctions that cliticize to the next word
-  "a", "i", "v", "k", "s", "z", "u", "o",
-]);
+// Per-language word sets for subtitle line-breaking
+const NO_BREAK_BEFORE: Record<TranscriptionLanguage, Set<string>> = {
+  sk: new Set(["a", "i", "v", "k", "s", "z", "u", "o"]),
+  cs: new Set(["a", "i", "v", "k", "s", "z", "u", "o"]),
+  en: new Set(["a", "I"]),
+};
 
-// Words that are good break points (start a new segment before these)
-const SK_BREAK_BEFORE = new Set([
-  // Conjunctions (excluding single-char "a"/"i" — those are in SK_NO_BREAK_BEFORE)
-  "ale", "alebo", "že", "keď", "aby", "pretože", "lebo", "ak",
-  "ani", "no", "však", "teda", "takže", "preto", "hoci", "kde", "keďže",
-  // Relative / interrogative
-  "ktorý", "ktorá", "ktoré", "ktorí", "ktorým", "ktorých", "čo", "kto",
-  // Common prepositions (longer ones — safe to break before)
-  "na", "do", "od", "pre", "pri", "po", "za", "bez", "cez", "nad", "pod", "medzi",
-]);
+const BREAK_BEFORE: Record<TranscriptionLanguage, Set<string>> = {
+  sk: new Set([
+    // Conjunctions
+    "ale", "alebo", "že", "keď", "aby", "pretože", "lebo", "ak",
+    "ani", "no", "však", "teda", "takže", "preto", "hoci", "kde", "keďže",
+    // Relative / interrogative
+    "ktorý", "ktorá", "ktoré", "ktorí", "ktorým", "ktorých", "čo", "kto",
+    // Common prepositions
+    "na", "do", "od", "pre", "pri", "po", "za", "bez", "cez", "nad", "pod", "medzi",
+  ]),
+  cs: new Set([
+    // Conjunctions
+    "ale", "nebo", "že", "když", "aby", "protože", "pokud", "jenže",
+    "ani", "no", "však", "tedy", "takže", "proto", "ačkoli", "kde", "jelikož",
+    // Relative / interrogative
+    "který", "která", "které", "kteří", "kterým", "kterých", "co", "kdo",
+    // Common prepositions
+    "na", "do", "od", "pro", "při", "po", "za", "bez", "přes", "nad", "pod", "mezi",
+  ]),
+  en: new Set([
+    // Conjunctions
+    "but", "or", "and", "that", "when", "because", "since", "if",
+    "although", "though", "while", "so", "yet", "nor",
+    // Relative / interrogative
+    "which", "who", "whom", "whose", "where", "what", "how",
+    // Common prepositions
+    "in", "on", "at", "to", "for", "with", "from", "by", "about",
+    "into", "through", "during", "before", "after", "between", "under", "over",
+  ]),
+};
 
-function isBreakPoint(word: string): boolean {
+function isBreakPoint(word: string, lang: TranscriptionLanguage): boolean {
   const w = word.toLowerCase().replace(/[.,;:!?"""()–—]/g, "");
-  return SK_BREAK_BEFORE.has(w);
+  return BREAK_BEFORE[lang].has(w);
 }
 
 function endsWithPunctuation(word: string): boolean {
@@ -348,7 +370,7 @@ function blockTextLength(words: CaptionWord[]): number {
 
 // Apply the pyramid rule: split into 2 lines where top line ≤ bottom line,
 // preferring phrase-boundary breaks.
-function applyPyramidRule(words: CaptionWord[], maxLineChars: number): string {
+function applyPyramidRule(words: CaptionWord[], maxLineChars: number, lang: TranscriptionLanguage): string {
   const full = words.map(w => w.text.trim()).join(" ");
   if (full.length <= maxLineChars) return full;
 
@@ -369,12 +391,12 @@ function applyPyramidRule(words: CaptionWord[], maxLineChars: number): string {
     if (runLen > bottomLen) continue; // violates pyramid
 
     // Don't break before a clitic (short preposition/conjunction that belongs with next word)
-    if (i + 1 < texts.length && SK_NO_BREAK_BEFORE.has(texts[i + 1].toLowerCase().replace(/[.,;:!?]/g, ""))) continue;
+    if (i + 1 < texts.length && NO_BREAK_BEFORE[lang].has(texts[i + 1].toLowerCase().replace(/[.,;:!?]/g, ""))) continue;
 
     // Score: prefer breaks at phrase boundaries, then closest to ideal split
     let score = Math.abs(runLen - idealTop);
     if (endsWithPunctuation(texts[i])) score -= 20; // strong preference
-    if (i + 1 < texts.length && isBreakPoint(texts[i + 1])) score -= 10; // good break point
+    if (i + 1 < texts.length && isBreakPoint(texts[i + 1], lang)) score -= 10; // good break point
 
     if (score < bestScore) {
       bestScore = score;
@@ -389,7 +411,7 @@ function applyPyramidRule(words: CaptionWord[], maxLineChars: number): string {
   return `${top}\n${bottom}`;
 }
 
-function captionsToSrt(captions: CaptionWord[]): string {
+function captionsToSrt(captions: CaptionWord[], lang: TranscriptionLanguage): string {
   const MAX_LINE_CHARS = 42;
   const MAX_BLOCK_CHARS = 84; // 2 lines
   const MIN_DISPLAY_MS = 1000;
@@ -426,9 +448,9 @@ function captionsToSrt(captions: CaptionWord[]): string {
       const prevWord = currentBlock[currentBlock.length - 1].text.trim();
       const currWord = word.text.trim().toLowerCase().replace(/[.,;:!?]/g, "");
 
-      if (endsWithPunctuation(prevWord) || isBreakPoint(currWord)) {
+      if (endsWithPunctuation(prevWord) || isBreakPoint(currWord, lang)) {
         // Don't break if current word is a clitic that should stay with next word
-        if (!SK_NO_BREAK_BEFORE.has(currWord)) {
+        if (!NO_BREAK_BEFORE[lang].has(currWord)) {
           groups.push(currentBlock);
           currentBlock = [];
         }
@@ -465,7 +487,7 @@ function captionsToSrt(captions: CaptionWord[]): string {
 
     const start = msToSrtTimestamp(startMs);
     const end = msToSrtTimestamp(endMs);
-    const text = applyPyramidRule(group, MAX_LINE_CHARS);
+    const text = applyPyramidRule(group, MAX_LINE_CHARS, lang);
     srt += `${index}${crlf}${start} --> ${end}${crlf}${text}${crlf}${crlf}`;
     index++;
   }
@@ -493,7 +515,8 @@ function captionsToSrt(captions: CaptionWord[]): string {
          }
       }
 
-      const srt = captionsToSrt(session.captions);
+      const lang = await settingsService.getTranscriptionLanguage();
+      const srt = captionsToSrt(session.captions, lang);
 
       return reply
         .header("Content-Type", "application/x-subrip")
