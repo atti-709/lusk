@@ -65,6 +65,12 @@ export interface CaptionWord {
   confidence: number | null;
 }
 
+export interface TranslatedBlock {
+  text: string;
+  startMs: number;
+  endMs: number;
+}
+
 export interface CaptionStyles {
   fontSize: number;
   highlightColor: string;
@@ -107,6 +113,7 @@ export interface ProjectData {
   correctedTranscriptRaw?: string | null;
   scriptText?: string | null;
   captions: CaptionWord[] | null;
+  translatedCaptions?: TranslatedBlock[] | null;
   viralClips: ViralClip[] | null;
 }
 

@@ -716,40 +716,53 @@ function App() {
                 <button
                   className="secondary"
                   onClick={async () => {
-                    const url = `/api/projects/${sessionId}/captions.srt`;
                     const projectName =
                       state.videoName?.trim() ||
                       (state.projectFilePath
                         ? state.projectFilePath.replace(/\\/g, "/").split("/").pop()?.replace(/\.lusk$/i, "").trim() || "project"
                         : "project");
-                    const filename = `${projectName}_captions.srt`;
 
-                    if ("showSaveFilePicker" in window) {
-                      try {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        const handle = await (window as any).showSaveFilePicker({
-                          suggestedName: filename,
-                          types: [{ description: "SRT File", accept: { "application/x-subrip": [".srt"] } }],
-                        });
-                        const res = await fetch(url);
-                        if (!res.ok) return;
-                        const blob = await res.blob();
-                        const writable = await handle.createWritable();
-                        await writable.write(blob);
-                        await writable.close();
-                        return;
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      } catch (err: any) {
-                        if (err.name === "AbortError") return;
-                      }
+                    const urls = [`/api/projects/${sessionId}/captions.srt`];
+                    if (state.translatedCaptions && state.translatedCaptions.length > 0) {
+                      urls.push(`/api/projects/${sessionId}/captions-en.srt`);
                     }
 
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
+                    for (const url of urls) {
+                      const res = await fetch(url);
+                      if (!res.ok) continue;
+                      // Extract server-provided filename (e.g. captions_sk.srt)
+                      const disposition = res.headers.get("Content-Disposition") ?? "";
+                      const match = disposition.match(/filename="(.+?)"/);
+                      const serverName = match?.[1] ?? "captions.srt";
+                      const filename = `${projectName}_${serverName}`;
+
+                      const blob = await res.blob();
+
+                      if ("showSaveFilePicker" in window) {
+                        try {
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          const handle = await (window as any).showSaveFilePicker({
+                            suggestedName: filename,
+                            types: [{ description: "SRT File", accept: { "application/x-subrip": [".srt"] } }],
+                          });
+                          const writable = await handle.createWritable();
+                          await writable.write(blob);
+                          await writable.close();
+                          continue;
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        } catch (err: any) {
+                          if (err.name === "AbortError") return;
+                        }
+                      }
+
+                      const a = document.createElement("a");
+                      a.href = URL.createObjectURL(blob);
+                      a.download = filename;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(a.href);
+                    }
                   }}
                 >
                   Download .srt

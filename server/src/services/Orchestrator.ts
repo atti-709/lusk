@@ -5,6 +5,7 @@ import type {
   ProgressEvent,
   TranscriptData,
   CaptionWord,
+  TranslatedBlock,
   ViralClip,
   ClipRenderState,
 } from "@lusk/shared";
@@ -51,6 +52,7 @@ class Orchestrator extends EventEmitter {
       correctedTranscriptRaw: null,
       scriptText: null,
       captions: null,
+      translatedCaptions: null,
       viralClips: null,
       outputUrl: null,
       renders: {},
@@ -120,6 +122,12 @@ class Orchestrator extends EventEmitter {
   setCaptions(id: string, captions: CaptionWord[]): void {
     const session = this.requireSession(id);
     session.captions = captions;
+    this.persistSession(id);
+  }
+
+  setTranslatedCaptions(id: string, blocks: TranslatedBlock[]): void {
+    const session = this.requireSession(id);
+    session.translatedCaptions = blocks;
     this.persistSession(id);
   }
 

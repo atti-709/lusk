@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import { settingsService, type TranscriptionLanguage } from "../services/SettingsService.js";
 import archiver from "archiver";
-import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord } from "@lusk/shared";
+import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord, TranslatedBlock } from "@lusk/shared";
 import { runGeminiAutomation } from "./transcribe.js";
 
 // ── Helpers ──
@@ -84,6 +84,184 @@ export function wordsToCaptions(words: TranscriptWord[]): CaptionWord[] {
     timestampMs: w.startMs,
     confidence: null,
   }));
+}
+
+// ── SRT Formatting ──
+
+function msToSrtTimestamp(ms: number): string {
+  const h = String(Math.floor(ms / 3600000)).padStart(2, "0");
+  const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, "0");
+  const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, "0");
+  const msStr = String(ms % 1000).padStart(3, "0");
+  return `${h}:${m}:${s},${msStr}`;
+}
+
+// Per-language word sets for subtitle line-breaking
+const NO_BREAK_BEFORE: Record<TranscriptionLanguage, Set<string>> = {
+  sk: new Set(["a", "i", "v", "k", "s", "z", "u", "o"]),
+  cs: new Set(["a", "i", "v", "k", "s", "z", "u", "o"]),
+  en: new Set(["a", "I"]),
+};
+
+const BREAK_BEFORE: Record<TranscriptionLanguage, Set<string>> = {
+  sk: new Set([
+    "ale", "alebo", "že", "keď", "aby", "pretože", "lebo", "ak",
+    "ani", "no", "však", "teda", "takže", "preto", "hoci", "kde", "keďže",
+    "ktorý", "ktorá", "ktoré", "ktorí", "ktorým", "ktorých", "čo", "kto",
+    "na", "do", "od", "pre", "pri", "po", "za", "bez", "cez", "nad", "pod", "medzi",
+  ]),
+  cs: new Set([
+    "ale", "nebo", "že", "když", "aby", "protože", "pokud", "jenže",
+    "ani", "no", "však", "tedy", "takže", "proto", "ačkoli", "kde", "jelikož",
+    "který", "která", "které", "kteří", "kterým", "kterých", "co", "kdo",
+    "na", "do", "od", "pro", "při", "po", "za", "bez", "přes", "nad", "pod", "mezi",
+  ]),
+  en: new Set([
+    "but", "or", "and", "that", "when", "because", "since", "if",
+    "although", "though", "while", "so", "yet", "nor",
+    "which", "who", "whom", "whose", "where", "what", "how",
+    "in", "on", "at", "to", "for", "with", "from", "by", "about",
+    "into", "through", "during", "before", "after", "between", "under", "over",
+  ]),
+};
+
+function isBreakPoint(word: string, lang: TranscriptionLanguage): boolean {
+  return BREAK_BEFORE[lang].has(word.toLowerCase().replace(/[.,;:!?"""()–—]/g, ""));
+}
+
+function endsWithPunctuation(word: string): boolean {
+  return /[.,;:!?"""()–—]$/.test(word.trim());
+}
+
+function blockTextLength(words: CaptionWord[]): number {
+  return words.reduce((acc, w) => acc + w.text.trim().length + 1, 0) - 1;
+}
+
+const MAX_LINE_CHARS = 42;
+const MAX_BLOCK_CHARS = 84;
+const MIN_DISPLAY_MS = 1000;
+const MIN_GAP_MS = 80;
+const SILENCE_GAP_MS = 1000;
+
+export function groupCaptionBlocks(captions: CaptionWord[], lang: TranscriptionLanguage): CaptionWord[][] {
+  const groups: CaptionWord[][] = [];
+  let currentBlock: CaptionWord[] = [];
+
+  for (const word of captions) {
+    const prevEnd = currentBlock.length > 0 ? currentBlock[currentBlock.length - 1].endMs : 0;
+
+    if (currentBlock.length > 0 && word.startMs - prevEnd > SILENCE_GAP_MS) {
+      groups.push(currentBlock);
+      currentBlock = [];
+    }
+
+    const projectedLen = currentBlock.length > 0
+      ? blockTextLength(currentBlock) + 1 + word.text.trim().length
+      : word.text.trim().length;
+
+    if (currentBlock.length > 0 && projectedLen > MAX_BLOCK_CHARS) {
+      groups.push(currentBlock);
+      currentBlock = [];
+    }
+
+    if (currentBlock.length >= 4 && projectedLen > MAX_LINE_CHARS) {
+      const prevWord = currentBlock[currentBlock.length - 1].text.trim();
+      const currWord = word.text.trim().toLowerCase().replace(/[.,;:!?]/g, "");
+
+      if (endsWithPunctuation(prevWord) || isBreakPoint(currWord, lang)) {
+        if (!NO_BREAK_BEFORE[lang].has(currWord)) {
+          groups.push(currentBlock);
+          currentBlock = [];
+        }
+      }
+    }
+
+    currentBlock.push(word);
+  }
+  if (currentBlock.length > 0) {
+    groups.push(currentBlock);
+  }
+
+  return groups;
+}
+
+// Pyramid rule for plain text: split into 2 lines where top ≤ bottom
+function applyPyramidRuleText(text: string, maxLineChars: number, lang: TranscriptionLanguage): string {
+  if (text.length <= maxLineChars) return text;
+
+  const words = text.split(/\s+/);
+  const totalLen = text.length;
+  const idealTop = Math.floor(totalLen / 2);
+  let bestSplit = -1;
+  let bestScore = Infinity;
+
+  let runLen = 0;
+  for (let i = 0; i < words.length - 1; i++) {
+    runLen += words[i].length + (i > 0 ? 1 : 0);
+    const bottomLen = totalLen - runLen - 1;
+
+    if (runLen > maxLineChars || bottomLen > maxLineChars) continue;
+    if (runLen > bottomLen) continue;
+
+    const nextWord = words[i + 1].toLowerCase().replace(/[.,;:!?]/g, "");
+    if (NO_BREAK_BEFORE[lang].has(nextWord)) continue;
+
+    let score = Math.abs(runLen - idealTop);
+    if (endsWithPunctuation(words[i])) score -= 20;
+    if (isBreakPoint(nextWord, lang)) score -= 10;
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestSplit = i;
+    }
+  }
+
+  if (bestSplit === -1) return text;
+  return words.slice(0, bestSplit + 1).join(" ") + "\n" + words.slice(bestSplit + 1).join(" ");
+}
+
+function formatSrtBlocks(
+  blocks: { text: string; startMs: number; endMs: number }[],
+  lang: TranscriptionLanguage,
+): string {
+  const crlf = "\r\n";
+  let srt = "";
+  let index = 1;
+
+  for (let gi = 0; gi < blocks.length; gi++) {
+    let { startMs, endMs } = blocks[gi];
+
+    if (endMs - startMs < MIN_DISPLAY_MS) endMs = startMs + MIN_DISPLAY_MS;
+
+    if (gi + 1 < blocks.length) {
+      const nextStart = blocks[gi + 1].startMs;
+      if (endMs > nextStart - MIN_GAP_MS) {
+        endMs = Math.max(startMs + MIN_DISPLAY_MS, nextStart - MIN_GAP_MS);
+      }
+    }
+
+    const start = msToSrtTimestamp(startMs);
+    const end = msToSrtTimestamp(endMs);
+    const text = applyPyramidRuleText(blocks[gi].text, MAX_LINE_CHARS, lang);
+    srt += `${index}${crlf}${start} --> ${end}${crlf}${text}${crlf}${crlf}`;
+    index++;
+  }
+
+  return srt;
+}
+
+function captionsToSrt(captions: CaptionWord[], lang: TranscriptionLanguage): string {
+  const groups = groupCaptionBlocks(captions, lang);
+  const blocks = groups.map(group => ({
+    text: group.map(w => w.text.trim()).join(" "),
+    startMs: group[0].startMs,
+    endMs: group[group.length - 1].endMs,
+  }));
+  return formatSrtBlocks(blocks, lang);
+}
+
+function translatedBlocksToSrt(blocks: TranslatedBlock[]): string {
+  return formatSrtBlocks(blocks, "en");
 }
 
 // ── Routes ──
@@ -308,193 +486,6 @@ export async function alignRoute(app: FastifyInstance) {
       }
     }
   );
-// Helper to format SRT timestamp: HH:MM:SS,mmm
-function msToSrtTimestamp(ms: number): string {
-  const h = String(Math.floor(ms / 3600000)).padStart(2, "0");
-  const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, "0");
-  const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, "0");
-  const msStr = String(ms % 1000).padStart(3, "0");
-  return `${h}:${m}:${s},${msStr}`;
-}
-
-// Per-language word sets for subtitle line-breaking
-const NO_BREAK_BEFORE: Record<TranscriptionLanguage, Set<string>> = {
-  sk: new Set(["a", "i", "v", "k", "s", "z", "u", "o"]),
-  cs: new Set(["a", "i", "v", "k", "s", "z", "u", "o"]),
-  en: new Set(["a", "I"]),
-};
-
-const BREAK_BEFORE: Record<TranscriptionLanguage, Set<string>> = {
-  sk: new Set([
-    // Conjunctions
-    "ale", "alebo", "že", "keď", "aby", "pretože", "lebo", "ak",
-    "ani", "no", "však", "teda", "takže", "preto", "hoci", "kde", "keďže",
-    // Relative / interrogative
-    "ktorý", "ktorá", "ktoré", "ktorí", "ktorým", "ktorých", "čo", "kto",
-    // Common prepositions
-    "na", "do", "od", "pre", "pri", "po", "za", "bez", "cez", "nad", "pod", "medzi",
-  ]),
-  cs: new Set([
-    // Conjunctions
-    "ale", "nebo", "že", "když", "aby", "protože", "pokud", "jenže",
-    "ani", "no", "však", "tedy", "takže", "proto", "ačkoli", "kde", "jelikož",
-    // Relative / interrogative
-    "který", "která", "které", "kteří", "kterým", "kterých", "co", "kdo",
-    // Common prepositions
-    "na", "do", "od", "pro", "při", "po", "za", "bez", "přes", "nad", "pod", "mezi",
-  ]),
-  en: new Set([
-    // Conjunctions
-    "but", "or", "and", "that", "when", "because", "since", "if",
-    "although", "though", "while", "so", "yet", "nor",
-    // Relative / interrogative
-    "which", "who", "whom", "whose", "where", "what", "how",
-    // Common prepositions
-    "in", "on", "at", "to", "for", "with", "from", "by", "about",
-    "into", "through", "during", "before", "after", "between", "under", "over",
-  ]),
-};
-
-function isBreakPoint(word: string, lang: TranscriptionLanguage): boolean {
-  const w = word.toLowerCase().replace(/[.,;:!?"""()–—]/g, "");
-  return BREAK_BEFORE[lang].has(w);
-}
-
-function endsWithPunctuation(word: string): boolean {
-  return /[.,;:!?"""()–—]$/.test(word.trim());
-}
-
-function blockTextLength(words: CaptionWord[]): number {
-  return words.reduce((acc, w) => acc + w.text.trim().length + 1, 0) - 1;
-}
-
-// Apply the pyramid rule: split into 2 lines where top line ≤ bottom line,
-// preferring phrase-boundary breaks.
-function applyPyramidRule(words: CaptionWord[], maxLineChars: number, lang: TranscriptionLanguage): string {
-  const full = words.map(w => w.text.trim()).join(" ");
-  if (full.length <= maxLineChars) return full;
-
-  const texts = words.map(w => w.text.trim());
-  const totalLen = full.length;
-  const idealTop = Math.floor(totalLen / 2); // aim for top ≤ bottom
-
-  let bestSplit = -1;
-  let bestScore = Infinity;
-
-  let runLen = 0;
-  for (let i = 0; i < texts.length - 1; i++) {
-    runLen += texts[i].length + (i > 0 ? 1 : 0);
-    const bottomLen = totalLen - runLen - 1;
-
-    // Pyramid: top must be ≤ bottom, and both ≤ maxLineChars
-    if (runLen > maxLineChars || bottomLen > maxLineChars) continue;
-    if (runLen > bottomLen) continue; // violates pyramid
-
-    // Don't break before a clitic (short preposition/conjunction that belongs with next word)
-    if (i + 1 < texts.length && NO_BREAK_BEFORE[lang].has(texts[i + 1].toLowerCase().replace(/[.,;:!?]/g, ""))) continue;
-
-    // Score: prefer breaks at phrase boundaries, then closest to ideal split
-    let score = Math.abs(runLen - idealTop);
-    if (endsWithPunctuation(texts[i])) score -= 20; // strong preference
-    if (i + 1 < texts.length && isBreakPoint(texts[i + 1], lang)) score -= 10; // good break point
-
-    if (score < bestScore) {
-      bestScore = score;
-      bestSplit = i;
-    }
-  }
-
-  if (bestSplit === -1) return full; // can't split well, keep single line
-
-  const top = texts.slice(0, bestSplit + 1).join(" ");
-  const bottom = texts.slice(bestSplit + 1).join(" ");
-  return `${top}\n${bottom}`;
-}
-
-function captionsToSrt(captions: CaptionWord[], lang: TranscriptionLanguage): string {
-  const MAX_LINE_CHARS = 42;
-  const MAX_BLOCK_CHARS = 84; // 2 lines
-  const MIN_DISPLAY_MS = 1000;
-  const MIN_GAP_MS = 80; // ~2 frames at 25fps, so viewer perceives subtitle change
-  const SILENCE_GAP_MS = 1000;
-  const crlf = "\r\n";
-
-  // Step 1: Group words into subtitle blocks respecting phrase boundaries
-  const groups: CaptionWord[][] = [];
-  let currentBlock: CaptionWord[] = [];
-
-  for (let wi = 0; wi < captions.length; wi++) {
-    const word = captions[wi];
-    const prevEnd = currentBlock.length > 0 ? currentBlock[currentBlock.length - 1].endMs : 0;
-
-    // Force break on silence gap
-    if (currentBlock.length > 0 && word.startMs - prevEnd > SILENCE_GAP_MS) {
-      groups.push(currentBlock);
-      currentBlock = [];
-    }
-
-    // Check if adding this word would exceed max block size
-    const projectedLen = currentBlock.length > 0
-      ? blockTextLength(currentBlock) + 1 + word.text.trim().length
-      : word.text.trim().length;
-
-    if (currentBlock.length > 0 && projectedLen > MAX_BLOCK_CHARS) {
-      groups.push(currentBlock);
-      currentBlock = [];
-    }
-
-    // Prefer breaking at phrase boundaries when block is getting long enough
-    if (currentBlock.length >= 4 && projectedLen > MAX_LINE_CHARS) {
-      const prevWord = currentBlock[currentBlock.length - 1].text.trim();
-      const currWord = word.text.trim().toLowerCase().replace(/[.,;:!?]/g, "");
-
-      if (endsWithPunctuation(prevWord) || isBreakPoint(currWord, lang)) {
-        // Don't break if current word is a clitic that should stay with next word
-        if (!NO_BREAK_BEFORE[lang].has(currWord)) {
-          groups.push(currentBlock);
-          currentBlock = [];
-        }
-      }
-    }
-
-    currentBlock.push(word);
-  }
-  if (currentBlock.length > 0) {
-    groups.push(currentBlock);
-  }
-
-  // Step 2: Format SRT with pyramid rule, minimum display time, and inter-subtitle gaps
-  let srt = "";
-  let index = 1;
-
-  for (let gi = 0; gi < groups.length; gi++) {
-    const group = groups[gi];
-    const startMs = group[0].startMs;
-    let endMs = group[group.length - 1].endMs;
-
-    // Enforce minimum 1s display time
-    if (endMs - startMs < MIN_DISPLAY_MS) {
-      endMs = startMs + MIN_DISPLAY_MS;
-    }
-
-    // Enforce minimum gap: trim end so it doesn't overlap with next subtitle start
-    if (gi + 1 < groups.length) {
-      const nextStart = groups[gi + 1][0].startMs;
-      if (endMs > nextStart - MIN_GAP_MS) {
-        endMs = Math.max(startMs + MIN_DISPLAY_MS, nextStart - MIN_GAP_MS);
-      }
-    }
-
-    const start = msToSrtTimestamp(startMs);
-    const end = msToSrtTimestamp(endMs);
-    const text = applyPyramidRule(group, MAX_LINE_CHARS, lang);
-    srt += `${index}${crlf}${start} --> ${end}${crlf}${text}${crlf}${crlf}`;
-    index++;
-  }
-
-  return srt;
-}
-
 // ... inside alignRoute function ...
 
   // 5f. Download captions as SRT
@@ -520,7 +511,30 @@ function captionsToSrt(captions: CaptionWord[], lang: TranscriptionLanguage): st
 
       return reply
         .header("Content-Type", "application/x-subrip")
-        .header("Content-Disposition", 'attachment; filename="captions.srt"')
+        .header("Content-Disposition", `attachment; filename="captions_${lang}.srt"`)
+        .send(srt);
+    }
+  );
+
+  // 5f-b. Download English translated captions as SRT
+  app.get<{ Params: { projectId: string }; Reply: string | ErrorResponse }>(
+    "/api/projects/:projectId/captions-en.srt",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
+
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+      if (!session.translatedCaptions || session.translatedCaptions.length === 0) {
+        return reply.status(400).send({ success: false, error: "No English translation available" });
+      }
+
+      const srt = translatedBlocksToSrt(session.translatedCaptions);
+
+      return reply
+        .header("Content-Type", "application/x-subrip")
+        .header("Content-Disposition", 'attachment; filename="captions_en.srt"')
         .send(srt);
     }
   );
@@ -572,8 +586,14 @@ function captionsToSrt(captions: CaptionWord[], lang: TranscriptionLanguage): st
       // Reset progress so the UI shows the automation running
       orchestrator.updateProgress(projectId, 0, "Starting Gemini...");
 
+      // Always use the original (uncorrected) transcript to avoid multi-correction drift
+      if (!session.originalTranscript) {
+        return reply.status(409).send({ success: false, error: "Original transcript not available — re-transcribe first" });
+      }
+      const original = session.originalTranscript;
+
       // Fire-and-forget — progress events update the client
-      runGeminiAutomation(projectId, session.transcript, app.log).catch(() => {});
+      runGeminiAutomation(projectId, original, app.log).catch(() => {});
 
       return { success: true as const };
     }

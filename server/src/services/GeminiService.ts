@@ -534,6 +534,112 @@ class GeminiService {
 
     return response.text ?? "";
   }
+
+  /**
+   * Translate subtitle blocks to English.
+   * Returns an array of translated text strings (same order & count as input).
+   */
+  async translateCaptions(
+    blocks: { text: string; startMs: number; endMs: number }[],
+    sourceLang: string,
+    sessionId: string,
+    onProgress: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    if (blocks.length === 0) return [];
+
+    const ai = await this.getClient();
+    const langName = sourceLang === "sk" ? "Slovak" : sourceLang === "cs" ? "Czech" : "English";
+
+    // Format as numbered lines for easy parsing
+    const numberedLines = blocks.map((b, i) => `${i + 1}. ${b.text}`);
+    const TRANSLATION_CHUNK = 200;
+    const chunks: { start: number; end: number }[] = [];
+    for (let i = 0; i < numberedLines.length; i += TRANSLATION_CHUNK) {
+      chunks.push({ start: i, end: Math.min(i + TRANSLATION_CHUNK, numberedLines.length) });
+    }
+
+    const translated: string[] = new Array(blocks.length).fill("");
+
+    for (let ci = 0; ci < chunks.length; ci++) {
+      if (signal?.aborted) throw new Error("Cancelled");
+
+      const chunk = chunks[ci];
+      const chunkLabel = chunks.length > 1 ? ` (chunk ${ci + 1}/${chunks.length})` : "";
+      onProgress(
+        90 + Math.round((ci / chunks.length) * 8),
+        `Translating captions to English${chunkLabel}...`,
+      );
+
+      const chunkLines = numberedLines.slice(chunk.start, chunk.end);
+      const chunkHash = createHash("md5").update("translate_en:" + chunkLines.join("\n")).digest("hex");
+
+      // Check cache
+      const cached = await this.getCachedChunk(sessionId, chunkHash);
+      if (cached) {
+        for (let i = 0; i < cached.length && chunk.start + i < blocks.length; i++) {
+          translated[chunk.start + i] = cached[i];
+        }
+        continue;
+      }
+
+      const expectedCount = chunkLines.length;
+      const userMessage = [
+        `Translate the following ${expectedCount} numbered subtitle lines from ${langName} to English.`,
+        `Return EXACTLY ${expectedCount} numbered lines in the same format: "N. translated text".`,
+        "Keep the translation natural and concise (subtitles should be short).",
+        "Do NOT add, merge, split, or drop any lines. Every input line must have exactly one output line.",
+        "",
+        chunkLines.join("\n"),
+        "",
+        `REMINDER: You MUST return exactly ${expectedCount} numbered lines.`,
+      ].join("\n");
+
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        if (signal?.aborted) throw new Error("Cancelled");
+
+        try {
+          const response = await ai.models.generateContent({
+            model: MODEL,
+            contents: userMessage,
+            config: {
+              thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+            },
+          });
+
+          const text = response.text ?? "";
+          // Parse numbered lines: "1. text" → "text"
+          const resultLines = text.trim().split("\n")
+            .map(l => l.replace(/^\d+\.\s*/, "").trim())
+            .filter(l => l.length > 0);
+
+          if (resultLines.length !== expectedCount) {
+            throw new Error(
+              `Translation row mismatch: expected ${expectedCount}, got ${resultLines.length}`,
+            );
+          }
+
+          // Cache and store
+          await this.setCachedChunk(sessionId, chunkHash, resultLines);
+          for (let i = 0; i < resultLines.length; i++) {
+            translated[chunk.start + i] = resultLines[i];
+          }
+          break;
+        } catch (err: unknown) {
+          const errObj = err instanceof Error ? err : new Error(String(err));
+          if (attempt < MAX_RETRIES && (isRetryableError(errObj) || isRowMismatchError(errObj))) {
+            const delay = RETRY_DELAY_MS * (attempt + 1);
+            console.warn(`[GeminiService] Translation chunk ${ci} attempt ${attempt + 1} failed: ${errObj.message}. Retrying in ${delay / 1000}s...`);
+            await sleep(delay);
+            continue;
+          }
+          throw errObj;
+        }
+      }
+    }
+
+    return translated;
+  }
 }
 
 export const geminiService = new GeminiService();

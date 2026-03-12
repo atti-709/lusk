@@ -3,7 +3,8 @@ import { orchestrator } from "../services/Orchestrator.js";
 import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
 import { geminiService, wordsToTsv, msToTimestamp } from "../services/GeminiService.js";
-import { parseTsv, parseViralClipText, wordsToCaptions } from "./align.js";
+import { settingsService } from "../services/SettingsService.js";
+import { parseTsv, parseViralClipText, wordsToCaptions, groupCaptionBlocks } from "./align.js";
 import type { TranscribeRequest, ErrorResponse } from "@lusk/shared";
 
 type Logger = Pick<FastifyInstance["log"], "error">;
@@ -117,6 +118,40 @@ export async function runGeminiAutomation(
     }
 
     orchestrator.setViralClips(sessionId, clips);
+
+    // 3. Translate captions to English (if source language is not English)
+    const lang = await settingsService.getTranscriptionLanguage();
+    if (lang !== "en") {
+      const currentSession = orchestrator.getSession(sessionId);
+      const captions = currentSession?.captions;
+      if (captions && captions.length > 0) {
+        try {
+          const blocks = groupCaptionBlocks(captions, lang);
+          const blockTexts = blocks.map(group => ({
+            text: group.map(w => w.text.trim()).join(" "),
+            startMs: group[0].startMs,
+            endMs: group[group.length - 1].endMs,
+          }));
+
+          const translated = await geminiService.translateCaptions(
+            blockTexts,
+            lang,
+            sessionId,
+            (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
+            signal,
+          );
+
+          const translatedBlocks = blockTexts.map((b, i) => ({
+            text: translated[i],
+            startMs: b.startMs,
+            endMs: b.endMs,
+          }));
+          orchestrator.setTranslatedCaptions(sessionId, translatedBlocks);
+        } catch (err: any) {
+          console.warn("[runGeminiAutomation] Translation failed, continuing without:", err?.message);
+        }
+      }
+    }
 
     // Transition to READY
     orchestrator.transition(sessionId, "READY");
