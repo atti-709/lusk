@@ -35,6 +35,12 @@ if (fs.existsSync(ffmpegBin)) {
 
 copyDir(path.join(ROOT, "server/dist"), path.join(serverBundle, "dist"));
 
+// Copy WhisperX requirements for PythonEnvService
+fs.copyFileSync(
+  path.join(ROOT, "server/requirements-whisperx.txt"),
+  path.join(serverBundle, "requirements-whisperx.txt"),
+);
+
 // Client: dist, public, full src, and node_modules for Remotion bundler
 copyDir(path.join(ROOT, "client/dist"), path.join(BUNDLE, "client/dist"));
 copyDir(path.join(ROOT, "client/public"), path.join(BUNDLE, "client/public"));
