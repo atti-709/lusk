@@ -5,6 +5,7 @@ import { access, readFile, unlink } from "node:fs/promises";
 import type { TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
 import { getFFmpegPath } from "../config/ffmpeg.js";
 import { settingsService } from "./SettingsService.js";
+import { pythonEnvService } from "./PythonEnvService.js";
 
 const WHISPERX_MODEL = "large-v3-turbo";
 
@@ -34,18 +35,20 @@ interface WhisperXOutput {
 }
 
 class WhisperService {
-  private _availableCache: boolean | null = null;
-
   async isAvailable(): Promise<boolean> {
-    if (this._availableCache !== null) return this._availableCache;
+    if (pythonEnvService.isReady()) return true;
+    // Dev fallback: check system python
+    return this.checkSystemWhisperX();
+  }
+
+  private checkSystemWhisperX(): boolean {
     const python3 = this.resolvePython3();
     try {
       execFileSync(python3, ["-m", "whisperx", "--version"], { stdio: "pipe" });
-      this._availableCache = true;
+      return true;
     } catch {
-      this._availableCache = false;
+      return false;
     }
-    return this._availableCache;
   }
 
   /**
@@ -67,17 +70,23 @@ class WhisperService {
   private async ensureInstalled(onProgress?: ProgressCallback): Promise<string> {
     onProgress?.(2, "Checking WhisperX...");
 
-    const python3 = this.resolvePython3();
+    // Prefer managed environment
+    if (pythonEnvService.isReady()) {
+      onProgress?.(5, "WhisperX ready (managed env)");
+      return pythonEnvService.getPythonPath();
+    }
 
+    // Dev fallback: system python
+    const python3 = this.resolvePython3();
     try {
       execFileSync(python3, ["-m", "whisperx", "--version"], { stdio: "pipe" });
     } catch {
       throw new Error(
-        `WhisperX is not installed. Run: pip3 install whisperx (python3: ${python3})`
+        `WhisperX is not installed. Run the setup from the app or: pip3 install whisperx (python3: ${python3})`
       );
     }
 
-    onProgress?.(5, "WhisperX ready");
+    onProgress?.(5, "WhisperX ready (system)");
     return python3;
   }
 
