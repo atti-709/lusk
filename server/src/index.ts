@@ -10,7 +10,8 @@ import { alignRoute } from "./routes/align.js";
 import { exportImportRoute } from "./routes/exportImport.js";
 import { projectsRoute } from "./routes/projects.js";
 import { settingsRoute } from "./routes/settings.js";
-import { whisperService } from "./services/WhisperService.js";
+import { pythonEnvRoute } from "./routes/python-env.js";
+import { pythonEnvService } from "./services/PythonEnvService.js";
 import { settingsService } from "./services/SettingsService.js";
 import { tempManager } from "./services/TempManager.js";
 import { projectFileService } from "./services/ProjectFileService.js";
@@ -42,9 +43,10 @@ await server.register(alignRoute);
 await server.register(exportImportRoute);
 await server.register(projectsRoute);
 await server.register(settingsRoute);
+await server.register(pythonEnvRoute);
 
 server.get("/api/health", async () => {
-  const whisperxAvailable = await whisperService.isAvailable();
+  const whisperxAvailable = pythonEnvService.isReady();
   const geminiApiKeySet = !!(await settingsService.getGeminiApiKey());
   return { status: "ok" as const, uptime: process.uptime(), whisperxAvailable, geminiApiKeySet };
 });
