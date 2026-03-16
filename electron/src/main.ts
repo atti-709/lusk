@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import { autoUpdater } from "electron-updater";
 import { spawn, execSync, ChildProcess } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
@@ -134,6 +134,7 @@ async function startServer(): Promise<void> {
     LUSK_PUBLIC_DIR: publicDir,
     LUSK_REMOTION_ENTRY: remotionEntry,
     LUSK_SERVER_ORIGIN: `http://localhost:${PORT}`,
+    LUSK_PYTHON_ENV_DIR: path.join(app.getPath("userData"), "python-env"),
   };
 
   // Use Electron itself as the Node runtime (ELECTRON_RUN_AS_NODE=1).
@@ -231,33 +232,139 @@ function setupAutoUpdater(): void {
   });
 }
 
-async function checkDependencies(): Promise<void> {
-  try {
-    const res = await fetch(`http://localhost:${PORT}/api/health`);
-    const health = (await res.json()) as { whisperxAvailable: boolean };
+const SETUP_HTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Lusk Setup</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#1a1a2e;color:#e0e0e0;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:24px;-webkit-app-region:drag;user-select:none}
+h1{font-size:16px;font-weight:600;margin-bottom:16px;color:#fff}
+.progress-container{width:100%;max-width:320px;background:#2a2a4a;border-radius:8px;overflow:hidden;height:8px;margin-bottom:12px}
+.progress-bar{height:100%;background:linear-gradient(90deg,#7c3aed,#a855f7);width:0%;transition:width .3s ease;border-radius:8px}
+.status{font-size:13px;color:#a0a0c0;text-align:center;min-height:20px}
+.error-container{display:none;text-align:center}
+.error-container.visible{display:block}
+.error-message{color:#f87171;font-size:13px;margin-bottom:16px;max-height:60px;overflow-y:auto}
+.buttons{display:flex;gap:8px;justify-content:center}
+button{-webkit-app-region:no-drag;padding:8px 20px;border-radius:6px;border:none;font-size:13px;cursor:pointer;font-weight:500}
+.btn-primary{background:#7c3aed;color:#fff}
+.btn-secondary{background:#3a3a5a;color:#c0c0d0}
+</style></head><body>
+<h1>Setting up transcription engine...</h1>
+<div class="progress-container"><div class="progress-bar" id="progress"></div></div>
+<div class="status" id="status">Preparing...</div>
+<div class="error-container" id="errorContainer">
+<div class="error-message" id="errorMessage"></div>
+<div class="buttons"><button class="btn-primary" id="retryBtn">Retry</button><button class="btn-secondary" id="skipBtn">Skip</button></div>
+</div>
+<script>
+const{ipcRenderer}=require("electron");
+ipcRenderer.on("setup-progress",(_,d)=>{
+  if(d.step==="error"){document.getElementById("status").style.display="none";document.querySelector(".progress-container").style.display="none";document.getElementById("errorContainer").classList.add("visible");document.getElementById("errorMessage").textContent=d.message;return}
+  document.getElementById("progress").style.width=d.percent+"%";document.getElementById("status").textContent=d.message;
+});
+document.getElementById("retryBtn").addEventListener("click",()=>ipcRenderer.send("setup-retry"));
+document.getElementById("skipBtn").addEventListener("click",()=>ipcRenderer.send("setup-skip"));
+</script></body></html>`;
 
-    if (!health.whisperxAvailable && mainWindow) {
-      const commands = "brew install python3\npip3 install whisperx";
-      const { response } = await dialog.showMessageBox(mainWindow, {
-        type: "warning",
-        title: "Missing Dependencies",
-        message: "WhisperX is not installed",
-        detail:
-          "Lusk needs Python 3 and WhisperX for transcription.\n\n" +
-          "Run these commands in Terminal:\n\n" +
-          commands +
-          "\n\nTranscription won't work until these are installed.\n" +
-          "You can still use Lusk for editing and rendering.",
-        buttons: ["Copy Commands to Clipboard", "Continue"],
-        defaultId: 0,
-      });
-      if (response === 0) {
-        clipboard.writeText(commands);
-      }
-    }
+async function ensurePythonEnv(): Promise<void> {
+  // Check if Python env is already set up
+  try {
+    const statusRes = await fetch(`http://localhost:${PORT}/api/python-env/status`);
+    const status = (await statusRes.json()) as { ready: boolean };
+    if (status.ready) return;
   } catch {
-    // Health check failed — server may still be starting, skip silently
+    return; // Server not responding, skip
   }
+
+  return new Promise<void>((resolve) => {
+    const setupWindow = new BrowserWindow({
+      width: 400,
+      height: 200,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      closable: false,
+      frame: false,
+      show: false,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+      },
+    });
+
+    const loadSetupPage = () => {
+      setupWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SETUP_HTML)}`);
+    };
+
+    loadSetupPage();
+    setupWindow.once("ready-to-show", () => setupWindow.show());
+
+    const cleanup = () => {
+      ipcMain.removeAllListeners("setup-retry");
+      ipcMain.removeAllListeners("setup-skip");
+    };
+
+    const runSetup = () => {
+      fetch(`http://localhost:${PORT}/api/python-env/setup`, { method: "POST" })
+        .then(async (res) => {
+          if (!res.body) throw new Error("No response body");
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            // Parse SSE events from buffer
+            const events = buffer.split("\n\n");
+            buffer = events.pop() ?? "";
+
+            for (const event of events) {
+              const dataLine = event.split("\n").find((l) => l.startsWith("data: "));
+              if (!dataLine) continue;
+              const data = JSON.parse(dataLine.slice(6));
+              setupWindow.webContents.send("setup-progress", data);
+
+              if (data.step === "done") {
+                cleanup();
+                setupWindow.destroy();
+                resolve();
+                return;
+              }
+            }
+          }
+
+          // Stream ended without "done" — treat as error
+          setupWindow.webContents.send("setup-progress", {
+            step: "error",
+            percent: 0,
+            message: "Setup stream ended unexpectedly",
+          });
+        })
+        .catch((err) => {
+          setupWindow.webContents.send("setup-progress", {
+            step: "error",
+            percent: 0,
+            message: err.message ?? "Connection failed",
+          });
+        });
+    };
+
+    // Handle retry/skip from the setup window
+    ipcMain.once("setup-skip", () => {
+      cleanup();
+      setupWindow.destroy();
+      resolve();
+    });
+
+    ipcMain.on("setup-retry", () => {
+      loadSetupPage();
+      setupWindow.once("ready-to-show", () => runSetup());
+    });
+
+    runSetup();
+  });
 }
 
 function createWindow(): void {
@@ -292,6 +399,7 @@ app.whenReady().then(async () => {
     return;
   }
 
+  await ensurePythonEnv();
   createWindow();
 
   // Check for updates (only in packaged app — dev builds have no publish config)
@@ -299,13 +407,12 @@ app.whenReady().then(async () => {
     setupAutoUpdater();
   }
 
-  // Once the page has loaded, process pending files and check dependencies
+  // Once the page has loaded, process any pending file opens
   mainWindow!.webContents.once("did-finish-load", async () => {
     if (pendingFilePath) {
       openLuskFile(pendingFilePath).catch(console.error);
       pendingFilePath = null;
     }
-    await checkDependencies();
   });
 
   // macOS: explicit app menu ensures Cmd+Q (Quit) works
