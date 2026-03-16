@@ -601,6 +601,7 @@ function App() {
             geminiAvailable={geminiAvailable}
             captions={captions}
             sourceAspectRatio={sourceAspectRatio}
+            videoDurationMs={state.videoDurationMs}
           />
         </div>
       )}

@@ -33,6 +33,7 @@ interface PipelineStepperProps {
   geminiAvailable?: boolean;
   captions?: CaptionWord[];
   sourceAspectRatio?: number | null;
+  videoDurationMs?: number | null;
 }
 
 function getActiveStepId(
@@ -67,6 +68,7 @@ export function PipelineStepper({
   geminiAvailable = false,
   captions = [],
   sourceAspectRatio,
+  videoDurationMs,
 }: PipelineStepperProps) {
   const { fps } = useAppSettings();
 
@@ -76,7 +78,6 @@ export function PipelineStepper({
     (currentState === "RENDERING");
 
   const showAlignStep = currentState === "ALIGNING" && progress === 100;
-  const isAligningInProgress = currentState === "ALIGNING" && progress < 100;
   const activeStepId = getActiveStepId(currentState, readySubView);
 
   const remotionCaptions: Caption[] = useMemo(
@@ -91,13 +92,14 @@ export function PipelineStepper({
     [captions]
   );
 
-  const alignPreviewDurationInFrames = useMemo(() => {
+  const previewDurationInFrames = useMemo(() => {
     const last = captions.at(-1);
-    if (!last) return 1;
-    return Math.max(1, Math.ceil(((last.endMs + 1000) / 1000) * fps));
-  }, [captions, fps]);
+    const durationMs = last ? last.endMs + 1000 : videoDurationMs ?? 0;
+    if (durationMs <= 0) return 1;
+    return Math.max(1, Math.ceil((durationMs / 1000) * fps));
+  }, [captions, videoDurationMs, fps]);
 
-  const alignPlayerInputProps = useMemo(
+  const playerInputProps = useMemo(
     () => ({
       videoUrl: videoUrl ?? "",
       captions: remotionCaptions,
@@ -132,35 +134,21 @@ export function PipelineStepper({
         })}
       </div>
 
-      {/* Plain video preview during UPLOADING/TRANSCRIBING (no captions yet) */}
-      {videoUrl && currentState !== "READY" && !showAlignStep && !isAligningInProgress && (
-        <div className="video-preview">
-          <video src={videoUrl} controls />
-        </div>
-      )}
-
-      {/* Remotion Player with captions during Gemini processing (ALIGNING in progress) */}
-      {videoUrl && isAligningInProgress && remotionCaptions.length > 0 && (
+      {/* Remotion Player preview during UPLOADING/TRANSCRIBING/ALIGNING */}
+      {videoUrl && currentState !== "READY" && !showAlignStep && previewDurationInFrames > 1 && (
         <div className="align-preview-player">
           <Player
             key={sessionId}
             component={VideoComposition}
-            inputProps={alignPlayerInputProps}
+            inputProps={playerInputProps}
             compositionWidth={COMP_WIDTH}
             compositionHeight={COMP_HEIGHT}
-            durationInFrames={alignPreviewDurationInFrames}
+            durationInFrames={previewDurationInFrames}
             fps={fps}
             style={playerStyle}
             controls
             loop
           />
-        </div>
-      )}
-
-      {/* Fallback: plain video during ALIGNING while captions are still loading */}
-      {videoUrl && isAligningInProgress && remotionCaptions.length === 0 && (
-        <div className="video-preview">
-          <video src={videoUrl} controls />
         </div>
       )}
 

@@ -99,23 +99,7 @@
 }
 
 
-/* ── Video preview ── */
-.video-preview {
-  width: fit-content;
-  max-width: 100%;
-  background: var(--surface);
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-}
-
-.video-preview video {
-  display: block;
-  max-width: 100%;
-  max-height: 65vh;
-}
-
-/* ── Align phase preview player ── */
+/* ── Preview player ── */
 .align-preview-player {
   width: 100%;
   max-width: 400px;
