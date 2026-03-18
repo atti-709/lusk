@@ -5,9 +5,9 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import path from "node:path";
 
-const UV_VERSION = "0.6.6";
+const UV_VERSION = "0.10.11";
 const UV_ARTIFACT = `uv-aarch64-apple-darwin.tar.gz`;
-const UV_URL = `https://github.com/astral-sh/uv/releases/download/v${UV_VERSION}/${UV_ARTIFACT}`;
+const UV_URL = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_ARTIFACT}`;
 const PYTHON_VERSION = "3.11";
 
 export type SetupProgressCallback = (step: string, percent: number, message: string) => void;
@@ -45,7 +45,7 @@ class PythonEnvService {
       return false;
     }
     try {
-      execFileSync(this.getPythonPath(), ["-c", "import whisperx; print(whisperx.__version__)"], {
+      execFileSync(this.getPythonPath(), ["-c", "import whisperx"], {
         stdio: "pipe",
         timeout: 10_000,
       });
