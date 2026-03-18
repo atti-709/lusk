@@ -151,6 +151,23 @@ Since the app is unsigned, macOS blocks it. Users must run once:
 xattr -cr /Applications/Lusk.app
 ```
 
+### Bundle Pitfalls (Dev vs DMG differences)
+
+The DMG build has a different runtime environment than `npm run dev`. Common issues:
+
+* **No `ffprobe` in bundle:** `ffmpeg-static` only ships `ffmpeg`, not `ffprobe`. Any code that calls `ffprobe` must have an `ffmpeg -i` stderr-parsing fallback (see `probeVideoDurationMs` pattern). Remotion ships its own ffmpeg/ffprobe in `@remotion/compositor-darwin-arm64`.
+* **macOS quarantine on binaries:** All native binaries in the bundle (`ffmpeg-static/ffmpeg`, `@remotion/compositor-darwin-arm64/{ffmpeg,ffprobe,remotion}`) must have quarantine attributes cleared in `electron/scripts/bundle.ts` via `xattr -dr com.apple.quarantine`.
+* **No npm workspace symlinks:** The `@lusk/shared` workspace package isn't linked in the bundle. `bundle.ts` must copy `shared/` into `client/node_modules/@lusk/shared` so Remotion's webpack bundler can resolve it at render time.
+* **Fastify empty body rejection:** `POST` requests with `Content-Type: application/json` and no body cause a 400 error. Don't set the JSON content-type header on requests that send no body.
+
+### Python Environment (Managed via uv)
+
+* **Service:** `PythonEnvService.ts` manages a self-contained Python 3.11 venv with pinned dependencies (`server/requirements-whisperx.txt`).
+* **Location:** `~/Library/Application Support/@lusk/electron/python-env/` (Electron) or `.python-env/` (dev).
+* **Pins:** `torch`, `torchaudio`, and `whisperx` are pinned together — they must be compatible. `transformers` 5.x requires `torch >= 2.6` (CVE-2025-32434). WhisperX 3.8.x requires `torch ~= 2.8.0` and `numpy >= 2.1.0`.
+* **Setup flow:** Electron shows a setup dialog on first launch that streams progress via SSE from `POST /api/python-env/setup`. The SSE endpoint uses `reply.hijack()` to prevent Fastify from interfering.
+* **Verification:** `import whisperx` cold start takes ~5s (loads torch). The `isReady()` check uses a 30s timeout.
+
 ## **User Instructions**
 
 * When asking for code, specify if it belongs in the **/server** or **/client** directory.
