@@ -445,6 +445,12 @@ app.whenReady().then(async () => {
           { role: "selectAll" as const },
         ],
       },
+      {
+        label: "View",
+        submenu: [
+          { role: "toggleDevTools" as const },
+        ],
+      },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }
