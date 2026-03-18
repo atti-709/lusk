@@ -33,6 +33,19 @@ if (fs.existsSync(ffmpegBin)) {
   console.log(`ffmpeg binary ready: ${ffmpegBin}`);
 }
 
+// Remove macOS quarantine from Remotion compositor binaries (ffmpeg, ffprobe, remotion)
+const compositorDir = path.join(serverBundle, "node_modules", "@remotion", "compositor-darwin-arm64");
+if (fs.existsSync(compositorDir)) {
+  for (const bin of ["ffmpeg", "ffprobe", "remotion"]) {
+    const binPath = path.join(compositorDir, bin);
+    if (fs.existsSync(binPath)) {
+      try { execSync(`xattr -dr com.apple.quarantine "${binPath}"`, { stdio: "ignore" }); } catch {}
+      try { execSync(`chmod +x "${binPath}"`, { stdio: "ignore" }); } catch {}
+    }
+  }
+  console.log(`Remotion compositor binaries ready: ${compositorDir}`);
+}
+
 copyDir(path.join(ROOT, "server/dist"), path.join(serverBundle, "dist"));
 
 // Copy WhisperX requirements for PythonEnvService
