@@ -124,10 +124,7 @@ function App() {
 
   const cancelPrompt = useCancelPrompt();
   const cancelProject = useCallback((id: string) => {
-    fetch(`/api/projects/${id}/cancel`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    }).catch(() => {});
+    fetch(`/api/projects/${id}/cancel`, { method: "POST" }).catch(() => {});
   }, []);
 
   // Register working process as cancellable for Cmd+R (transcription, alignment, render)
