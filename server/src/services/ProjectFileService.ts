@@ -335,10 +335,17 @@ class ProjectFileService {
       stateOverride,
     });
 
-    // Register / bump in recent list
-    const thumbnail = videoExists
-      ? generateThumbnail(data.videoPath)
-      : null;
+    // Register / bump in recent list — preserve existing thumbnail if regeneration fails
+    let thumbnail: string | null = null;
+    if (videoExists) {
+      thumbnail = generateThumbnail(data.videoPath);
+    }
+    if (!thumbnail) {
+      const existing = (await readRegistry()).find(
+        (e) => e.projectPath === projectFilePath,
+      );
+      if (existing?.thumbnail) thumbnail = existing.thumbnail;
+    }
 
     await addToRegistry({
       projectId: data.projectId,

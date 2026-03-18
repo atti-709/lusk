@@ -42,7 +42,7 @@ export function Dashboard({ onOpenProject, onNewProject, onOpenFile, whisperxAva
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/projects/recent")
+    fetch("/api/projects/recent", { cache: "no-store" })
       .then((r) => r.json())
       .then((data: RecentProject[]) => {
         setProjects(data);
