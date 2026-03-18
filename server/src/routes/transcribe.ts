@@ -229,6 +229,8 @@ export async function transcribeRoute(app: FastifyInstance) {
       const transcription = activeTranscriptions.get(projectId);
       const gemini = activeGeminiOperations.get(projectId);
 
+      request.log.info({ projectId, hasTranscription: !!transcription, hasGemini: !!gemini }, "Cancel requested");
+
       if (transcription) transcription.abort();
       if (gemini) gemini.abort();
 
