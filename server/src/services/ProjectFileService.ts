@@ -321,6 +321,7 @@ class ProjectFileService {
       videoUrl = `/static/${data.projectId}/input.mp4`;
       // TRANSCRIBING can't survive a server restart — reset so it can be retried
       if (data.state === "TRANSCRIBING") stateOverride = "UPLOADING";
+      data.videoDurationMs = data.videoDurationMs ?? probeVideoDurationMs(data.videoPath);
       const meta = probeVideoMeta(data.videoPath);
       data.videoWidth = data.videoWidth ?? meta.width;
       data.videoHeight = data.videoHeight ?? meta.height;
