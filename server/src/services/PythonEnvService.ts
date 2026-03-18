@@ -18,6 +18,7 @@ function getEnvDir(): string {
 
 class PythonEnvService {
   private setupPromise: Promise<void> | null = null;
+  private _readyCache: boolean | null = null;
 
   get envDir(): string {
     return getEnvDir();
@@ -36,15 +37,27 @@ class PythonEnvService {
   }
 
   isReady(): boolean {
+    if (this._readyCache === true) return true;
+    // Fast negative: if the python binary doesn't exist, skip the exec
     try {
-      execFileSync(this.getPythonPath(), ["-m", "whisperx", "--version"], {
+      statSync(this.getPythonPath());
+    } catch {
+      return false;
+    }
+    try {
+      execFileSync(this.getPythonPath(), ["-c", "import whisperx; print(whisperx.__version__)"], {
         stdio: "pipe",
         timeout: 10_000,
       });
+      this._readyCache = true;
       return true;
     } catch {
       return false;
     }
+  }
+
+  get isSettingUp(): boolean {
+    return this.setupPromise !== null;
   }
 
   async setup(onProgress?: SetupProgressCallback): Promise<void> {
@@ -72,7 +85,7 @@ class PythonEnvService {
 
     // Step 2: Install Python
     onProgress?.("installing-python", 15, "Installing Python 3.11...");
-    await this.installPython(onProgress);
+    await this.installPython();
     onProgress?.("installing-python", 35, "Python 3.11 installed");
 
     // Step 3: Create venv
@@ -116,7 +129,7 @@ class PythonEnvService {
     await unlink(tarPath).catch(() => {});
   }
 
-  private async installPython(onProgress?: SetupProgressCallback): Promise<void> {
+  private async installPython(): Promise<void> {
     await this.runUv(["python", "install", PYTHON_VERSION], {
       UV_PYTHON_INSTALL_DIR: path.join(this.envDir, "python"),
     });
@@ -177,7 +190,7 @@ class PythonEnvService {
 
       proc.stderr.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
-        stderr += text;
+        stderr = (stderr + text).slice(-2000);
         if (onStderr) {
           const combined = partialLine + text;
           const lines = combined.split("\n");

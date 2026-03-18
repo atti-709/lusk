@@ -29,6 +29,13 @@ export const pythonEnvRoute: FastifyPluginAsync = async (server) => {
       return reply;
     }
 
+    // Reject concurrent setup requests
+    if (pythonEnvService.isSettingUp) {
+      send({ step: "error", percent: 0, message: "Setup already in progress" });
+      reply.raw.end();
+      return reply;
+    }
+
     try {
       await pythonEnvService.setup((step, percent, message) => {
         send({ step, percent, message });

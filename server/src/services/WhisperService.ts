@@ -44,7 +44,7 @@ class WhisperService {
   private checkSystemWhisperX(): boolean {
     const python3 = this.resolvePython3();
     try {
-      execFileSync(python3, ["-m", "whisperx", "--version"], { stdio: "pipe" });
+      execFileSync(python3, ["-c", "import whisperx"], { stdio: "pipe" });
       return true;
     } catch {
       return false;
@@ -79,7 +79,7 @@ class WhisperService {
     // Dev fallback: system python
     const python3 = this.resolvePython3();
     try {
-      execFileSync(python3, ["-m", "whisperx", "--version"], { stdio: "pipe" });
+      execFileSync(python3, ["-c", "import whisperx"], { stdio: "pipe" });
     } catch {
       throw new Error(
         `WhisperX is not installed. Run the setup from the app or: pip3 install whisperx (python3: ${python3})`

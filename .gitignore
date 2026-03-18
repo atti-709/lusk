@@ -13,3 +13,4 @@ server/models/
 electron/out/
 electron/bundle/
 .worktrees/
+.python-env/
