@@ -104,6 +104,7 @@ export function StudioView({
   const key = clipKey(trimmedClip);
   const renderState = renders[key] ?? null;
   const isRendering = renderState?.status === "rendering";
+  const isRenderError = renderState?.status === "error";
   const outputUrl = renderState?.outputUrl ?? null;
   const renderProgress = renderState?.progress ?? 0;
   const renderMessage = renderState?.message ?? "";
@@ -580,6 +581,13 @@ export function StudioView({
                   style={{ width: `${renderProgress}%` }}
                 />
               </div>
+            </div>
+          )}
+
+          {isRenderError && (
+            <div className="render-error">
+              <span className="render-error-label">Render failed</span>
+              <pre className="render-error-message">{renderMessage}</pre>
             </div>
           )}
 

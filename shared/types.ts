@@ -90,7 +90,7 @@ export const DEFAULT_CAPTION_STYLES: CaptionStyles = {
 };
 
 export interface ClipRenderState {
-  status: 'rendering' | 'exported';
+  status: 'rendering' | 'exported' | 'error';
   progress: number;
   message: string;
   outputUrl: string | null;

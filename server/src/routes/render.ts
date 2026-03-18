@@ -87,15 +87,22 @@ async function runRender(
     const isCancelled = err instanceof Error && err.message.includes("cancelled");
     if (!isCancelled) {
       log.error(err, "Render failed");
-      const errMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[render] RENDER ERROR:", errMsg);
       routeLog(`runRender ERROR: ${errMsg}`);
-    }
-    // Delete the render entry so the clip appears retryable.
-    const s = orchestrator.getSession(sessionId);
-    if (s?.renders) {
-      delete s.renders[key];
-      orchestrator.emitAndPersist(sessionId);
+      orchestrator.updateClipRender(sessionId, key, {
+        status: "error",
+        progress: 0,
+        message: errMsg,
+        outputUrl: null,
+      });
+    } else {
+      // Cancelled — delete the render entry so the clip appears retryable
+      const s = orchestrator.getSession(sessionId);
+      if (s?.renders) {
+        delete s.renders[key];
+        orchestrator.emitAndPersist(sessionId);
+      }
     }
   } finally {
     activeRenderCancels.delete(sessionId);

@@ -47,7 +47,8 @@ export function useSSE(sessionId: string | null): UseSSEResult {
       }
     };
 
-    es.onerror = () => {
+    es.onerror = (ev) => {
+      console.error("[SSE] connection error", ev);
       setIsConnected(false);
       if (es.readyState === EventSource.CLOSED) {
         setError("Connection closed");

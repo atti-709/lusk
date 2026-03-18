@@ -69,7 +69,7 @@ function App() {
           setGeminiAvailable(data.geminiApiKeySet);
         }
       })
-      .catch(() => {});
+      .catch((e: unknown) => console.error(e));
   }, []);
 
   // Handle .lusk files opened from Finder (Electron only)
@@ -107,7 +107,7 @@ function App() {
         if (!isMounted || !data.captions) return;
         setCaptions(data.captions);
       })
-      .catch(() => {});
+      .catch((e: unknown) => console.error(e));
 
     return () => { isMounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -124,7 +124,7 @@ function App() {
 
   const cancelPrompt = useCancelPrompt();
   const cancelProject = useCallback((id: string) => {
-    fetch(`/api/projects/${id}/cancel`, { method: "POST" }).catch(() => {});
+    fetch(`/api/projects/${id}/cancel`, { method: "POST" }).catch((e: unknown) => console.error(e));
   }, []);
 
   // Register working process as cancellable for Cmd+R (transcription, alignment, render)
@@ -231,7 +231,7 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: projectId }),
-      }).catch(() => {});
+      }).catch((e: unknown) => console.error(e));
     }
   }, [sessionId, isWorking, cancelProject, resetSessionState, whisperxAvailable]);
 
@@ -296,7 +296,7 @@ function App() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId }),
-    }).catch(() => {});
+    }).catch((e: unknown) => console.error(e));
   }, [pendingVideoPath, sessionId, selectVideoForProject]);
 
   const handleScriptFile = useCallback(async (filePath: string) => {
@@ -362,7 +362,7 @@ function App() {
     setSelectedClip(clip);
     // Sync render states to clear any stuck "rendering" entries from cancelled renders
     if (sessionId) {
-      fetch(`/api/projects/${sessionId}/sync-render-states`, { method: "POST" }).catch(() => {});
+      fetch(`/api/projects/${sessionId}/sync-render-states`, { method: "POST" }).catch((e: unknown) => console.error(e));
     }
   }, [sessionId]);
 
@@ -370,7 +370,7 @@ function App() {
     const hasRendering = state?.renders && Object.values(state.renders).some((r) => r.status === "rendering");
     if (hasRendering && !window.confirm("A video is rendering. Go back and cancel it?")) return;
     if (sessionId && hasRendering) {
-      fetch(`/api/projects/${sessionId}/cancel-render`, { method: "POST" }).catch(() => {});
+      fetch(`/api/projects/${sessionId}/cancel-render`, { method: "POST" }).catch((e: unknown) => console.error(e));
     }
     setSelectedClip(null);
   }, [sessionId, state?.renders]);
@@ -470,7 +470,7 @@ function App() {
     if (sessionId) {
       if (isWorking) cancelProject(sessionId);
       if (state?.renders && Object.values(state.renders).some((r) => r.status === "rendering")) {
-        fetch(`/api/projects/${sessionId}/cancel-render`, { method: "POST" }).catch(() => {});
+        fetch(`/api/projects/${sessionId}/cancel-render`, { method: "POST" }).catch((e: unknown) => console.error(e));
       }
     }
     setSessionId(null);
