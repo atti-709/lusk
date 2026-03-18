@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import type { FastifyPluginAsync } from "fastify";
+import { getFFmpegPath } from "../config/ffmpeg.js";
 import type {
   BrowseRequest,
   BrowseResponse,
@@ -16,7 +17,7 @@ import { tempManager } from "../services/TempManager.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Probe video duration in ms using ffprobe (same pattern as ProjectFileService). */
+/** Probe video duration in ms. Tries ffprobe, falls back to ffmpeg. */
 function probeVideoDurationMs(filePath: string): number | null {
   try {
     const ffprobe = process.env.FFPROBE_PATH ?? "ffprobe";
@@ -26,10 +27,25 @@ function probeVideoDurationMs(filePath: string): number | null {
     );
     const info = JSON.parse(stdout);
     const sec = parseFloat(info.format?.duration ?? "0");
-    return sec > 0 ? Math.round(sec * 1000) : null;
-  } catch {
-    return null;
-  }
+    if (sec > 0) return Math.round(sec * 1000);
+  } catch { /* ffprobe not available */ }
+
+  // Fallback: parse duration from ffmpeg -i stderr
+  try {
+    const ffmpeg = getFFmpegPath();
+    const stderr = (() => {
+      try { execSync(`${JSON.stringify(ffmpeg)} -i ${JSON.stringify(filePath)}`, { encoding: "utf-8", timeout: 15_000 }); }
+      catch (e: any) { return e.stderr ?? ""; }
+      return "";
+    })();
+    const m = stderr.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);
+    if (m) {
+      const sec = parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]);
+      if (sec > 0) return Math.round(sec * 1000);
+    }
+  } catch { /* ignore */ }
+
+  return null;
 }
 
 /** Probe video width and height (first video stream). Returns null values on failure. */

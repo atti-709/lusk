@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
+import { getFFmpegPath } from "../config/ffmpeg.js";
 import AdmZip from "adm-zip";
 import type {
   ProjectData,
@@ -43,8 +44,9 @@ function sanitizeVideoName(filename: string): string {
     .trim();
 }
 
-/** Probe video duration in milliseconds using ffprobe. Returns null on failure. */
+/** Probe video duration in milliseconds. Tries ffprobe, falls back to ffmpeg. */
 function probeVideoDurationMs(filePath: string): number | null {
+  // Try ffprobe first
   try {
     const ffprobe = process.env.FFPROBE_PATH ?? "ffprobe";
     const stdout = execSync(
@@ -53,10 +55,25 @@ function probeVideoDurationMs(filePath: string): number | null {
     );
     const info = JSON.parse(stdout);
     const sec = parseFloat(info.format?.duration ?? "0");
-    return sec > 0 ? Math.round(sec * 1000) : null;
-  } catch {
-    return null;
-  }
+    if (sec > 0) return Math.round(sec * 1000);
+  } catch { /* ffprobe not available */ }
+
+  // Fallback: parse duration from ffmpeg -i stderr (works with bundled ffmpeg-static)
+  try {
+    const ffmpeg = getFFmpegPath();
+    const stderr = (() => {
+      try { execSync(`${JSON.stringify(ffmpeg)} -i ${JSON.stringify(filePath)}`, { encoding: "utf-8", timeout: 15_000 }); }
+      catch (e: any) { return e.stderr ?? ""; }
+      return "";
+    })();
+    const m = stderr.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);
+    if (m) {
+      const sec = parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]);
+      if (sec > 0) return Math.round(sec * 1000);
+    }
+  } catch { /* ignore */ }
+
+  return null;
 }
 
 /** Probe video width and height (first video stream). Returns null values on failure. */
