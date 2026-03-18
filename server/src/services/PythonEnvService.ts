@@ -47,7 +47,7 @@ class PythonEnvService {
     try {
       execFileSync(this.getPythonPath(), ["-c", "import whisperx"], {
         stdio: "pipe",
-        timeout: 10_000,
+        timeout: 30_000,
       });
       this._readyCache = true;
       return true;

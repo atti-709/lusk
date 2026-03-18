@@ -12,6 +12,10 @@ export const pythonEnvRoute: FastifyPluginAsync = async (server) => {
 
   // Setup — SSE stream that drives the full installation
   server.post("/api/python-env/setup", async (request, reply) => {
+    // Tell Fastify we're taking over the response — prevents it from
+    // sending its own reply or closing the connection prematurely.
+    reply.hijack();
+
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
@@ -26,14 +30,14 @@ export const pythonEnvRoute: FastifyPluginAsync = async (server) => {
     if (pythonEnvService.isReady()) {
       send({ step: "done", percent: 100, message: "Already set up" });
       reply.raw.end();
-      return reply;
+      return;
     }
 
     // Reject concurrent setup requests
     if (pythonEnvService.isSettingUp) {
       send({ step: "error", percent: 0, message: "Setup already in progress" });
       reply.raw.end();
-      return reply;
+      return;
     }
 
     try {
@@ -45,6 +49,5 @@ export const pythonEnvRoute: FastifyPluginAsync = async (server) => {
     }
 
     reply.raw.end();
-    return reply;
   });
 };
