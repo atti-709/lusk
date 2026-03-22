@@ -273,6 +273,7 @@ class ProjectFileService {
     const hasVideo = !!videoPath;
     const videoName = hasVideo ? sanitizeVideoName(basename(videoPath)) : "";
     const videoDurationMs = hasVideo ? probeVideoDurationMs(videoPath) : null;
+    const videoMeta = hasVideo ? probeVideoMeta(videoPath) : { width: null, height: null };
 
     const data: ProjectData = {
       version: 1,
@@ -282,8 +283,8 @@ class ProjectFileService {
       videoPath: videoPath ?? "",
       videoName,
       videoDurationMs,
-      videoWidth: null,
-      videoHeight: null,
+      videoWidth: videoMeta.width,
+      videoHeight: videoMeta.height,
       state: hasVideo ? "UPLOADING" : "IDLE",
       transcript: null,
       originalTranscript: null,
