@@ -83,12 +83,12 @@ export interface CaptionStyles {
 
 export const DEFAULT_CAPTION_STYLES: CaptionStyles = {
   fontSize: 56,
-  fontFamily: "Montserrat",
-  highlightColor: "#F77205",
-  textColor: "#ffffff",
+  fontFamily: "Space Grotesk",
+  highlightColor: "#e8451f",
+  textColor: "#faf9f8",
   textTransform: "uppercase",
-  captionPosition: 340,
-  fontWeight: 900,
+  captionPosition: 400,
+  fontWeight: 700,
 };
 
 export interface ClipRenderState {
