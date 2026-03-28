@@ -61,7 +61,8 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
         textColor?: string;
         textTransform?: "uppercase" | "none" | "capitalize";
         captionPosition?: number;
-        fontWeight?: 800 | 900;
+        fontWeight?: number;
+        fontFamily?: string;
       } | null;
     };
   }>("/api/settings", async (request) => {
