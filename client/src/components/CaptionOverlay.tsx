@@ -7,21 +7,50 @@ import {
 } from "remotion";
 import { createTikTokStyleCaptions } from "@remotion/captions";
 import type { TikTokPage, Caption } from "@remotion/captions";
-import { loadFont } from "@remotion/google-fonts/Montserrat";
+import { loadFont as loadMontserrat } from "@remotion/google-fonts/Montserrat";
+import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
+import { loadFont as loadOswald } from "@remotion/google-fonts/Oswald";
+import { loadFont as loadBebasNeue } from "@remotion/google-fonts/BebasNeue";
+import { loadFont as loadPoppins } from "@remotion/google-fonts/Poppins";
+import { loadFont as loadBangers } from "@remotion/google-fonts/Bangers";
+import { loadFont as loadSpaceMono } from "@remotion/google-fonts/SpaceMono";
+import { loadFont as loadSpaceGrotesk } from "@remotion/google-fonts/SpaceGrotesk";
 import type { CaptionStyles } from "@lusk/shared";
 import { DEFAULT_CAPTION_STYLES } from "@lusk/shared";
 
-const { fontFamily } = loadFont("normal", {
-  weights: ["800", "900"],
-  subsets: ["latin", "latin-ext"],
-});
+type FontEntry = {
+  load: typeof loadMontserrat;
+  weights: number[];
+};
+
+export const FONT_REGISTRY: Record<string, FontEntry> = {
+  Montserrat:      { load: loadMontserrat,    weights: [400, 500, 600, 700, 800, 900] },
+  Inter:           { load: loadInter,          weights: [400, 500, 600, 700, 800, 900] },
+  Oswald:          { load: loadOswald,         weights: [400, 500, 600, 700] },
+  "Bebas Neue":    { load: loadBebasNeue,      weights: [400] },
+  Poppins:         { load: loadPoppins,        weights: [400, 500, 600, 700, 800, 900] },
+  Bangers:         { load: loadBangers,        weights: [400] },
+  "Space Mono":    { load: loadSpaceMono,      weights: [400, 700] },
+  "Space Grotesk": { load: loadSpaceGrotesk,   weights: [400, 500, 600, 700] },
+};
+
+function useFontFamily(fontKey: string): string {
+  return useMemo(() => {
+    const entry = FONT_REGISTRY[fontKey] ?? FONT_REGISTRY["Montserrat"];
+    const { fontFamily } = entry.load("normal", {
+      weights: entry.weights.map(String) as ("400" | "500" | "600" | "700" | "800" | "900")[],
+      subsets: ["latin", "latin-ext"],
+    });
+    return fontFamily;
+  }, [fontKey]);
+}
 
 // How often captions switch — controls words per page
 const SWITCH_CAPTIONS_EVERY_MS = 1200;
 const SHADOW =
   "0 2px 8px rgba(0,0,0,0.9), 0 0 24px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4)";
 
-function CaptionPage({ page, styles }: { page: TikTokPage; styles: CaptionStyles }) {
+function CaptionPage({ page, styles, fontFamily }: { page: TikTokPage; styles: CaptionStyles; fontFamily: string }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -133,6 +162,7 @@ function splitAtSentenceBoundaries(pages: TikTokPage[]): TikTokPage[] {
 
 export function CaptionOverlay({ captions, captionStyles }: CaptionOverlayProps) {
   const styles = captionStyles ?? DEFAULT_CAPTION_STYLES;
+  const fontFamily = useFontFamily(styles.fontFamily);
   const { fps } = useVideoConfig();
 
   const pages = useMemo(() => {
@@ -165,7 +195,7 @@ export function CaptionOverlay({ captions, captionStyles }: CaptionOverlayProps)
             from={startFrame}
             durationInFrames={durationInFrames}
           >
-            <CaptionPage page={page} styles={styles} />
+            <CaptionPage page={page} styles={styles} fontFamily={fontFamily} />
           </Sequence>
         );
       })}
