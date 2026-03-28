@@ -73,15 +73,17 @@ export interface TranslatedBlock {
 
 export interface CaptionStyles {
   fontSize: number;
+  fontFamily: string;
   highlightColor: string;
   textColor: string;
   textTransform: "uppercase" | "none" | "capitalize";
   captionPosition: number;
-  fontWeight: 800 | 900;
+  fontWeight: number;
 }
 
 export const DEFAULT_CAPTION_STYLES: CaptionStyles = {
   fontSize: 56,
+  fontFamily: "Montserrat",
   highlightColor: "#F77205",
   textColor: "#ffffff",
   textTransform: "uppercase",
