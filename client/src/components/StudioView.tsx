@@ -8,6 +8,7 @@ import {
   COMP_WIDTH,
   COMP_HEIGHT,
 } from "./VideoComposition";
+import { FONT_REGISTRY } from "./CaptionOverlay";
 import { useOutroConfig } from "../hooks/useOutroConfig";
 import { useAppSettings } from "../contexts/AppSettingsContext";
 import "./StudioView.css";
@@ -413,6 +414,27 @@ export function StudioView({
             {stylesOpen && (
               <div className="collapsible-body">
                 <div className="style-row">
+                  <label>Font</label>
+                  <select value={captionStyles.fontFamily ?? "Montserrat"} onChange={(e) => {
+                    const newFont = e.target.value;
+                    const entry = FONT_REGISTRY[newFont];
+                    const availableWeights = entry?.weights ?? [900];
+                    // Snap weight to nearest available if current weight isn't supported
+                    const currentWeight = captionStyles.fontWeight;
+                    const newWeight = availableWeights.includes(currentWeight)
+                      ? currentWeight
+                      : availableWeights.reduce((best, w) => Math.abs(w - currentWeight) < Math.abs(best - currentWeight) ? w : best);
+                    handleStyleChange("fontFamily", newFont);
+                    if (newWeight !== currentWeight) {
+                      handleStyleChange("fontWeight", newWeight);
+                    }
+                  }}>
+                    {Object.keys(FONT_REGISTRY).map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="style-row">
                   <label>Size</label>
                   <input type="range" className="offset-slider" min={32} max={80} step={1} value={captionStyles.fontSize} onChange={(e) => handleStyleChange("fontSize", Number(e.target.value))} />
                   <span className="control-value">{captionStyles.fontSize}</span>
@@ -435,9 +457,10 @@ export function StudioView({
                 </div>
                 <div className="style-row">
                   <label>Weight</label>
-                  <select value={captionStyles.fontWeight} onChange={(e) => handleStyleChange("fontWeight", Number(e.target.value) as 800 | 900)}>
-                    <option value={900}>900 (Bold)</option>
-                    <option value={800}>800 (Heavy)</option>
+                  <select value={captionStyles.fontWeight} onChange={(e) => handleStyleChange("fontWeight", Number(e.target.value))}>
+                    {(FONT_REGISTRY[captionStyles.fontFamily ?? "Montserrat"]?.weights ?? [900]).map((w) => (
+                      <option key={w} value={w}>{w}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="style-row">
