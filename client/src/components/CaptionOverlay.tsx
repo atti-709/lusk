@@ -18,20 +18,22 @@ import { loadFont as loadSpaceGrotesk } from "@remotion/google-fonts/SpaceGrotes
 import type { CaptionStyles } from "@lusk/shared";
 import { DEFAULT_CAPTION_STYLES } from "@lusk/shared";
 
+type LoadFontFn = (style: string, options?: Record<string, unknown>) => { fontFamily: string };
+
 type FontEntry = {
-  load: typeof loadMontserrat;
+  load: LoadFontFn;
   weights: number[];
 };
 
 export const FONT_REGISTRY: Record<string, FontEntry> = {
-  Montserrat:      { load: loadMontserrat,    weights: [400, 500, 600, 700, 800, 900] },
-  Inter:           { load: loadInter,          weights: [400, 500, 600, 700, 800, 900] },
-  Oswald:          { load: loadOswald,         weights: [400, 500, 600, 700] },
-  "Bebas Neue":    { load: loadBebasNeue,      weights: [400] },
-  Poppins:         { load: loadPoppins,        weights: [400, 500, 600, 700, 800, 900] },
-  Bangers:         { load: loadBangers,        weights: [400] },
-  "Space Mono":    { load: loadSpaceMono,      weights: [400, 700] },
-  "Space Grotesk": { load: loadSpaceGrotesk,   weights: [400, 500, 600, 700] },
+  Montserrat:      { load: loadMontserrat as LoadFontFn,    weights: [400, 500, 600, 700, 800, 900] },
+  Inter:           { load: loadInter as LoadFontFn,          weights: [400, 500, 600, 700, 800, 900] },
+  Oswald:          { load: loadOswald as LoadFontFn,         weights: [400, 500, 600, 700] },
+  "Bebas Neue":    { load: loadBebasNeue as LoadFontFn,      weights: [400] },
+  Poppins:         { load: loadPoppins as LoadFontFn,        weights: [400, 500, 600, 700, 800, 900] },
+  Bangers:         { load: loadBangers as LoadFontFn,        weights: [400] },
+  "Space Mono":    { load: loadSpaceMono as LoadFontFn,      weights: [400, 700] },
+  "Space Grotesk": { load: loadSpaceGrotesk as LoadFontFn,   weights: [400, 500, 600, 700] },
 };
 
 function useFontFamily(fontKey: string): string {
