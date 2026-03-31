@@ -6,7 +6,8 @@ import { Readable } from "node:stream";
 import path from "node:path";
 
 const UV_VERSION = "0.10.11";
-const UV_ARTIFACT = `uv-aarch64-apple-darwin.tar.gz`;
+const UV_ARCH = process.arch === "x64" ? "x86_64" : "aarch64";
+const UV_ARTIFACT = `uv-${UV_ARCH}-apple-darwin.tar.gz`;
 const UV_URL = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_ARTIFACT}`;
 const PYTHON_VERSION = "3.11";
 
