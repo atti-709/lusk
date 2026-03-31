@@ -10,7 +10,7 @@ import {
   access,
   unlink,
 } from "node:fs/promises";
-import { join, basename, dirname } from "node:path";
+import { join, basename, dirname, relative, resolve, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { getFFmpegPath } from "../config/ffmpeg.js";
 import AdmZip from "adm-zip";
@@ -144,7 +144,12 @@ async function fileExists(filePath: string): Promise<boolean> {
 
 function writeLuskFile(filePath: string, data: ProjectData): void {
   const zip = new AdmZip();
-  zip.addFile("project.json", Buffer.from(JSON.stringify(data, null, 2), "utf-8"));
+  // Store videoPath relative to the .lusk file so projects are portable across machines
+  const persistedData = { ...data };
+  if (persistedData.videoPath) {
+    persistedData.videoPath = relative(dirname(filePath), persistedData.videoPath);
+  }
+  zip.addFile("project.json", Buffer.from(JSON.stringify(persistedData, null, 2), "utf-8"));
   zip.writeZip(filePath);
 }
 
@@ -155,7 +160,12 @@ function readLuskFile(filePath: string): ProjectData {
     throw new Error("Invalid .lusk file: missing project.json");
   }
   const raw = entry.getData().toString("utf-8");
-  return JSON.parse(raw) as ProjectData;
+  const data = JSON.parse(raw) as ProjectData;
+  // Resolve videoPath relative to the .lusk file location (also handles legacy absolute paths)
+  if (data.videoPath && !isAbsolute(data.videoPath)) {
+    data.videoPath = resolve(dirname(filePath), data.videoPath);
+  }
+  return data;
 }
 
 // ---------------------------------------------------------------------------
