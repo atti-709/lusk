@@ -78,7 +78,7 @@ jobs:
           npm run bundle
           # Install x64 native deps into bundle for cross-build (arm64 ones already present)
           cd bundle/server
-          npm install --cpu=x64 --os=darwin @remotion/compositor-darwin-x64@4.0.424
+          npm install --force @remotion/compositor-darwin-x64@4.0.424
           # Clear quarantine & set +x on the freshly installed x64 compositor binaries
           for BIN in ffmpeg ffprobe remotion; do
             F="node_modules/@remotion/compositor-darwin-x64/$BIN"
