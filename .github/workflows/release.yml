@@ -123,37 +123,13 @@ jobs:
             codesign --verify --deep --strict "$APP" && echo "${ARCH} signature OK"
           done
 
-      - name: Repackage arm64 and publish
+      - name: Repackage and publish
         working-directory: electron
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           rm -f out/*.dmg out/*.zip out/*.blockmap
           electron-builder --publish always --prepackaged out/mac-arm64/Lusk.app
-          # Save arm64 yml before x64 publish overwrites it
-          cp out/latest-mac.yml out/latest-mac-arm64.yml
-
-      - name: Repackage x64 and publish
-        working-directory: electron
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          rm -f out/*.dmg out/*.zip out/*.blockmap
-          electron-builder --publish always --prepackaged out/mac-x64/Lusk.app
-
-      - name: Merge latest-mac.yml for multi-arch auto-update
-        working-directory: electron
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # x64 publish wrote latest-mac.yml with only x64 files.
-          # Append the arm64 file entries so electron-updater finds the right zip per arch.
-          # The "files:" array in the arm64 yml contains the sha512 and size we need.
-          # Extract everything after "files:" from the arm64 yml and append it to the x64 one.
-          ARM_FILES=$(sed -n '/^files:/,$ { /^files:/d; p; }' out/latest-mac-arm64.yml)
-          echo "$ARM_FILES" >> out/latest-mac.yml
-          TAG="v${{ steps.version.outputs.version }}"
-          gh release upload "$TAG" out/latest-mac.yml --clobber
 
       - name: Tag and push
         run: |
