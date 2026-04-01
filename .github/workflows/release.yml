@@ -128,18 +128,34 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # --prepackaged ignores --arm64/--x64 flags; override config to single-arch
+          cp electron-builder.json electron-builder.json.bak
+          node -e "
+            const fs = require('fs');
+            const c = JSON.parse(fs.readFileSync('electron-builder.json', 'utf8'));
+            c.mac.target = [{target:'dmg',arch:['arm64']},{target:'zip',arch:['arm64']}];
+            fs.writeFileSync('electron-builder.json', JSON.stringify(c, null, 2));
+          "
           rm -f out/*.dmg out/*.zip out/*.blockmap
-          electron-builder --arm64 --publish always --prepackaged out/mac-arm64/Lusk.app
-          # Save arm64 yml before x64 publish overwrites it
+          electron-builder --publish always --prepackaged out/mac-arm64/Lusk.app
           cp out/latest-mac.yml out/latest-mac-arm64.yml
+          cp electron-builder.json.bak electron-builder.json
 
       - name: Repackage x64 and publish
         working-directory: electron
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          cp electron-builder.json electron-builder.json.bak
+          node -e "
+            const fs = require('fs');
+            const c = JSON.parse(fs.readFileSync('electron-builder.json', 'utf8'));
+            c.mac.target = [{target:'dmg',arch:['x64']},{target:'zip',arch:['x64']}];
+            fs.writeFileSync('electron-builder.json', JSON.stringify(c, null, 2));
+          "
           rm -f out/*.dmg out/*.zip out/*.blockmap
-          electron-builder --x64 --publish always --prepackaged out/mac-x64/Lusk.app
+          electron-builder --publish always --prepackaged out/mac-x64/Lusk.app
+          cp electron-builder.json.bak electron-builder.json
 
       - name: Merge latest-mac.yml for multi-arch auto-update
         working-directory: electron
