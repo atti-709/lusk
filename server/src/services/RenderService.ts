@@ -232,6 +232,7 @@ class RenderService {
       hardwareAcceleration: "if-possible" as const,
       outputLocation: outputPath,
       inputProps,
+      timeoutInMilliseconds: 120_000,
       onProgress: ({ progress }: { progress: number }) => {
         const pct = 25 + Math.round(progress * 70);
         onProgress?.(pct, "Rendering video...");

@@ -99,9 +99,12 @@ jobs:
       - name: Sign arm64 app
         run: |
           APP="electron/out/mac-arm64/Lusk.app"
-          # Sign all Mach-O binaries inside-out (deepest first)
+          # Sign inside-out: dylibs, bundled executables (ffmpeg, remotion, crashpad),
+          # helper apps, frameworks, then outer app. Do NOT blanket-sign all Mach-O
+          # executables — that strips Electron's entitlements and breaks symlink access.
           find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \) -exec codesign --force --sign - {} \;
-          find "$APP" -type f -perm +111 -exec sh -c 'file "$1" | grep -q Mach-O && codesign --force --sign - "$1"' _ {} \;
+          find "$APP/Contents/Resources/bundle" -type f -perm +111 -exec sh -c 'file "$1" | grep -q Mach-O && codesign --force --sign - "$1"' _ {} \;
+          find "$APP/Contents/Frameworks" -name "chrome_crashpad_handler" -exec codesign --force --sign - {} \;
           find "$APP/Contents/Frameworks" -name "*.app" -exec codesign --force --sign - {} \;
           find "$APP/Contents/Frameworks" -name "*.framework" -exec codesign --force --sign - {} \;
           codesign --force --sign - --requirements '=designated => identifier "com.lusk.app"' "$APP"
@@ -159,9 +162,9 @@ jobs:
       - name: Sign x64 app
         run: |
           APP="electron/out/mac-x64/Lusk.app"
-          # Sign all Mach-O binaries inside-out (deepest first)
           find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \) -exec codesign --force --sign - {} \;
-          find "$APP" -type f -perm +111 -exec sh -c 'file "$1" | grep -q Mach-O && codesign --force --sign - "$1"' _ {} \;
+          find "$APP/Contents/Resources/bundle" -type f -perm +111 -exec sh -c 'file "$1" | grep -q Mach-O && codesign --force --sign - "$1"' _ {} \;
+          find "$APP/Contents/Frameworks" -name "chrome_crashpad_handler" -exec codesign --force --sign - {} \;
           find "$APP/Contents/Frameworks" -name "*.app" -exec codesign --force --sign - {} \;
           find "$APP/Contents/Frameworks" -name "*.framework" -exec codesign --force --sign - {} \;
           codesign --force --sign - --requirements '=designated => identifier "com.lusk.app"' "$APP"
