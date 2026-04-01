@@ -133,7 +133,7 @@ jobs:
       - name: Replace ffmpeg binary in x64 app
         run: |
           X64_FFMPEG="electron/out/mac-x64/Lusk.app/Contents/Resources/bundle/server/node_modules/ffmpeg-static/ffmpeg"
-          FFMPEG_TAG=$(node -p "require('$PWD/electron/out/mac-x64/Lusk.app/Contents/Resources/bundle/server/node_modules/ffmpeg-static/package.json')['ffmpeg-static']['binary-release-tag']")
+          FFMPEG_TAG=$(node -p "require('$PWD/node_modules/ffmpeg-static/package.json')['ffmpeg-static']['binary-release-tag']")
           echo "Downloading x64 ffmpeg binary (release $FFMPEG_TAG)..."
           curl -sL "https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_TAG}/ffmpeg-darwin-x64.gz" | gunzip > "$X64_FFMPEG"
           chmod +x "$X64_FFMPEG"
