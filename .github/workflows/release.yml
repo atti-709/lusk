@@ -206,8 +206,8 @@ jobs:
             const x64Files = getFiles(x64);
             const armFiles = getFiles(arm);
             // Rebuild: files header, all entries, then top-level path/sha512/releaseDate from x64
-            const topLevel = x64.split('\n').filter(l => /^(path|sha512|releaseDate):/.test(l));
-            const merged = ['files:', ...x64Files, ...armFiles, ...topLevel].join('\n') + '\n';
+            const topLevel = x64.split('\n').filter(l => /^(version|path|sha512|releaseDate):/.test(l));
+            const merged = [...topLevel.filter(l => l.startsWith('version:')), 'files:', ...x64Files, ...armFiles, ...topLevel.filter(l => !l.startsWith('version:'))].join('\n') + '\n';
             fs.writeFileSync('out/latest-mac.yml', merged);
             console.log(merged);
           "
