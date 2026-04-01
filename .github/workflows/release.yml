@@ -128,7 +128,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # --prepackaged ignores --arm64/--x64 flags; override config to single-arch
+          # --prepackaged cleans up ALL .app dirs in out/ regardless of config.
+          # Move x64 app to safety before arm64 repackage.
+          mv out/mac-x64 /tmp/mac-x64-save
           cp electron-builder.json electron-builder.json.bak
           node -e "
             const fs = require('fs');
@@ -140,6 +142,8 @@ jobs:
           electron-builder --publish always --prepackaged out/mac-arm64/Lusk.app
           cp out/latest-mac.yml out/latest-mac-arm64.yml
           cp electron-builder.json.bak electron-builder.json
+          # Restore x64 app
+          mv /tmp/mac-x64-save out/mac-x64
 
       - name: Repackage x64 and publish
         working-directory: electron
