@@ -133,13 +133,19 @@ jobs:
 
       - name: Replace ffmpeg binary in x64 app
         run: |
-          X64_FFMPEG="electron/out/mac-x64/Lusk.app/Contents/Resources/bundle/server/node_modules/ffmpeg-static/ffmpeg"
+          # Find the ffmpeg-static binary inside the x64 app bundle
+          X64_FFMPEG=$(find electron/out/mac-x64/Lusk.app -path "*/ffmpeg-static/ffmpeg" -type f 2>/dev/null | head -1)
+          if [ -z "$X64_FFMPEG" ]; then
+            echo "::warning::ffmpeg-static binary not found in x64 app — skipping replacement"
+            exit 0
+          fi
+          echo "Found ffmpeg at: $X64_FFMPEG ($(file "$X64_FFMPEG"))"
           FFMPEG_TAG=$(node -p "require('$PWD/node_modules/ffmpeg-static/package.json')['ffmpeg-static']['binary-release-tag']")
           echo "Downloading x64 ffmpeg binary (release $FFMPEG_TAG)..."
           curl -sL "https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_TAG}/ffmpeg-darwin-x64.gz" | gunzip > "$X64_FFMPEG"
           chmod +x "$X64_FFMPEG"
           xattr -dr com.apple.quarantine "$X64_FFMPEG" 2>/dev/null || true
-          echo "x64 ffmpeg binary replaced: $(file "$X64_FFMPEG")"
+          echo "Replaced: $(file "$X64_FFMPEG")"
 
       - name: Sign x64 app
         run: |
