@@ -74,13 +74,19 @@ jobs:
         working-directory: electron
         run: |
           npm run bundle
-          # Install x64 Remotion compositor into bundle for cross-build
           cd bundle/server
-          npm install --force @remotion/compositor-darwin-x64@4.0.424
+          # Install x64 native bindings for cross-build (CI runs on arm64)
+          REMOTION_VER=$(node -p "require('./node_modules/@remotion/renderer/package.json').version")
+          npm install --force @remotion/compositor-darwin-x64@$REMOTION_VER
           for BIN in ffmpeg ffprobe remotion; do
             F="node_modules/@remotion/compositor-darwin-x64/$BIN"
             [ -f "$F" ] && xattr -dr com.apple.quarantine "$F" 2>/dev/null; chmod +x "$F"
           done
+          # rspack binding (pulled in by @remotion/bundler via @rspack/core)
+          if [ -d "node_modules/@rspack/binding" ]; then
+            RSPACK_VER=$(node -p "require('./node_modules/@rspack/binding/package.json').version")
+            npm install --force @rspack/binding-darwin-x64@$RSPACK_VER
+          fi
 
       # ── ARM64 build ────────────────────────────────────────────────
       - name: Build arm64
