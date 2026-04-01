@@ -187,10 +187,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # x64 publish wrote latest-mac.yml with only x64 files.
-          # Append the arm64 file entries so electron-updater picks the right zip per arch.
-          ARM_FILES=$(sed -n '/^files:/,$ { /^files:/d; p; }' /tmp/latest-mac-arm64.yml)
-          echo "$ARM_FILES" >> out/latest-mac.yml
+          node -e "
+            const fs = require('fs');
+            const x64 = fs.readFileSync('out/latest-mac.yml', 'utf8');
+            const arm = fs.readFileSync('/tmp/latest-mac-arm64.yml', 'utf8');
+            // Extract indented file entries (lines starting with '  - url:' or '    ')
+            const getFiles = (yml) => {
+              const lines = yml.split('\n');
+              const start = lines.findIndex(l => l.startsWith('files:'));
+              if (start < 0) return [];
+              const entries = [];
+              for (let i = start + 1; i < lines.length; i++) {
+                if (/^\s/.test(lines[i])) entries.push(lines[i]);
+                else break;
+              }
+              return entries;
+            };
+            const x64Files = getFiles(x64);
+            const armFiles = getFiles(arm);
+            // Rebuild: files header, all entries, then top-level path/sha512/releaseDate from x64
+            const topLevel = x64.split('\n').filter(l => /^(path|sha512|releaseDate):/.test(l));
+            const merged = ['files:', ...x64Files, ...armFiles, ...topLevel].join('\n') + '\n';
+            fs.writeFileSync('out/latest-mac.yml', merged);
+            console.log(merged);
+          "
           TAG="v${{ steps.version.outputs.version }}"
           gh release upload "$TAG" out/latest-mac.yml --clobber
 
