@@ -75,9 +75,13 @@ jobs:
         run: |
           npm run bundle
           cd bundle/server
-          # Install x64 native bindings for cross-build (CI runs on arm64)
+          # Install x64 native bindings for cross-build (CI runs on arm64).
+          # Use a temp dir for npm install to avoid modifying the main node_modules tree.
           REMOTION_VER=$(node -p "require('./node_modules/@remotion/renderer/package.json').version")
-          npm install --force @remotion/compositor-darwin-x64@$REMOTION_VER
+          X64_TMP=$(mktemp -d)
+          echo '{}' > "$X64_TMP/package.json"
+          npm install --prefix "$X64_TMP" --force @remotion/compositor-darwin-x64@$REMOTION_VER
+          cp -R "$X64_TMP/node_modules/@remotion/compositor-darwin-x64" node_modules/@remotion/compositor-darwin-x64
           for BIN in ffmpeg ffprobe remotion; do
             F="node_modules/@remotion/compositor-darwin-x64/$BIN"
             [ -f "$F" ] && xattr -dr com.apple.quarantine "$F" 2>/dev/null; chmod +x "$F"
@@ -85,8 +89,10 @@ jobs:
           # rspack binding (pulled in by @remotion/bundler via @rspack/core)
           if [ -d "node_modules/@rspack/binding" ]; then
             RSPACK_VER=$(node -p "require('./node_modules/@rspack/binding/package.json').version")
-            npm install --force @rspack/binding-darwin-x64@$RSPACK_VER
+            npm install --prefix "$X64_TMP" --force @rspack/binding-darwin-x64@$RSPACK_VER
+            cp -R "$X64_TMP/node_modules/@rspack/binding-darwin-x64" node_modules/@rspack/binding-darwin-x64
           fi
+          rm -rf "$X64_TMP"
 
       # ── ARM64 build ────────────────────────────────────────────────
       - name: Build arm64
