@@ -116,7 +116,7 @@ jobs:
           cp out/latest-mac.yml /tmp/latest-mac-arm64.yml
 
       # ── X64 build ──────────────────────────────────────────────────
-      - name: Build x64
+      - name: Build x64 (unpackaged)
         working-directory: electron
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -124,16 +124,23 @@ jobs:
           node -e "
             const fs = require('fs');
             const c = JSON.parse(fs.readFileSync('electron-builder.json', 'utf8'));
-            c.mac.target = [{target:'dmg',arch:['x64']},{target:'zip',arch:['x64']}];
+            c.mac.target = [{target:'dir',arch:['x64']}];
             fs.writeFileSync('electron-builder.json', JSON.stringify(c, null, 2));
           "
           # Clean previous build output (arm64 was already published)
-          rm -rf out/mac-arm64 out/*.dmg out/*.zip out/*.blockmap
+          rm -rf out
           electron-builder --publish never
+          # Discover the actual .app path (may be mac/, mac-x64/, etc.)
+          X64_APP=$(find out -name "Lusk.app" -maxdepth 2 | head -1)
+          echo "X64 app at: $X64_APP"
+          # Normalize to expected path for subsequent steps
+          if [ "$X64_APP" != "out/mac-x64/Lusk.app" ]; then
+            mkdir -p out/mac-x64
+            mv "$X64_APP" out/mac-x64/Lusk.app
+          fi
 
       - name: Replace ffmpeg binary in x64 app
         run: |
-          # Find the ffmpeg-static binary inside the x64 app bundle
           X64_FFMPEG=$(find electron/out/mac-x64/Lusk.app -path "*/ffmpeg-static/ffmpeg" -type f 2>/dev/null | head -1)
           if [ -z "$X64_FFMPEG" ]; then
             echo "::warning::ffmpeg-static binary not found in x64 app — skipping replacement"
@@ -161,7 +168,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          rm -f out/*.dmg out/*.zip out/*.blockmap
+          # Restore config to x64 dmg+zip targets for --prepackaged
+          node -e "
+            const fs = require('fs');
+            const c = JSON.parse(fs.readFileSync('electron-builder.json', 'utf8'));
+            c.mac.target = [{target:'dmg',arch:['x64']},{target:'zip',arch:['x64']}];
+            fs.writeFileSync('electron-builder.json', JSON.stringify(c, null, 2));
+          "
           electron-builder --publish always --prepackaged out/mac-x64/Lusk.app
 
       # ── Finalize ───────────────────────────────────────────────────
