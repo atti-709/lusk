@@ -20,10 +20,9 @@
     "category": "public.app-category.video",
     "icon": "resources/icon.icns",
     "target": [
-      { "target": "dmg", "arch": ["arm64", "x64"] },
-      { "target": "zip", "arch": ["arm64", "x64"] }
+      { "target": "dmg", "arch": ["arm64"] },
+      { "target": "zip", "arch": ["arm64"] }
     ],
-    "minimumSystemVersion": "12.0",
     "identity": null,
     "extendInfo": {
       "CFBundleDocumentTypes": [

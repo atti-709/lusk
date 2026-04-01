@@ -70,168 +70,38 @@ jobs:
       - name: Build all workspaces including Electron
         run: npm run build:electron
 
-      - name: Bundle
-        working-directory: electron
-        run: |
-          npm run bundle
-          cd bundle/server
-          # Install x64 native bindings for cross-build (CI runs on arm64).
-          # Use a temp dir for npm install to avoid modifying the main node_modules tree.
-          REMOTION_VER=$(node -p "require('./node_modules/@remotion/renderer/package.json').version")
-          X64_TMP=$(mktemp -d)
-          echo '{}' > "$X64_TMP/package.json"
-          npm install --prefix "$X64_TMP" --force @remotion/compositor-darwin-x64@$REMOTION_VER
-          cp -R "$X64_TMP/node_modules/@remotion/compositor-darwin-x64" node_modules/@remotion/compositor-darwin-x64
-          for BIN in ffmpeg ffprobe remotion; do
-            F="node_modules/@remotion/compositor-darwin-x64/$BIN"
-            [ -f "$F" ] && xattr -dr com.apple.quarantine "$F" 2>/dev/null; chmod +x "$F"
-          done
-          # rspack binding (pulled in by @remotion/bundler via @rspack/core)
-          if [ -d "node_modules/@rspack/binding" ]; then
-            RSPACK_VER=$(node -p "require('./node_modules/@rspack/binding/package.json').version")
-            npm install --prefix "$X64_TMP" --force @rspack/binding-darwin-x64@$RSPACK_VER
-            cp -R "$X64_TMP/node_modules/@rspack/binding-darwin-x64" node_modules/@rspack/binding-darwin-x64
-          fi
-          rm -rf "$X64_TMP"
-
-      # ── ARM64 build ────────────────────────────────────────────────
-      - name: Build arm64
+      - name: Bundle and build (unsigned)
         working-directory: electron
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: |
-          node -e "
-            const fs = require('fs');
-            const c = JSON.parse(fs.readFileSync('electron-builder.json', 'utf8'));
-            c.mac.target = [{target:'dmg',arch:['arm64']},{target:'zip',arch:['arm64']}];
-            fs.writeFileSync('electron-builder.json', JSON.stringify(c, null, 2));
-          "
-          electron-builder --publish never
+        run: npm run bundle && electron-builder --publish never
 
-      - name: Sign arm64 app
+      - name: Sign app with stable designated requirement
         run: |
           APP="electron/out/mac-arm64/Lusk.app"
-          # Sign inside-out: dylibs, bundled executables (ffmpeg, remotion, crashpad),
-          # helper apps, frameworks, then outer app. Do NOT blanket-sign all Mach-O
-          # executables — that strips Electron's entitlements and breaks symlink access.
-          find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \) -exec codesign --force --sign - {} \;
-          find "$APP/Contents/Resources/bundle" -type f -perm +111 -exec sh -c 'file "$1" | grep -q Mach-O && codesign --force --sign - "$1"' _ {} \;
-          find "$APP/Contents/Frameworks" -name "chrome_crashpad_handler" -exec codesign --force --sign - {} \;
-          find "$APP/Contents/Frameworks" -name "*.app" -exec codesign --force --sign - {} \;
-          find "$APP/Contents/Frameworks" -name "*.framework" -exec codesign --force --sign - {} \;
-          codesign --force --sign - --requirements '=designated => identifier "com.lusk.app"' "$APP"
-          codesign --verify --deep --strict "$APP" && echo "arm64 signature OK"
 
-      - name: Publish arm64
+          # Sign from inside out (Electron requires this order)
+          # 1. All dylibs
+          find "$APP" -name "*.dylib" -exec codesign --force --sign - {} \;
+          # 2. Helper apps
+          find "$APP/Contents/Frameworks" -name "*.app" -exec codesign --force --sign - {} \;
+          # 3. All frameworks
+          find "$APP/Contents/Frameworks" -name "*.framework" -exec codesign --force --sign - {} \;
+          # 4. Outer app with custom designated requirement
+          codesign --force --sign - \
+            --requirements '=designated => identifier "com.lusk.app"' \
+            "$APP"
+
+          # Verify
+          codesign --verify --deep --strict "$APP" && echo "Signature OK"
+
+      - name: Repackage and publish
         working-directory: electron
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          rm -f out/*.dmg out/*.zip out/*.blockmap
+          rm -f out/*.dmg out/*.zip
           electron-builder --publish always --prepackaged out/mac-arm64/Lusk.app
-          # Save arm64 yml outside out/ — x64 build may wipe out/ entirely
-          cp out/latest-mac.yml /tmp/latest-mac-arm64.yml
-
-      # ── X64 build ──────────────────────────────────────────────────
-      - name: Build x64 (unpackaged)
-        working-directory: electron
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: |
-          node -e "
-            const fs = require('fs');
-            const c = JSON.parse(fs.readFileSync('electron-builder.json', 'utf8'));
-            c.mac.target = [{target:'dir',arch:['x64']}];
-            fs.writeFileSync('electron-builder.json', JSON.stringify(c, null, 2));
-          "
-          # Clean previous build output (arm64 was already published)
-          rm -rf out
-          electron-builder --publish never
-          # Discover the actual .app path (may be mac/, mac-x64/, etc.)
-          X64_APP=$(find out -name "Lusk.app" -maxdepth 2 | head -1)
-          echo "X64 app at: $X64_APP"
-          # Normalize to expected path for subsequent steps
-          if [ "$X64_APP" != "out/mac-x64/Lusk.app" ]; then
-            mkdir -p out/mac-x64
-            mv "$X64_APP" out/mac-x64/Lusk.app
-          fi
-
-      - name: Replace ffmpeg binary in x64 app
-        run: |
-          X64_FFMPEG=$(find electron/out/mac-x64/Lusk.app -path "*/ffmpeg-static/ffmpeg" -type f 2>/dev/null | head -1)
-          if [ -z "$X64_FFMPEG" ]; then
-            echo "::warning::ffmpeg-static binary not found in x64 app — skipping replacement"
-            exit 0
-          fi
-          echo "Found ffmpeg at: $X64_FFMPEG ($(file "$X64_FFMPEG"))"
-          FFMPEG_TAG=$(node -p "require('$PWD/node_modules/ffmpeg-static/package.json')['ffmpeg-static']['binary-release-tag']")
-          echo "Downloading x64 ffmpeg binary (release $FFMPEG_TAG)..."
-          curl -sL "https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_TAG}/ffmpeg-darwin-x64.gz" | gunzip > "$X64_FFMPEG"
-          chmod +x "$X64_FFMPEG"
-          xattr -dr com.apple.quarantine "$X64_FFMPEG" 2>/dev/null || true
-          echo "Replaced: $(file "$X64_FFMPEG")"
-
-      - name: Sign x64 app
-        run: |
-          APP="electron/out/mac-x64/Lusk.app"
-          find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \) -exec codesign --force --sign - {} \;
-          find "$APP/Contents/Resources/bundle" -type f -perm +111 -exec sh -c 'file "$1" | grep -q Mach-O && codesign --force --sign - "$1"' _ {} \;
-          find "$APP/Contents/Frameworks" -name "chrome_crashpad_handler" -exec codesign --force --sign - {} \;
-          find "$APP/Contents/Frameworks" -name "*.app" -exec codesign --force --sign - {} \;
-          find "$APP/Contents/Frameworks" -name "*.framework" -exec codesign --force --sign - {} \;
-          codesign --force --sign - --requirements '=designated => identifier "com.lusk.app"' "$APP"
-          codesign --verify --deep --strict "$APP" && echo "x64 signature OK"
-
-      - name: Publish x64
-        working-directory: electron
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Restore config to x64 dmg+zip targets for --prepackaged
-          node -e "
-            const fs = require('fs');
-            const c = JSON.parse(fs.readFileSync('electron-builder.json', 'utf8'));
-            c.mac.target = [{target:'dmg',arch:['x64']},{target:'zip',arch:['x64']}];
-            fs.writeFileSync('electron-builder.json', JSON.stringify(c, null, 2));
-          "
-          electron-builder --publish always --prepackaged out/mac-x64/Lusk.app
-
-      # ── Finalize ───────────────────────────────────────────────────
-      - name: Merge latest-mac.yml for multi-arch auto-update
-        working-directory: electron
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          node -e "
-            const fs = require('fs');
-            const x64 = fs.readFileSync('out/latest-mac.yml', 'utf8');
-            const arm = fs.readFileSync('/tmp/latest-mac-arm64.yml', 'utf8');
-            // Extract indented file entries (lines starting with '  - url:' or '    ')
-            const getFiles = (yml) => {
-              const lines = yml.split('\n');
-              const start = lines.findIndex(l => l.startsWith('files:'));
-              if (start < 0) return [];
-              const entries = [];
-              for (let i = start + 1; i < lines.length; i++) {
-                if (/^\s/.test(lines[i])) entries.push(lines[i]);
-                else break;
-              }
-              return entries;
-            };
-            const x64Files = getFiles(x64);
-            const armFiles = getFiles(arm);
-            // Rebuild: files header, all entries, then top-level path/sha512/releaseDate from x64
-            const topLevel = x64.split('\n').filter(l => /^(version|path|sha512|releaseDate):/.test(l));
-            const merged = [...topLevel.filter(l => l.startsWith('version:')), 'files:', ...x64Files, ...armFiles, ...topLevel.filter(l => !l.startsWith('version:'))].join('\n') + '\n';
-            fs.writeFileSync('out/latest-mac.yml', merged);
-            console.log(merged);
-          "
-          TAG="v${{ steps.version.outputs.version }}"
-          gh release upload "$TAG" out/latest-mac.yml --clobber
-
-      - name: Restore electron-builder.json
-        working-directory: electron
-        run: git checkout electron-builder.json
 
       - name: Tag and push
         run: |
