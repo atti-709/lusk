@@ -50,7 +50,7 @@ function useFontFamily(fontKey: string): string {
 // How often captions switch — controls words per page
 const SWITCH_CAPTIONS_EVERY_MS = 1200;
 const SHADOW =
-  "0 1px 4px rgba(0,0,0,0.6), 0 0 12px rgba(0,0,0,0.3)";
+  "0 0 6px rgba(0,0,0,0.8), 0 0 16px rgba(0,0,0,0.5), 0 0 30px rgba(0,0,0,0.3)";
 
 function CaptionPage({ page, styles, fontFamily }: { page: TikTokPage; styles: CaptionStyles; fontFamily: string }) {
   const frame = useCurrentFrame();
