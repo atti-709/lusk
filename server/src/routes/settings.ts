@@ -30,6 +30,7 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
       transcriptionLanguage: settings.transcriptionLanguage ?? "sk",
       correctionPrompt: settings.correctionPrompt ?? null,
       viralClipsPrompt: settings.viralClipsPrompt ?? null,
+      viralClipsManualPrompt: settings.viralClipsManualPrompt ?? null,
       fps: settings.fps ?? 23.976,
       outroOverlapFrames: settings.outroOverlapFrames ?? 4,
       outroSet,
@@ -39,11 +40,12 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
   });
 
   server.get("/api/settings/default-prompts", async () => {
-    const [correctionPrompt, viralClipsPrompt] = await Promise.all([
+    const [correctionPrompt, viralClipsPrompt, viralClipsManualPrompt] = await Promise.all([
       settingsService.getDefaultCorrectionPrompt(),
       settingsService.getDefaultViralClipsPrompt(),
+      settingsService.getDefaultViralClipsManualPrompt(),
     ]);
-    return { correctionPrompt, viralClipsPrompt };
+    return { correctionPrompt, viralClipsPrompt, viralClipsManualPrompt };
   });
 
   server.put<{
@@ -52,6 +54,7 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
       transcriptionLanguage?: string;
       correctionPrompt?: string | null;
       viralClipsPrompt?: string | null;
+      viralClipsManualPrompt?: string | null;
       fps?: number;
       outroOverlapFrames?: number;
       outroEnabled?: boolean;
@@ -67,7 +70,7 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
     };
   }>("/api/settings", async (request) => {
     const current = await settingsService.load();
-    const { geminiApiKey, transcriptionLanguage, correctionPrompt, viralClipsPrompt, fps, outroOverlapFrames, outroEnabled, captionStyles } =
+    const { geminiApiKey, transcriptionLanguage, correctionPrompt, viralClipsPrompt, viralClipsManualPrompt, fps, outroOverlapFrames, outroEnabled, captionStyles } =
       request.body ?? {};
 
     if (geminiApiKey !== undefined) {
@@ -82,6 +85,9 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
     }
     if (viralClipsPrompt !== undefined) {
       current.viralClipsPrompt = viralClipsPrompt ?? undefined;
+    }
+    if (viralClipsManualPrompt !== undefined) {
+      current.viralClipsManualPrompt = viralClipsManualPrompt ?? undefined;
     }
     if (fps !== undefined && VALID_FPS.includes(fps)) {
       current.fps = fps;

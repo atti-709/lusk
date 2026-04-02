@@ -26,7 +26,8 @@ const FPS_OPTIONS = [
 
 const PROMPT_FIELDS = [
   { key: "correctionPrompt", label: "Correction Prompt", hint: "System prompt for transcript correction via Gemini" },
-  { key: "viralClipsPrompt", label: "Viral Clips Prompt", hint: "System prompt for viral clip detection via Gemini" },
+  { key: "viralClipsPrompt", label: "Viral Clips Prompt (API)", hint: "System prompt for automatic viral clip detection via Gemini API" },
+  { key: "viralClipsManualPrompt", label: "Viral Clips Prompt (Manual)", hint: "Prompt shown in the Align step for manual copy-paste to Gemini" },
 ] as const;
 
 type PromptKey = (typeof PROMPT_FIELDS)[number]["key"];
@@ -44,10 +45,12 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
   const [prompts, setPrompts] = useState<Record<PromptKey, string | null>>({
     correctionPrompt: null,
     viralClipsPrompt: null,
+    viralClipsManualPrompt: null,
   });
   const [defaults, setDefaults] = useState<Record<PromptKey, string>>({
     correctionPrompt: "",
     viralClipsPrompt: "",
+    viralClipsManualPrompt: "",
   });
   const [expandedPrompt, setExpandedPrompt] = useState<PromptKey | null>(null);
 
@@ -65,10 +68,12 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
         setPrompts({
           correctionPrompt: settings.correctionPrompt ?? null,
           viralClipsPrompt: settings.viralClipsPrompt ?? null,
+          viralClipsManualPrompt: settings.viralClipsManualPrompt ?? null,
         });
         setDefaults({
           correctionPrompt: defaultPrompts.correctionPrompt,
           viralClipsPrompt: defaultPrompts.viralClipsPrompt,
+          viralClipsManualPrompt: defaultPrompts.viralClipsManualPrompt,
         });
       })
       .catch(() => {});

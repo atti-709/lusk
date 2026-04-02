@@ -14,6 +14,9 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
   const [viralText, setViralText] = useState("");
   const [correctionPrompt, setCorrectionPrompt] = useState("");
   const [viralClipPrompt, setViralClipPrompt] = useState("");
+  const [viralClipPromptDefault, setViralClipPromptDefault] = useState("");
+  const [viralClipPromptDirty, setViralClipPromptDirty] = useState(false);
+  const [viralClipPromptSaved, setViralClipPromptSaved] = useState<string | null>(null);
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [submitError, setSubmitError] = useState("");
   const [videoName, setVideoName] = useState("project");
@@ -21,25 +24,28 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
 
   // Fetch prompts: use custom prompts from settings, fall back to static defaults
   useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((settings) => {
-        const fetchDefault = (path: string) => fetch(path).then((r) => r.text());
-        if (settings.correctionPrompt) {
-          setCorrectionPrompt(settings.correctionPrompt);
-        } else {
-          fetchDefault("/prompts/correction-manual.md").then(setCorrectionPrompt).catch(() => {});
-        }
-        if (settings.viralClipsPrompt) {
-          setViralClipPrompt(settings.viralClipsPrompt);
-        } else {
-          fetchDefault("/prompts/viral-clips-manual.md").then(setViralClipPrompt).catch(() => {});
-        }
+    Promise.all([
+      fetch("/api/settings").then((r) => r.json()),
+      fetch("/api/settings/default-prompts").then((r) => r.json()),
+    ])
+      .then(([settings, defaults]) => {
+        // Correction prompt (read-only display)
+        setCorrectionPrompt(settings.correctionPrompt ?? defaults.correctionPrompt ?? "");
+
+        // Viral clips manual prompt (editable)
+        const savedManual = settings.viralClipsManualPrompt ?? null;
+        const defaultManual = defaults.viralClipsManualPrompt ?? "";
+        setViralClipPromptDefault(defaultManual);
+        setViralClipPromptSaved(savedManual);
+        setViralClipPrompt(savedManual ?? defaultManual);
       })
       .catch(() => {
         // Fallback: load static defaults
         fetch("/prompts/correction-manual.md").then((r) => r.text()).then(setCorrectionPrompt).catch(() => {});
-        fetch("/prompts/viral-clips-manual.md").then((r) => r.text()).then(setViralClipPrompt).catch(() => {});
+        fetch("/prompts/viral-clips-manual.md").then((r) => r.text()).then((text) => {
+          setViralClipPrompt(text);
+          setViralClipPromptDefault(text);
+        }).catch(() => {});
       });
   }, []);
 
@@ -120,6 +126,28 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
     setter(true);
     setTimeout(() => setter(false), 2000);
   }, []);
+
+  const handleSaveViralPrompt = useCallback(async () => {
+    const value = viralClipPrompt === viralClipPromptDefault ? null : viralClipPrompt;
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ viralClipsManualPrompt: value }),
+    });
+    setViralClipPromptSaved(value);
+    setViralClipPromptDirty(false);
+  }, [viralClipPrompt, viralClipPromptDefault]);
+
+  const handleResetViralPrompt = useCallback(async () => {
+    setViralClipPrompt(viralClipPromptDefault);
+    setViralClipPromptDirty(false);
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ viralClipsManualPrompt: null }),
+    });
+    setViralClipPromptSaved(null);
+  }, [viralClipPromptDefault]);
 
   const handleSubmitClips = useCallback(async () => {
     setSubmitStatus("submitting");
@@ -249,17 +277,38 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
         <div className="align-section-header">
           <span className="align-section-number">4</span>
           <h3>Find Viral Clips with Gemini</h3>
+          {viralClipPromptSaved !== null && <span className="align-badge">Custom</span>}
         </div>
         <p className="align-section-desc">
-          Paste this as your next message in the same Gemini chat.
+          Edit the prompt below, then copy and paste it as your next message in the same Gemini chat.
         </p>
-        <pre className="align-prompt-box">{viralClipPrompt}</pre>
-        <button
-          className="secondary"
-          onClick={() => handleCopyPrompt(viralClipPrompt, setViralCopied)}
-        >
-          {viralCopied ? "✓ Copied!" : "Copy Prompt"}
-        </button>
+        <textarea
+          className="align-textarea align-prompt-textarea"
+          value={viralClipPrompt}
+          onChange={(e) => {
+            setViralClipPrompt(e.target.value);
+            setViralClipPromptDirty(true);
+          }}
+          rows={12}
+        />
+        <div className="align-prompt-actions">
+          <button
+            className="secondary"
+            onClick={() => handleCopyPrompt(viralClipPrompt, setViralCopied)}
+          >
+            {viralCopied ? "✓ Copied!" : "Copy Prompt"}
+          </button>
+          {viralClipPromptDirty && (
+            <button className="primary" onClick={handleSaveViralPrompt}>
+              Save Prompt
+            </button>
+          )}
+          {viralClipPromptSaved !== null && (
+            <button className="secondary" onClick={handleResetViralPrompt}>
+              Reset to Default
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Section 5: Paste Viral Clips */}

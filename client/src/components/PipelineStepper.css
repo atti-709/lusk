@@ -286,6 +286,31 @@
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+.align-prompt-textarea {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  font-family: var(--font-mono, monospace);
+}
+
+.align-prompt-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.align-badge {
+  font-size: 0.65rem;
+  background: var(--accent, #4f8cff);
+  color: #fff;
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  margin-left: 0.5rem;
+}
+
 .align-status {
   font-size: 0.8rem;
   margin: 0;

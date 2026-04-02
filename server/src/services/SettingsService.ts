@@ -10,6 +10,7 @@ export interface AppSettings {
   transcriptionLanguage?: TranscriptionLanguage;
   correctionPrompt?: string;
   viralClipsPrompt?: string;
+  viralClipsManualPrompt?: string;
   fps?: number;
   outroOverlapFrames?: number;
   outroEnabled?: boolean;
@@ -83,8 +84,19 @@ class SettingsService {
     return readFile(promptPath, "utf-8");
   }
 
+  async getViralClipsManualPrompt(): Promise<string> {
+    const settings = await this.load();
+    if (settings.viralClipsManualPrompt) return settings.viralClipsManualPrompt;
+    return this.getDefaultViralClipsManualPrompt();
+  }
+
   async getDefaultViralClipsPrompt(): Promise<string> {
     const promptPath = join(getClientPublicDir(), "prompts", "viral-clips-api.md");
+    return readFile(promptPath, "utf-8");
+  }
+
+  async getDefaultViralClipsManualPrompt(): Promise<string> {
+    const promptPath = join(getClientPublicDir(), "prompts", "viral-clips-manual.md");
     return readFile(promptPath, "utf-8");
   }
 
