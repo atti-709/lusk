@@ -45,8 +45,11 @@
 
 ### **3. Viral Clip Detection (Server Side)**
 
-* **Status:** The LLM service has been removed. Viral clip suggestions are no longer generated automatically; clips are added manually by the user via the UI.
-* **Legacy:** `server/models/meta-llama-3-8b-instruct.Q4_K_M.gguf` is a leftover and is not loaded.
+* **Tool:** Gemini Flash API via `GeminiService.ts` (`/server/src/services/GeminiService.ts`).
+* **Flow:** After transcription/correction, Gemini analyzes the transcript and suggests 4-8 viral clip candidates.
+* **Prompt:** `client/public/prompts/viral-clips-api.md` — instructs Gemini to find 10-30 second segments optimized for Instagram Reels.
+* **Users can also add clips manually** via the UI.
+* **Legacy:** `server/models/meta-llama-3-8b-instruct.Q4_K_M.gguf` is a leftover from the previous offline LLM approach and is not loaded.
 
 ### **4. Text Correction (Server Side)**
 

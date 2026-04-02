@@ -6,9 +6,9 @@ Based on the corrected transcript, identify 4-8 segments that would make the mos
 
 ## Duration Requirements (CRITICAL)
 
-Each clip MUST be **20-60 seconds long**, with **25-35 seconds being the sweet spot**. Clips shorter than 18 seconds are REJECTED — they feel rushed and unfinished.
+Each clip MUST be **10-30 seconds long**, with **15-25 seconds being the sweet spot**. Clips shorter than 10 seconds or longer than 30 seconds are REJECTED — shorter clips feel rushed and unfinished, longer clips lose viewer retention on Instagram Reels.
 
-**How to hit 20-30 seconds:** After choosing a start point, scan forward ~25 seconds in the TSV timestamps before deciding where to end. Do NOT stop at the first punchline if you're only 8-12 seconds in — keep going to build a complete narrative arc.
+**How to hit 15-25 seconds:** After choosing a start point, scan forward ~20 seconds in the TSV timestamps before deciding where to end. Do NOT stop at the first punchline if you're only 5 seconds in — keep going to build a complete narrative arc. But do NOT pad beyond the natural conclusion just to fill time.
 
 ## Content Selection
 
@@ -19,7 +19,7 @@ Look for segments that contain:
 - Surprising facts or revelations
 - Moments with high energy or passion
 
-**Prefer longer, meatier segments** that tell a complete mini-story over short zingers. A 25-second clip with context + punchline always outperforms a 10-second soundbite.
+**Prefer complete segments** that tell a mini-story over short zingers. A 20-second clip with context + punchline always outperforms a 5-second soundbite.
 
 ## Clip Boundaries
 
@@ -48,4 +48,4 @@ Takeaway: ...
 Start: ...
 End: ...
 
-IMPORTANT: Verify that (1) the exact text between your chosen Start and End timestamps forms a complete, logical, and satisfying narrative from start to finish, (2) the duration is at least 20 seconds, and (3) the clip contains a clear takeaway. Use the exact timestamps from the TSV file. Do not approximate.
+IMPORTANT: Verify that (1) the exact text between your chosen Start and End timestamps forms a complete, logical, and satisfying narrative from start to finish, (2) the duration is between 10-30 seconds, and (3) the clip contains a clear takeaway. Use the exact timestamps from the TSV file. Do not approximate.
