@@ -84,7 +84,7 @@ export interface CaptionStyles {
 export const DEFAULT_CAPTION_STYLES: CaptionStyles = {
   fontSize: 56,
   fontFamily: "Space Grotesk",
-  highlightColor: "#e8451f",
+  highlightColor: "#FF4F26",
   textColor: "#faf9f8",
   textTransform: "uppercase",
   captionPosition: 400,
