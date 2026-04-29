@@ -7,7 +7,8 @@ import { orchestrator } from "../services/Orchestrator.js";
 import { tempManager } from "../services/TempManager.js";
 import { renderService } from "../services/RenderService.js";
 import { settingsService } from "../services/SettingsService.js";
-import type { RenderRequest, ErrorResponse, CaptionWord } from "@lusk/shared";
+import type { RenderRequest, ErrorResponse, CaptionWord, ClipSegment } from "@lusk/shared";
+import { getClipRenderKey } from "@lusk/shared";
 
 const RENDER_LOG = "/tmp/lusk-render.log";
 function routeLog(msg: string): void {
@@ -19,8 +20,8 @@ function routeLog(msg: string): void {
 /** Active render cancel functions, keyed by sessionId (one render per session at a time). */
 const activeRenderCancels = new Map<string, { cancel: () => void; clipKey: string }>();
 
-function clipKey(clip: { startMs: number; endMs: number }): string {
-  return `${clip.startMs}-${clip.endMs}`;
+function clipKey(clip: { startMs: number; endMs: number; segments?: ClipSegment[] }): string {
+  return getClipRenderKey(clip);
 }
 
 async function runRender(

@@ -17,37 +17,43 @@ export const COMP_FPS = 23.976;
 /** Frames by which the outro overlaps the end of the main clip. */
 export const OUTRO_OVERLAP_FRAMES = 4;
 
-function ClipVideo({
+export type CompSegment = {
+  /** Frame in the source video where this segment starts. */
+  startFromInFrames: number;
+  /** Length of this segment in output frames. */
+  durationInFrames: number;
+};
+
+function ClipSegmentVideo({
   src,
-  startFrom,
+  startFromInFrames,
+  durationInFrames,
   offsetX,
-  clipDurationInFrames,
+  fadeOut,
   sourceAspectRatio,
 }: {
   src: string;
-  startFrom: number;
+  startFromInFrames: number;
+  durationInFrames: number;
   offsetX: number;
-  clipDurationInFrames: number;
+  fadeOut: boolean;
   sourceAspectRatio?: number | null;
 }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const fadeStartFrame = clipDurationInFrames - Math.round(fps);
-  const volume = interpolate(
-    frame,
-    [fadeStartFrame, clipDurationInFrames - 1],
-    [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-  );
 
-  // Portrait source (aspect ratio < 1, e.g. 9:16): already fills the vertical frame.
-  // Landscape source (aspect ratio >= 1 or unknown): scale width so the video fills the
-  // full composition height, then center with optional horizontal pan (offsetX).
+  // Audio fades out only at the very end of the clip (last segment).
+  const fadeStartFrame = durationInFrames - Math.round(fps);
+  const volume = fadeOut
+    ? interpolate(
+        frame,
+        [fadeStartFrame, durationInFrames - 1],
+        [1, 0],
+        { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+      )
+    : 1;
+
   const isPortrait = sourceAspectRatio != null && sourceAspectRatio < 1;
-
-  // Width needed (as % of COMP_WIDTH) for a landscape video to fill the composition height:
-  //   COMP_HEIGHT * sourceAspectRatio / COMP_WIDTH * 100
-  // For 16:9 in 1080×1920 this is ~316%. Fall back to 316% (16:9 assumption) when unknown.
   const landscapeWidthPct =
     sourceAspectRatio != null
       ? (COMP_HEIGHT * sourceAspectRatio / COMP_WIDTH) * 100
@@ -71,8 +77,9 @@ function ClipVideo({
         transform: `translateX(calc(-50% + ${offsetX}px))`,
       };
 
+  // Negative-from trick: shifts the video so playback begins at startFromInFrames.
   return (
-    <Sequence from={-startFrom}>
+    <Sequence from={-startFromInFrames}>
       <OffthreadVideo
         src={src}
         volume={volume}
@@ -97,6 +104,9 @@ export type VideoCompositionProps = {
   videoUrl: string;
   captions: Caption[];
   offsetX: number;
+  /** Multi-cut segments (canonical). When absent, falls back to startFrom + the rest of the composition's duration. */
+  segments?: CompSegment[];
+  /** Legacy single-segment fallback. Used only when segments is empty/undefined. */
   startFrom?: number;
   outroSrc?: string;
   outroDurationInFrames?: number;
@@ -109,6 +119,7 @@ export function VideoComposition({
   videoUrl,
   captions,
   offsetX,
+  segments,
   startFrom = 0,
   outroSrc,
   outroDurationInFrames = 0,
@@ -129,20 +140,46 @@ export function VideoComposition({
   // Outro begins overlap frames before the clip ends
   const outroFrom = clipDurationInFrames - overlap;
 
+  // Resolve segments: explicit list, or a single legacy segment spanning the full clip.
+  const effectiveSegments: CompSegment[] =
+    segments && segments.length > 0
+      ? segments
+      : [{ startFromInFrames: startFrom, durationInFrames: clipDurationInFrames }];
+
+  // Compute cumulative output offsets for each segment.
+  let runningFrame = 0;
+  const segmentLayouts = effectiveSegments.map((seg, i) => {
+    const fromFrame = runningFrame;
+    runningFrame += seg.durationInFrames;
+    return {
+      ...seg,
+      fromFrame,
+      isLast: i === effectiveSegments.length - 1,
+    };
+  });
+
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
-      {/* Main clip: video + captions */}
+      {/* Main clip: video segments + captions */}
       <Sequence durationInFrames={clipDurationInFrames}>
         <AbsoluteFill>
-          {videoUrl && (
-            <ClipVideo
-              src={videoUrl}
-              startFrom={startFrom}
-              offsetX={offsetX}
-              clipDurationInFrames={clipDurationInFrames}
-              sourceAspectRatio={sourceAspectRatio}
-            />
-          )}
+          {videoUrl &&
+            segmentLayouts.map((seg, i) => (
+              <Sequence
+                key={i}
+                from={seg.fromFrame}
+                durationInFrames={seg.durationInFrames}
+              >
+                <ClipSegmentVideo
+                  src={videoUrl}
+                  startFromInFrames={seg.startFromInFrames}
+                  durationInFrames={seg.durationInFrames}
+                  offsetX={offsetX}
+                  fadeOut={seg.isLast}
+                  sourceAspectRatio={sourceAspectRatio}
+                />
+              </Sequence>
+            ))}
         </AbsoluteFill>
         {captions.length > 0 && <CaptionOverlay captions={captions} captionStyles={captionStyles} />}
       </Sequence>

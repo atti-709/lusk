@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from "react";
 import type { ViralClip, ClipRenderState, CaptionWord } from "@lusk/shared";
+import { getClipSegments, getClipRenderKey } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
 import { useCancelPrompt } from "../contexts/CancelPromptContext";
 import { useAppSettings } from "../contexts/AppSettingsContext";
@@ -180,50 +181,63 @@ function AddClipForm({ onAdd, onCancel }: { onAdd: (clip: ViralClip) => void; on
 
 // ── Batch render helpers ─────────────────────────────────────────────────
 
-const CAPTION_DELAY_MS_BATCH = 900; // matches StudioView's CAPTION_DELAY_MS
-
-/** Compute Remotion-format captions for a clip, applying stored edits and offset. */
+/** Build Remotion captions across the multi-segment output timeline (mirrors RenderService.remapCaptionsToSegments). */
 function buildRemotionCaptions(clip: ViralClip, allCaptions: CaptionWord[], fps: number): Caption[] {
-  const trimStartDelta = clip.trimStartDelta ?? 0;
-  const trimEndDelta = clip.trimEndDelta ?? CAPTION_DELAY_MS_BATCH;
+  const segments = getClipSegments(clip);
   const captionOffset = clip.captionOffset ?? 0;
   const captionEdits = clip.captionEdits ?? {};
 
-  const effectiveStartMs = clip.startMs + trimStartDelta;
-  const effectiveEndMs = clip.endMs + trimEndDelta;
+  const result: Caption[] = [];
+  let cumOutputMs = 0;
+  for (const seg of segments) {
+    const startFrame = Math.round((seg.startMs / 1000) * fps);
+    const snappedStartMs = (startFrame / fps) * 1000;
+    const durationInFrames = Math.max(
+      1,
+      Math.ceil(((seg.endMs - snappedStartMs) / 1000) * fps)
+    );
+    const segOutputMs = (durationInFrames / fps) * 1000;
 
-  // Frame-align the start (matches RenderService logic)
-  const startFrame = Math.round((effectiveStartMs / 1000) * fps);
-  const actualStartMs = (startFrame / fps) * 1000;
-
-  return allCaptions
-    .map((c, globalIndex) => ({ c, globalIndex }))
-    .filter(({ c }) => c.endMs > effectiveStartMs && c.startMs < effectiveEndMs)
-    .map(({ c, globalIndex }) => ({
-      text: captionEdits[globalIndex] ?? c.text,
-      startMs: c.startMs - actualStartMs + captionOffset,
-      endMs: c.endMs - actualStartMs + captionOffset,
-      timestampMs: c.timestampMs != null ? c.timestampMs - actualStartMs + captionOffset : null,
-      confidence: c.confidence,
-    }));
+    for (let gi = 0; gi < allCaptions.length; gi++) {
+      const c = allCaptions[gi];
+      if (c.endMs <= seg.startMs || c.startMs >= seg.endMs) continue;
+      const clippedStart = Math.max(c.startMs, seg.startMs);
+      const clippedEnd = Math.min(c.endMs, seg.endMs);
+      result.push({
+        text: captionEdits[gi] ?? c.text,
+        startMs: clippedStart - snappedStartMs + cumOutputMs + captionOffset,
+        endMs: clippedEnd - snappedStartMs + cumOutputMs + captionOffset,
+        timestampMs:
+          c.timestampMs != null
+            ? Math.min(Math.max(c.timestampMs, clippedStart), clippedEnd) -
+              snappedStartMs +
+              cumOutputMs +
+              captionOffset
+            : null,
+        confidence: c.confidence,
+      });
+    }
+    cumOutputMs += segOutputMs;
+  }
+  return result.sort((a, b) => a.startMs - b.startMs);
 }
 
-/** Build the trimmed clip object sent to /api/render. */
+/** Build the clip object sent to /api/render — segments are canonical. */
 function buildTrimmedClip(clip: ViralClip): ViralClip {
-  const trimStartDelta = clip.trimStartDelta ?? 0;
-  const trimEndDelta = clip.trimEndDelta ?? CAPTION_DELAY_MS_BATCH;
+  const segments = getClipSegments(clip);
   return {
     ...clip,
-    startMs: clip.startMs + trimStartDelta,
-    endMs: clip.endMs + trimEndDelta,
+    segments,
+    startMs: segments[0].startMs,
+    endMs: segments[segments.length - 1].endMs,
+    trimStartDelta: 0,
+    trimEndDelta: 0,
   };
 }
 
-/** Compute the render key for a clip (effective trimmed start-end). */
+/** Compute the render key for a clip. */
 function clipRenderKey(clip: ViralClip): string {
-  const effectiveStart = clip.startMs + (clip.trimStartDelta ?? 0);
-  const effectiveEnd = clip.endMs + (clip.trimEndDelta ?? CAPTION_DELAY_MS_BATCH);
-  return `${effectiveStart}-${effectiveEnd}`;
+  return getClipRenderKey({ ...clip, segments: getClipSegments(clip) });
 }
 
 /** Download a single rendered clip to the target directory (or trigger browser download). */

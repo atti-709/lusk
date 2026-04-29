@@ -44,17 +44,48 @@ export interface TranscriptData {
   words: TranscriptWord[];
 }
 
+export interface ClipSegment {
+  startMs: number;
+  endMs: number;
+}
+
 export interface ViralClip {
   title: string;
   startMs: number;
   endMs: number;
   hookText: string;
-  // UI State Persistence
+  // Multi-cut: when present, render plays these segments back-to-back.
+  // When absent, falls back to a single segment derived from startMs/endMs + trim deltas.
+  segments?: ClipSegment[];
+  // UI State Persistence (trim deltas only used when segments is absent)
   captionEdits?: Record<number, string>;
   captionOffset?: number;
   trimStartDelta?: number;
   trimEndDelta?: number;
   speakerOffsetX?: number;
+}
+
+/** Whisper timestamps tend to be slightly early; default trailing margin so the last caption fully shows. */
+export const CLIP_TRAILING_MARGIN_MS = 900;
+
+/** Returns the segments to actually render. Falls back to startMs/endMs + trim deltas for legacy clips. */
+export function getClipSegments(clip: ViralClip): ClipSegment[] {
+  if (clip.segments && clip.segments.length > 0) return clip.segments;
+  return [{
+    startMs: clip.startMs + (clip.trimStartDelta ?? 0),
+    endMs: clip.endMs + (clip.trimEndDelta ?? CLIP_TRAILING_MARGIN_MS),
+  }];
+}
+
+/** Stable render key — single-segment clips keep the legacy `${startMs}-${endMs}` format for backwards compat with existing rendered files. */
+export function getClipRenderKey(clip: { startMs: number; endMs: number; segments?: ClipSegment[] }): string {
+  if (clip.segments && clip.segments.length > 1) {
+    return clip.segments.map((s) => `${s.startMs}-${s.endMs}`).join("_");
+  }
+  if (clip.segments && clip.segments.length === 1) {
+    return `${clip.segments[0].startMs}-${clip.segments[0].endMs}`;
+  }
+  return `${clip.startMs}-${clip.endMs}`;
 }
 
 export interface CaptionWord {
