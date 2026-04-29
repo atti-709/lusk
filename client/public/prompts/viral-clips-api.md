@@ -2,7 +2,12 @@
 
 Below this prompt under the header "**## Corrected Transcript (.tsv):**", you will find a corrected transcript.
 
-Based on the corrected transcript, identify 4-8 segments that would make the most viral short-form video clips.
+Based on the corrected transcript, produce **two groups** of viral short-form video clips:
+
+1. **6 single-cut clips** — the strongest contiguous moments, each a self-contained reel.
+2. **2-3 multi-cut clips** — experimental assemblies that stitch 2-3 ranges of the transcript into one reel. These are REQUIRED, not optional. Even if a multi-cut feels weaker than a single-cut, include your best attempts so the editor can review them. Aim for non-trivial multi-cut ideas (delayed payoff, cutting a filler tangent, two reinforcing quotes from far-apart parts of the conversation). Do NOT make a multi-cut just by joining two random adjacent segments — there must be a reason.
+
+Total output: **8-9 clips**.
 
 ## Duration Requirements (CRITICAL)
 
@@ -32,20 +37,21 @@ Pay CRITICAL attention to clip boundaries, especially the ENDINGS:
 4. **Avoid Cliffhangers:** Ensure the final sentence does not accidentally introduce a brand new idea that gets cut off.
 5. **Include the Takeaway:** The clip should contain enough context so the viewer understands the point AND the conclusion/takeaway. If the speaker reveals something interesting at second 10, include the 15 seconds of context before it AND the reaction/implication after it.
 
-## Multi-Cut Clips (use sparingly)
+## Multi-Cut Clips (the 2-3 required ones)
 
-A clip MAY consist of multiple cuts (segments) that get stitched together into one reel. Use this **only when the combined cuts are clearly more coherent than any single contiguous range** — for example:
-- A speaker makes a strong claim early, then delivers the explanation/payoff several minutes later. Splice the setup directly to the payoff.
-- A long detour or filler interrupts a tight argument. Cut out the detour to keep the reel under 25s.
-- Two related quotes from different parts of the conversation that reinforce each other.
+A multi-cut clip stitches 2-3 ranges of the transcript into a single reel. The job is to find combinations that are **more coherent or punchier than any single contiguous range** could be. Concrete patterns to look for:
+- **Setup + delayed payoff:** the speaker plants a hook early (a question, a bold claim) and delivers the answer/punchline minutes later. Splice the setup directly onto the payoff.
+- **Cut the filler:** a tight argument or story is interrupted by a long tangent or self-correction. Remove the tangent so the reel stays under 25s.
+- **Compound testimony:** two distinct moments where the speaker makes the same point in different words — combining them lands harder than either alone.
+- **Question + answer across exchanges:** a question asked in one part, the most direct answer given much later.
 
-Rules for multi-cut:
-- **Default to single-cut.** Only use multi-cut when removing material strictly improves the reel.
-- Each individual cut should still **start at a sentence boundary** and **end at a sentence boundary**. Avoid cutting mid-sentence — abrupt audio jumps are jarring.
+Rules for every multi-cut:
+- Each individual cut must **start at a sentence boundary** and **end at a sentence boundary**. Mid-sentence cuts produce jarring audio jumps.
 - Each cut must be at least **3 seconds** long. Sub-3-second cuts feel like glitches.
-- Use **at most 3 cuts per clip**. More than that fragments the narrative.
+- Use **2 or 3 cuts per clip** (never more).
 - Cuts MUST be listed in **source-video chronological order** (cut 1 starts before cut 2, etc.).
 - The **total duration across all cuts** must satisfy the 10-30s rule.
+- Cuts must come from **distinct parts of the transcript** — don't list two adjacent ranges where one continuous range would do the same job.
 
 ## Output Format
 
@@ -66,4 +72,12 @@ Takeaway: ...
 Cut 1: 00:01:23.456 - 00:01:38.921
 Cut 2: 00:04:12.105 - 00:04:22.847
 
-IMPORTANT: Verify that (1) the exact text within your chosen cuts forms a complete, logical, and satisfying narrative when played back-to-back, (2) the **total duration** across all cuts is between 10-30 seconds, and (3) the clip contains a clear takeaway. Use the exact timestamps from the TSV file. Do not approximate.
+**Order in the output:** list the 6 single-cut clips first, then the 2-3 multi-cut clips. Multi-cut clips must have **2 or 3 `Cut N:` lines**; single-cut clips must have exactly **1 `Cut 1:` line**.
+
+IMPORTANT: Before submitting, verify that
+1. you have produced **exactly 6 single-cut clips and at least 2 multi-cut clips** (8-9 clips total),
+2. the exact text within each clip's chosen cuts forms a complete, logical, and satisfying narrative when played back-to-back,
+3. the **total duration** across all cuts is between 10-30 seconds, and
+4. each clip contains a clear takeaway.
+
+Use the exact timestamps from the TSV file. Do not approximate.
