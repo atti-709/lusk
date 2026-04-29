@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import { settingsService, type TranscriptionLanguage } from "../services/SettingsService.js";
 import archiver from "archiver";
-import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord, TranslatedBlock } from "@lusk/shared";
+import type { ErrorResponse, TranscriptWord, ViralClip, ClipSegment, CaptionWord, TranslatedBlock } from "@lusk/shared";
 import { runGeminiAutomation, activeGeminiOperations } from "./transcribe.js";
 
 // ── Helpers ──
@@ -53,23 +53,68 @@ export function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
   return words;
 }
 
+/**
+ * Parse Gemini's viral-clip output into ViralClip objects.
+ *
+ * Supports two formats per CLIP block:
+ *  - new: one or more `Cut N: HH:MM:SS.mmm - HH:MM:SS.mmm` lines (multi-cut)
+ *  - legacy: a single `Start: ...` + `End: ...` pair (single-cut)
+ *
+ * Multi-cut clips populate `segments`; single-cut clips omit `segments` and
+ * keep the legacy startMs/endMs shape.
+ */
 export function parseViralClipText(text: string): ViralClip[] {
   const clips: ViralClip[] = [];
-  // Split on "CLIP N" headers
   const blocks = text.split(/^CLIP\s+\d+/im).filter((b) => b.trim());
+
+  // Matches "Cut 1: HH:MM:SS.mmm - HH:MM:SS.mmm" / "Cut 2: ... – ..." / "Segment N: ... — ..."
+  const cutLineRe = /^\s*(?:Cut|Segment)\s+\d+\s*:\s*(\S+)\s*[-–—→]+\s*(\S+)\s*$/gim;
 
   for (const block of blocks) {
     const titleMatch = block.match(/Title:\s*(.+)/i);
     const hookMatch = block.match(/Hook:\s*(.+)/i);
-    const startMatch = block.match(/Start:\s*(\S+)/i);
-    const endMatch = block.match(/End:\s*(\S+)/i);
 
-    if (startMatch && endMatch) {
+    const segments: ClipSegment[] = [];
+    cutLineRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = cutLineRe.exec(block)) !== null) {
+      try {
+        const startMs = timestampToMs(m[1]);
+        const endMs = timestampToMs(m[2]);
+        if (endMs > startMs) segments.push({ startMs, endMs });
+      } catch { /* skip bad timestamp */ }
+    }
+
+    // Legacy single-segment fallback
+    if (segments.length === 0) {
+      const startMatch = block.match(/Start:\s*(\S+)/i);
+      const endMatch = block.match(/End:\s*(\S+)/i);
+      if (startMatch && endMatch) {
+        try {
+          const startMs = timestampToMs(startMatch[1]);
+          const endMs = timestampToMs(endMatch[1]);
+          if (endMs > startMs) segments.push({ startMs, endMs });
+        } catch { /* skip */ }
+      }
+    }
+
+    if (segments.length === 0) continue;
+
+    const title = titleMatch?.[1]?.trim() ?? "Untitled";
+    const hookText = hookMatch?.[1]?.trim() ?? "";
+    const first = segments[0];
+    const last = segments[segments.length - 1];
+
+    if (segments.length === 1) {
+      // Backwards-compat shape — no `segments` field for single-cut clips.
+      clips.push({ title, hookText, startMs: first.startMs, endMs: last.endMs });
+    } else {
       clips.push({
-        title: titleMatch?.[1]?.trim() ?? "Untitled",
-        hookText: hookMatch?.[1]?.trim() ?? "",
-        startMs: timestampToMs(startMatch[1]),
-        endMs: timestampToMs(endMatch[1]),
+        title,
+        hookText,
+        startMs: first.startMs,
+        endMs: last.endMs,
+        segments,
       });
     }
   }

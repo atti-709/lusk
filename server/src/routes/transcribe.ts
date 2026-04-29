@@ -110,10 +110,15 @@ export async function runGeminiAutomation(
 
     const rawClips = viralClipText.trim() ? parseViralClipText(viralClipText) : [];
 
-    // Filter out clips with invalid time ranges
+    // Filter out clips with invalid time ranges (validate every segment for multi-cut clips).
     const clips = rawClips.filter(c => {
-      if (c.startMs < 0 || c.endMs <= c.startMs) return false;
-      if (c.endMs > transcriptEndMs) return false;
+      const segs = c.segments && c.segments.length > 0
+        ? c.segments
+        : [{ startMs: c.startMs, endMs: c.endMs }];
+      for (const s of segs) {
+        if (s.startMs < 0 || s.endMs <= s.startMs) return false;
+        if (s.endMs > transcriptEndMs) return false;
+      }
       return true;
     });
     if (clips.length < rawClips.length) {
