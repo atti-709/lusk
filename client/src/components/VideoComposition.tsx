@@ -1,10 +1,9 @@
 import {
   AbsoluteFill,
+  Audio,
   Sequence,
   OffthreadVideo,
   useVideoConfig,
-  useCurrentFrame,
-  interpolate,
 } from "remotion";
 import type { Caption } from "@remotion/captions";
 import { CaptionOverlay } from "./CaptionOverlay";
@@ -17,6 +16,9 @@ export const COMP_FPS = 23.976;
 /** Frames by which the outro overlaps the end of the main clip. */
 export const OUTRO_OVERLAP_FRAMES = 4;
 
+/** Frames over which audio crossfades between adjacent segments (~167ms at 23.976fps). */
+export const SEGMENT_AUDIO_CROSSFADE_FRAMES = 4;
+
 export type CompSegment = {
   /** Frame in the source video where this segment starts. */
   startFromInFrames: number;
@@ -24,35 +26,17 @@ export type CompSegment = {
   durationInFrames: number;
 };
 
-function ClipSegmentVideo({
+function ClipSegmentVideoOnly({
   src,
   startFromInFrames,
-  durationInFrames,
   offsetX,
-  fadeOut,
   sourceAspectRatio,
 }: {
   src: string;
   startFromInFrames: number;
-  durationInFrames: number;
   offsetX: number;
-  fadeOut: boolean;
   sourceAspectRatio?: number | null;
 }) {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-
-  // Audio fades out only at the very end of the clip (last segment).
-  const fadeStartFrame = durationInFrames - Math.round(fps);
-  const volume = fadeOut
-    ? interpolate(
-        frame,
-        [fadeStartFrame, durationInFrames - 1],
-        [1, 0],
-        { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-      )
-    : 1;
-
   const isPortrait = sourceAspectRatio != null && sourceAspectRatio < 1;
   const landscapeWidthPct =
     sourceAspectRatio != null
@@ -78,11 +62,12 @@ function ClipSegmentVideo({
       };
 
   // Negative-from trick: shifts the video so playback begins at startFromInFrames.
+  // muted=true: audio is rendered separately via <Audio> so we can crossfade between segments.
   return (
     <Sequence from={-startFromInFrames}>
       <OffthreadVideo
         src={src}
-        volume={volume}
+        muted
         style={videoStyle}
       />
     </Sequence>
@@ -127,7 +112,7 @@ export function VideoComposition({
   sourceAspectRatio,
   captionStyles,
 }: VideoCompositionProps) {
-  const { durationInFrames } = useVideoConfig();
+  const { durationInFrames, fps } = useVideoConfig();
 
   const hasOutro = !!outroSrc && outroDurationInFrames > 0;
   const overlap = hasOutro ? outroOverlapFrames : 0;
@@ -146,7 +131,7 @@ export function VideoComposition({
       ? segments
       : [{ startFromInFrames: startFrom, durationInFrames: clipDurationInFrames }];
 
-  // Compute cumulative output offsets for each segment.
+  // Compute cumulative output offsets for each segment (back-to-back, no visual overlap).
   let runningFrame = 0;
   const segmentLayouts = effectiveSegments.map((seg, i) => {
     const fromFrame = runningFrame;
@@ -154,9 +139,15 @@ export function VideoComposition({
     return {
       ...seg,
       fromFrame,
+      isFirst: i === 0,
       isLast: i === effectiveSegments.length - 1,
     };
   });
+
+  // Audio crossfade is disabled for single-segment clips (no boundaries to smooth).
+  const isMultiSegment = segmentLayouts.length > 1;
+  const cf = isMultiSegment ? SEGMENT_AUDIO_CROSSFADE_FRAMES : 0;
+  const finalFadeFrames = Math.round(fps); // 1-second fade-to-zero at the end of the last segment
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
@@ -166,21 +157,63 @@ export function VideoComposition({
           {videoUrl &&
             segmentLayouts.map((seg, i) => (
               <Sequence
-                key={i}
+                key={`v${i}`}
                 from={seg.fromFrame}
                 durationInFrames={seg.durationInFrames}
               >
-                <ClipSegmentVideo
+                <ClipSegmentVideoOnly
                   src={videoUrl}
                   startFromInFrames={seg.startFromInFrames}
-                  durationInFrames={seg.durationInFrames}
                   offsetX={offsetX}
-                  fadeOut={seg.isLast}
                   sourceAspectRatio={sourceAspectRatio}
                 />
               </Sequence>
             ))}
         </AbsoluteFill>
+
+        {/* Audio segments — non-last segments extend `cf` frames past their video to crossfade with the next. */}
+        {videoUrl &&
+          segmentLayouts.map((seg, i) => {
+            // Tail extension that overlaps with the next segment's audio start.
+            const tail = seg.isLast ? 0 : cf;
+            const audioDur = seg.durationInFrames + tail;
+            const fadeInEnd = seg.isFirst ? 0 : cf;
+            const tailStart = seg.durationInFrames; // where this segment's video ends
+            const finalFadeStart = seg.durationInFrames - finalFadeFrames;
+
+            return (
+              <Sequence
+                key={`a${i}`}
+                from={seg.fromFrame}
+                durationInFrames={audioDur}
+              >
+                <Audio
+                  src={videoUrl}
+                  startFrom={seg.startFromInFrames}
+                  endAt={seg.startFromInFrames + audioDur}
+                  volume={(frame) => {
+                    // Fade-in (multi-segment, non-first segments only).
+                    if (fadeInEnd > 0 && frame < fadeInEnd) {
+                      return frame / fadeInEnd;
+                    }
+                    // Last segment: 1-second fade-to-zero at the very end of the clip.
+                    if (seg.isLast) {
+                      if (frame >= finalFadeStart) {
+                        return Math.max(0, 1 - (frame - finalFadeStart) / finalFadeFrames);
+                      }
+                      return 1;
+                    }
+                    // Non-last segment: crossfade-out tail extending past video end.
+                    if (frame >= tailStart) {
+                      return Math.max(0, 1 - (frame - tailStart) / cf);
+                    }
+                    return 1;
+                  }}
+                />
+              </Sequence>
+            );
+          })}
+
         {captions.length > 0 && <CaptionOverlay captions={captions} captionStyles={captionStyles} />}
       </Sequence>
 
