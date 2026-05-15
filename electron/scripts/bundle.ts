@@ -69,10 +69,13 @@ execSync("npm install --omit=dev", { cwd: clientBundle, stdio: "inherit" });
 // Shared types
 copyDir(path.join(ROOT, "shared"), path.join(BUNDLE, "shared"));
 
-// Copy @lusk/shared into client/node_modules so Remotion's webpack bundler can resolve it
+// Copy @lusk/shared into client/node_modules so Remotion's webpack bundler can resolve it,
+// and into server/node_modules so the compiled server can import runtime helpers from it.
 // (npm workspace symlinks don't exist in the packaged bundle)
-const luskScope = path.join(clientBundle, "node_modules", "@lusk");
-fs.mkdirSync(luskScope, { recursive: true });
-copyDir(path.join(BUNDLE, "shared"), path.join(luskScope, "shared"));
+for (const target of [clientBundle, serverBundle]) {
+  const luskScope = path.join(target, "node_modules", "@lusk");
+  fs.mkdirSync(luskScope, { recursive: true });
+  copyDir(path.join(BUNDLE, "shared"), path.join(luskScope, "shared"));
+}
 
 console.log("Bundle assembled.");
