@@ -88,7 +88,7 @@ Expected: FAIL — `buildSlidingWindowChunks` is not exported from GeminiService
 In `server/src/services/GeminiService.ts`, update constants (lines 18-20) and add the function before the class:
 
 ```typescript
-const MODEL = "gemini-3.1-pro-preview";
+const MODEL = "gemini-3.1-flash-lite";
 const CHUNK_SIZE = 500;   // lines per API call
 const OVERLAP = 50;       // lines of overlap from previous chunk
 

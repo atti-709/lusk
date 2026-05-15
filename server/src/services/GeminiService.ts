@@ -16,7 +16,7 @@ setGlobalDispatcher(
   })
 );
 
-const MODEL = "gemini-3.1-flash-lite-preview";
+const MODEL = "gemini-3.1-flash-lite";
 const CHUNK_SIZE = 250;   // lines per API call
 const OVERLAP = 30;       // lines of overlap from previous chunk
 const MAX_RETRIES = 3;    // retries per chunk on transient API error
