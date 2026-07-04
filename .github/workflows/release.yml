@@ -95,6 +95,15 @@ jobs:
           # Verify
           codesign --verify --deep --strict "$APP" && echo "Signature OK"
 
+      # Tag must exist on the remote BEFORE publishing: electron-builder creates a
+      # published (non-draft) GitHub release, and GitHub rejects publishing a release
+      # whose tag does not yet exist ("Published releases must have a valid tag").
+      - name: Tag and push
+        run: |
+          VERSION="v${{ steps.version.outputs.version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
       - name: Repackage and publish
         working-directory: electron
         env:
@@ -102,9 +111,3 @@ jobs:
         run: |
           rm -f out/*.dmg out/*.zip
           electron-builder --publish always --prepackaged out/mac-arm64/Lusk.app
-
-      - name: Tag and push
-        run: |
-          VERSION="v${{ steps.version.outputs.version }}"
-          git tag "$VERSION"
-          git push origin "$VERSION"
