@@ -2,8 +2,9 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import { settingsService, type TranscriptionLanguage } from "../services/SettingsService.js";
 import archiver from "archiver";
-import type { ErrorResponse, TranscriptWord, ViralClip, ClipSegment, CaptionWord, TranslatedBlock } from "@lusk/shared";
-import { runGeminiAutomation, activeGeminiOperations } from "./transcribe.js";
+import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord, TranslatedBlock } from "@lusk/shared";
+import { runGeminiAutomation, regenerateViralClips, activeGeminiOperations } from "./transcribe.js";
+import { geminiService } from "../services/GeminiService.js";
 
 // ── Helpers ──
 
@@ -56,67 +57,56 @@ export function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
 /**
  * Parse Gemini's viral-clip output into ViralClip objects.
  *
- * Supports two formats per CLIP block:
- *  - new: one or more `Cut N: HH:MM:SS.mmm - HH:MM:SS.mmm` lines (multi-cut)
- *  - legacy: a single `Start: ...` + `End: ...` pair (single-cut)
+ * Each CLIP block is a single contiguous cut. Supports two boundary formats:
+ *  - `Cut 1: HH:MM:SS.mmm - HH:MM:SS.mmm`
+ *  - legacy `Start: ...` + `End: ...`
  *
- * Multi-cut clips populate `segments`; single-cut clips omit `segments` and
- * keep the legacy startMs/endMs shape.
+ * Any additional `Cut N:` lines are ignored — clips are single-cut only.
  */
 export function parseViralClipText(text: string): ViralClip[] {
   const clips: ViralClip[] = [];
   const blocks = text.split(/^CLIP\s+\d+/im).filter((b) => b.trim());
 
-  // Matches "Cut 1: HH:MM:SS.mmm - HH:MM:SS.mmm" / "Cut 2: ... – ..." / "Segment N: ... — ..."
-  const cutLineRe = /^\s*(?:Cut|Segment)\s+\d+\s*:\s*(\S+)\s*[-–—→]+\s*(\S+)\s*$/gim;
+  // Matches "Cut 1: HH:MM:SS.mmm - HH:MM:SS.mmm" (also accepts "Segment N:" and en/em dashes).
+  const cutLineRe = /^\s*(?:Cut|Segment)\s+\d+\s*:\s*(\S+)\s*[-–—→]+\s*(\S+)\s*$/im;
 
   for (const block of blocks) {
     const titleMatch = block.match(/Title:\s*(.+)/i);
     const hookMatch = block.match(/Hook:\s*(.+)/i);
 
-    const segments: ClipSegment[] = [];
-    cutLineRe.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = cutLineRe.exec(block)) !== null) {
+    let startMs: number | null = null;
+    let endMs: number | null = null;
+
+    const cut = block.match(cutLineRe);
+    if (cut) {
       try {
-        const startMs = timestampToMs(m[1]);
-        const endMs = timestampToMs(m[2]);
-        if (endMs > startMs) segments.push({ startMs, endMs });
+        const s = timestampToMs(cut[1]);
+        const e = timestampToMs(cut[2]);
+        if (e > s) { startMs = s; endMs = e; }
       } catch { /* skip bad timestamp */ }
     }
 
-    // Legacy single-segment fallback
-    if (segments.length === 0) {
+    // Legacy Start:/End: fallback
+    if (startMs === null || endMs === null) {
       const startMatch = block.match(/Start:\s*(\S+)/i);
       const endMatch = block.match(/End:\s*(\S+)/i);
       if (startMatch && endMatch) {
         try {
-          const startMs = timestampToMs(startMatch[1]);
-          const endMs = timestampToMs(endMatch[1]);
-          if (endMs > startMs) segments.push({ startMs, endMs });
+          const s = timestampToMs(startMatch[1]);
+          const e = timestampToMs(endMatch[1]);
+          if (e > s) { startMs = s; endMs = e; }
         } catch { /* skip */ }
       }
     }
 
-    if (segments.length === 0) continue;
+    if (startMs === null || endMs === null) continue;
 
-    const title = titleMatch?.[1]?.trim() ?? "Untitled";
-    const hookText = hookMatch?.[1]?.trim() ?? "";
-    const first = segments[0];
-    const last = segments[segments.length - 1];
-
-    if (segments.length === 1) {
-      // Backwards-compat shape — no `segments` field for single-cut clips.
-      clips.push({ title, hookText, startMs: first.startMs, endMs: last.endMs });
-    } else {
-      clips.push({
-        title,
-        hookText,
-        startMs: first.startMs,
-        endMs: last.endMs,
-        segments,
-      });
-    }
+    clips.push({
+      title: titleMatch?.[1]?.trim() ?? "Untitled",
+      hookText: hookMatch?.[1]?.trim() ?? "",
+      startMs,
+      endMs,
+    });
   }
   return clips;
 }
@@ -473,6 +463,49 @@ export async function alignRoute(app: FastifyInstance) {
           success: false,
           error: `Failed to parse clips: ${err instanceof Error ? err.message : String(err)}`,
         });
+      }
+    }
+  );
+
+  // 5c-b. Regenerate viral clips with Gemini (from the READY clip-selection screen)
+  app.post<{
+    Params: { projectId: string };
+    Reply: { success: true; clips: ViralClip[] } | ErrorResponse;
+  }>(
+    "/api/projects/:projectId/regenerate-clips",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
+
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+      if (session.state !== "READY") {
+        return reply.status(409).send({ success: false, error: `Cannot regenerate clips in state: ${session.state}` });
+      }
+      if (!session.transcript) {
+        return reply.status(409).send({ success: false, error: "No transcript available" });
+      }
+      if (!(await geminiService.isAvailable())) {
+        return reply.status(409).send({ success: false, error: "Gemini API key not configured" });
+      }
+
+      const controller = new AbortController();
+      activeGeminiOperations.set(projectId, controller);
+
+      try {
+        const clips = await regenerateViralClips(projectId, request.log, controller.signal);
+        return { success: true as const, clips };
+      } catch (err) {
+        if (controller.signal.aborted) {
+          return reply.status(409).send({ success: false, error: "Cancelled" });
+        }
+        return reply.status(500).send({
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        activeGeminiOperations.delete(projectId);
       }
     }
   );

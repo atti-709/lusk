@@ -325,6 +325,44 @@
   gap: 0.25rem;
 }
 
+.clip-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.regenerate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 0.15s, color 0.15s, transform 0.1s;
+  letter-spacing: 0.01em;
+}
+
+.regenerate-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.regenerate-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.regenerate-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .render-all-btn {
   display: inline-flex;
   align-items: center;

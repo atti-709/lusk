@@ -796,9 +796,11 @@ function App() {
               videoName={state.videoName}
               renders={state.renders ?? {}}
               captions={captions}
+              geminiAvailable={geminiAvailable}
               onSelect={handleSelectClip}
               onBack={() => setReadySubView("review")}
               onAddClip={handleAddClip}
+              onClipsRegenerated={setViralClips}
             />
           </div>
         )}

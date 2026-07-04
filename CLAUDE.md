@@ -46,8 +46,9 @@
 ### **3. Viral Clip Detection (Server Side)**
 
 * **Tool:** Gemini Flash API via `GeminiService.ts` (`/server/src/services/GeminiService.ts`).
-* **Flow:** After transcription/correction, Gemini analyzes the transcript and suggests 4-8 viral clip candidates.
-* **Prompt:** `client/public/prompts/viral-clips-api.md` — instructs Gemini to find 10-30 second segments optimized for Instagram Reels.
+* **Flow:** After transcription/correction, Gemini analyzes the transcript and suggests 12-16 viral clip candidates.
+* **Single-cut only:** every clip is one contiguous range (`startMs`/`endMs`). There is no multi-cut/concatenation — clips play straight through from the source. The clip's effective render range applies user trim deltas via `getClipRange` (`shared/types.ts`); `getClipRenderKey` derives the `${startMs}-${endMs}` output filename key from it.
+* **Prompt:** `client/public/prompts/viral-clips-api.md` — instructs Gemini to find 20-30 second single-cut clips optimized for Instagram Reels, cutting **only at sentence boundaries** (start and end must be whole sentences; never mid-sentence).
 * **Users can also add clips manually** via the UI.
 * **Legacy:** `server/models/meta-llama-3-8b-instruct.Q4_K_M.gguf` is a leftover from the previous offline LLM approach and is not loaded.
 

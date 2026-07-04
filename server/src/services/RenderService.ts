@@ -8,73 +8,48 @@ import { settingsService, getConfigDir } from "./SettingsService.js";
 import { bundle } from "@remotion/bundler";
 import type { CancelSignal } from "@remotion/renderer";
 import { renderMedia, selectComposition } from "@remotion/renderer";
-import type { CaptionWord, ClipSegment } from "@lusk/shared";
+import type { CaptionWord } from "@lusk/shared";
+import { getClipRange } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
 
-type CompSegment = {
+/** Computes the frame layout for a single clip range using the render's rounding rule. */
+function computeClipLayout(startMs: number, endMs: number, fps: number): {
   startFromInFrames: number;
   durationInFrames: number;
-};
-
-/** Computes per-segment frame layouts using the same rounding rule as legacy single-clip render. */
-function computeSegmentLayouts(segments: ClipSegment[], fps: number): {
-  layouts: CompSegment[];
-  totalDurationInFrames: number;
-  /** Per-segment (frame-snapped) start in source ms — used for caption remapping. */
-  snappedSourceStartsMs: number[];
+  /** Frame-snapped source start in ms — used for caption remapping. */
+  snappedStartMs: number;
 } {
-  const layouts: CompSegment[] = [];
-  const snappedSourceStartsMs: number[] = [];
-  let totalDurationInFrames = 0;
-  for (const seg of segments) {
-    const startFrame = Math.round((seg.startMs / 1000) * fps);
-    const snappedStartMs = (startFrame / fps) * 1000;
-    const durationInFrames = Math.max(
-      1,
-      Math.ceil(((seg.endMs - snappedStartMs) / 1000) * fps)
-    );
-    layouts.push({ startFromInFrames: startFrame, durationInFrames });
-    snappedSourceStartsMs.push(snappedStartMs);
-    totalDurationInFrames += durationInFrames;
-  }
-  return { layouts, totalDurationInFrames, snappedSourceStartsMs };
+  const startFromInFrames = Math.round((startMs / 1000) * fps);
+  const snappedStartMs = (startFromInFrames / fps) * 1000;
+  const durationInFrames = Math.max(
+    1,
+    Math.ceil(((endMs - snappedStartMs) / 1000) * fps)
+  );
+  return { startFromInFrames, durationInFrames, snappedStartMs };
 }
 
-/** Remaps a flat list of source captions onto the multi-segment output timeline. Captions are clipped at segment boundaries. */
-function remapCaptionsToSegments(
+/** Remaps source captions onto the clip's output timeline. Captions are clipped at the range boundaries. */
+function remapCaptions(
   captions: CaptionWord[],
-  segments: ClipSegment[],
-  layouts: CompSegment[],
-  snappedSourceStartsMs: number[],
-  fps: number
+  startMs: number,
+  endMs: number,
+  snappedStartMs: number
 ): Caption[] {
   const result: Caption[] = [];
-  let cumOutputMs = 0;
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-    const snappedStartMs = snappedSourceStartsMs[i];
-    const segOutputMs = (layouts[i].durationInFrames / fps) * 1000;
-    for (const c of captions) {
-      if (c.endMs <= seg.startMs || c.startMs >= seg.endMs) continue;
-      const clippedStart = Math.max(c.startMs, seg.startMs);
-      const clippedEnd = Math.min(c.endMs, seg.endMs);
-      const startMs = clippedStart - snappedStartMs + cumOutputMs;
-      const endMs = clippedEnd - snappedStartMs + cumOutputMs;
-      const tsMs =
+  for (const c of captions) {
+    if (c.endMs <= startMs || c.startMs >= endMs) continue;
+    const clippedStart = Math.max(c.startMs, startMs);
+    const clippedEnd = Math.min(c.endMs, endMs);
+    result.push({
+      text: c.text,
+      startMs: clippedStart - snappedStartMs,
+      endMs: clippedEnd - snappedStartMs,
+      timestampMs:
         c.timestampMs != null
-          ? Math.min(Math.max(c.timestampMs, clippedStart), clippedEnd) -
-            snappedStartMs +
-            cumOutputMs
-          : null;
-      result.push({
-        text: c.text,
-        startMs,
-        endMs,
-        timestampMs: tsMs,
-        confidence: c.confidence,
-      });
-    }
-    cumOutputMs += segOutputMs;
+          ? Math.min(Math.max(c.timestampMs, clippedStart), clippedEnd) - snappedStartMs
+          : null,
+      confidence: c.confidence,
+    });
   }
   return result;
 }
@@ -221,7 +196,7 @@ class RenderService {
   async renderClip(
     sessionId: string,
     sessionDir: string,
-    clip: { startMs: number; endMs: number; segments?: ClipSegment[] },
+    clip: Parameters<typeof getClipRange>[0],
     offsetX: number,
     captions: CaptionWord[],
     onProgress?: ProgressCallback,
@@ -239,17 +214,13 @@ class RenderService {
     const outroOverlapFrames = await settingsService.getOutroOverlapFrames();
     const captionStyles = await settingsService.getCaptionStyles();
 
-    const segments: ClipSegment[] =
-      clip.segments && clip.segments.length > 0
-        ? clip.segments
-        : [{ startMs: clip.startMs, endMs: clip.endMs }];
-
-    const { layouts, totalDurationInFrames: clipDurationInFrames, snappedSourceStartsMs } =
-      computeSegmentLayouts(segments, fps);
+    const { startMs, endMs } = getClipRange(clip);
+    const { startFromInFrames, durationInFrames: clipDurationInFrames, snappedStartMs } =
+      computeClipLayout(startMs, endMs, fps);
 
     const remotionCaptions: Caption[] =
       preProcessedCaptions ??
-      remapCaptionsToSegments(captions, segments, layouts, snappedSourceStartsMs, fps);
+      remapCaptions(captions, startMs, endMs, snappedStartMs);
 
     const hasOutro = outroConfig != null && outroConfig.outroSrc.length > 0;
     const outroDurationInFrames = hasOutro
@@ -261,9 +232,7 @@ class RenderService {
       videoUrl,
       captions: remotionCaptions,
       offsetX,
-      segments: layouts,
-      // startFrom kept for older bundled compositions; harmless when segments is set.
-      startFrom: layouts[0].startFromInFrames,
+      startFrom: startFromInFrames,
       outroSrc: hasOutro ? outroConfig.outroSrc : "",
       outroDurationInFrames,
       outroOverlapFrames,

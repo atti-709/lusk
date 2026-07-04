@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from "react";
 import type { ViralClip, ClipRenderState, CaptionWord } from "@lusk/shared";
-import { getClipSegments, getClipRenderKey } from "@lusk/shared";
+import { getClipRange, getClipRenderKey } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
 import { useCancelPrompt } from "../contexts/CancelPromptContext";
 import { useAppSettings } from "../contexts/AppSettingsContext";
@@ -181,55 +181,44 @@ function AddClipForm({ onAdd, onCancel }: { onAdd: (clip: ViralClip) => void; on
 
 // ── Batch render helpers ─────────────────────────────────────────────────
 
-/** Build Remotion captions across the multi-segment output timeline (mirrors RenderService.remapCaptionsToSegments). */
+/** Build Remotion captions remapped onto the clip output timeline (mirrors RenderService.remapCaptions). */
 function buildRemotionCaptions(clip: ViralClip, allCaptions: CaptionWord[], fps: number): Caption[] {
-  const segments = getClipSegments(clip);
+  const { startMs, endMs } = getClipRange(clip);
   const captionOffset = clip.captionOffset ?? 0;
   const captionEdits = clip.captionEdits ?? {};
 
-  const result: Caption[] = [];
-  let cumOutputMs = 0;
-  for (const seg of segments) {
-    const startFrame = Math.round((seg.startMs / 1000) * fps);
-    const snappedStartMs = (startFrame / fps) * 1000;
-    const durationInFrames = Math.max(
-      1,
-      Math.ceil(((seg.endMs - snappedStartMs) / 1000) * fps)
-    );
-    const segOutputMs = (durationInFrames / fps) * 1000;
+  const startFrame = Math.round((startMs / 1000) * fps);
+  const snappedStartMs = (startFrame / fps) * 1000;
 
-    for (let gi = 0; gi < allCaptions.length; gi++) {
-      const c = allCaptions[gi];
-      if (c.endMs <= seg.startMs || c.startMs >= seg.endMs) continue;
-      const clippedStart = Math.max(c.startMs, seg.startMs);
-      const clippedEnd = Math.min(c.endMs, seg.endMs);
-      result.push({
-        text: captionEdits[gi] ?? c.text,
-        startMs: clippedStart - snappedStartMs + cumOutputMs + captionOffset,
-        endMs: clippedEnd - snappedStartMs + cumOutputMs + captionOffset,
-        timestampMs:
-          c.timestampMs != null
-            ? Math.min(Math.max(c.timestampMs, clippedStart), clippedEnd) -
-              snappedStartMs +
-              cumOutputMs +
-              captionOffset
-            : null,
-        confidence: c.confidence,
-      });
-    }
-    cumOutputMs += segOutputMs;
+  const result: Caption[] = [];
+  for (let gi = 0; gi < allCaptions.length; gi++) {
+    const c = allCaptions[gi];
+    if (c.endMs <= startMs || c.startMs >= endMs) continue;
+    const clippedStart = Math.max(c.startMs, startMs);
+    const clippedEnd = Math.min(c.endMs, endMs);
+    result.push({
+      text: captionEdits[gi] ?? c.text,
+      startMs: clippedStart - snappedStartMs + captionOffset,
+      endMs: clippedEnd - snappedStartMs + captionOffset,
+      timestampMs:
+        c.timestampMs != null
+          ? Math.min(Math.max(c.timestampMs, clippedStart), clippedEnd) -
+            snappedStartMs +
+            captionOffset
+          : null,
+      confidence: c.confidence,
+    });
   }
   return result.sort((a, b) => a.startMs - b.startMs);
 }
 
-/** Build the clip object sent to /api/render — segments are canonical. */
+/** Build the clip object sent to /api/render — the effective range is baked into start/end. */
 function buildTrimmedClip(clip: ViralClip): ViralClip {
-  const segments = getClipSegments(clip);
+  const { startMs, endMs } = getClipRange(clip);
   return {
     ...clip,
-    segments,
-    startMs: segments[0].startMs,
-    endMs: segments[segments.length - 1].endMs,
+    startMs,
+    endMs,
     trimStartDelta: 0,
     trimEndDelta: 0,
   };
@@ -237,7 +226,7 @@ function buildTrimmedClip(clip: ViralClip): ViralClip {
 
 /** Compute the render key for a clip. */
 function clipRenderKey(clip: ViralClip): string {
-  return getClipRenderKey({ ...clip, segments: getClipSegments(clip) });
+  return getClipRenderKey(clip);
 }
 
 /** Download a single rendered clip to the target directory (or trigger browser download). */
@@ -325,12 +314,14 @@ interface ClipSelectorProps {
   videoName: string | null;
   renders: Record<string, ClipRenderState>;
   captions: CaptionWord[];
+  geminiAvailable?: boolean;
   onSelect: (clip: ViralClip) => void;
   onBack: () => void;
   onAddClip: (clip: ViralClip) => void;
+  onClipsRegenerated: (clips: ViralClip[]) => void;
 }
 
-export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, captions, onSelect, onBack, onAddClip }: ClipSelectorProps) {
+export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, captions, geminiAvailable = false, onSelect, onBack, onAddClip, onClipsRegenerated }: ClipSelectorProps) {
   const { fps } = useAppSettings();
   const [showForm, setShowForm] = useState(false);
   // ── Batch render state ─────────────────────────────────────────────────
@@ -339,6 +330,10 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
   const [batchTotal, setBatchTotal] = useState(0);
   const [batchDone, setBatchDone] = useState(0);
   const [batchError, setBatchError] = useState<string | null>(null);
+
+  // ── Regenerate clips state ─────────────────────────────────────────────
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenError, setRegenError] = useState<string | null>(null);
 
   // Mutable batch control — not state to avoid stale closures
   const batchRef = useRef<{
@@ -527,6 +522,58 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
     setShowForm(false);
   }, [onAddClip]);
 
+  const regenCancelledRef = useRef(false);
+
+  const stopRegenerate = useCallback(() => {
+    regenCancelledRef.current = true;
+    fetch(`/api/projects/${sessionId}/cancel`, { method: "POST" }).catch(() => {});
+    setRegenerating(false);
+  }, [sessionId]);
+
+  const handleRegenerate = useCallback(async () => {
+    if (regenerating) return;
+    if (clips.length > 0 && !window.confirm(
+      "Regenerate clips? This replaces the current suggestions (including any clips you added manually) with a fresh set from Gemini."
+    )) return;
+
+    regenCancelledRef.current = false;
+    setRegenError(null);
+    setRegenerating(true);
+    try {
+      const res = await fetch(`/api/projects/${sessionId}/regenerate-clips`, {
+        method: "POST",
+      });
+      if (regenCancelledRef.current) return;
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed to regenerate clips" }));
+        throw new Error(err.error || "Failed to regenerate clips");
+      }
+      const data = await res.json();
+      // Only replace when we actually got clips back — never wipe the existing set.
+      if (Array.isArray(data.clips) && data.clips.length > 0) {
+        onClipsRegenerated(data.clips);
+      } else {
+        throw new Error("Gemini returned no clips — try again");
+      }
+    } catch (err) {
+      if (regenCancelledRef.current) return;
+      setRegenError(err instanceof Error ? err.message : "Failed to regenerate clips");
+    } finally {
+      if (!regenCancelledRef.current) setRegenerating(false);
+    }
+  }, [regenerating, clips.length, sessionId, onClipsRegenerated]);
+
+  // Register regeneration as cancellable for Cmd+R
+  useEffect(() => {
+    if (!cancelPrompt || !regenerating) return;
+    cancelPrompt.register({
+      id: "regenerate-clips",
+      label: "clip regeneration",
+      onCancel: stopRegenerate,
+    });
+    return () => cancelPrompt.unregister("regenerate-clips");
+  }, [cancelPrompt, regenerating, stopRegenerate]);
+
 
   return (
     <div className="clip-selector">
@@ -543,35 +590,56 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
             {clips.length} clip{clips.length !== 1 ? "s" : ""}
           </p>
         </div>
-        {clips.length > 0 && (
+        {(geminiAvailable || clips.length > 0) && (
           <div className="render-all-wrapper">
-            <button
-              className="render-all-btn"
-              onClick={handleRenderAll}
-              disabled={batchState === "rendering" || batchState === "zipping"}
-              title={batchError ?? undefined}
-            >
-              {/* Film strip + download icon */}
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-                <line x1="7" y1="2" x2="7" y2="22" />
-                <line x1="17" y1="2" x2="17" y2="22" />
-                <line x1="2" y1="12" x2="22" y2="12" />
-                <line x1="2" y1="7" x2="7" y2="7" />
-                <line x1="2" y1="17" x2="7" y2="17" />
-                <line x1="17" y1="17" x2="22" y2="17" />
-                <line x1="17" y1="7" x2="22" y2="7" />
-              </svg>
-              {batchState === "done" ? "Done!" : "Render All"}
-              {batchState === "idle" && (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
+            <div className="clip-actions-row">
+              {geminiAvailable && (
+                <button
+                  className="regenerate-btn"
+                  onClick={handleRegenerate}
+                  disabled={regenerating || batchState === "rendering" || batchState === "zipping"}
+                  title="Ask Gemini for a fresh set of clip suggestions"
+                >
+                  {/* Refresh icon */}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                  {regenerating ? "Regenerating…" : "Regenerate"}
+                </button>
               )}
-            </button>
+              {clips.length > 0 && (
+                <button
+                  className="render-all-btn"
+                  onClick={handleRenderAll}
+                  disabled={batchState === "rendering" || batchState === "zipping" || regenerating}
+                  title={batchError ?? undefined}
+                >
+                  {/* Film strip + download icon */}
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                    <line x1="7" y1="2" x2="7" y2="22" />
+                    <line x1="17" y1="2" x2="17" y2="22" />
+                    <line x1="2" y1="12" x2="22" y2="12" />
+                    <line x1="2" y1="7" x2="7" y2="7" />
+                    <line x1="2" y1="17" x2="7" y2="17" />
+                    <line x1="17" y1="17" x2="22" y2="17" />
+                    <line x1="17" y1="7" x2="22" y2="7" />
+                  </svg>
+                  {batchState === "done" ? "Done!" : "Render All"}
+                  {batchState === "idle" && (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                  )}
+                </button>
+              )}
+            </div>
             {batchError && <p className="render-all-error">{batchError}</p>}
+            {regenError && <p className="render-all-error">{regenError}</p>}
           </div>
         )}
       </div>
@@ -646,6 +714,24 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
                 </span>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Regenerate clips overlay */}
+      {regenerating && (
+        <div className="batch-modal-overlay">
+          <div className="batch-modal">
+            <div className="batch-modal-icon spinning">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            </div>
+            <h3 className="batch-modal-title">Regenerating clips…</h3>
+            <p className="batch-modal-sub">Gemini is analyzing the transcript for a fresh set of clips</p>
+            <button className="secondary" onClick={stopRegenerate}>
+              Cancel
+            </button>
           </div>
         </div>
       )}

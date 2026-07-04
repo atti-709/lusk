@@ -44,48 +44,44 @@ export interface TranscriptData {
   words: TranscriptWord[];
 }
 
-export interface ClipSegment {
+/** A single contiguous clip range (in source-video milliseconds). */
+export interface ClipRange {
   startMs: number;
   endMs: number;
 }
 
 export interface ViralClip {
   title: string;
+  /** Base clip start in the source video (sentence boundary). */
   startMs: number;
+  /** Base clip end in the source video (sentence boundary). */
   endMs: number;
   hookText: string;
-  // Multi-cut: when present, render plays these segments back-to-back.
-  // When absent, falls back to a single segment derived from startMs/endMs + trim deltas.
-  segments?: ClipSegment[];
-  // UI State Persistence (trim deltas only used when segments is absent)
+  // UI State Persistence
   captionEdits?: Record<number, string>;
   captionOffset?: number;
+  /** User trim relative to `startMs` (ms; negative = earlier start). */
   trimStartDelta?: number;
+  /** User trim relative to `endMs` (ms; defaults to CLIP_TRAILING_MARGIN_MS). */
   trimEndDelta?: number;
   speakerOffsetX?: number;
 }
 
-/** Whisper timestamps tend to be slightly early; default trailing margin so the last caption fully shows. */
+/** Whisper timestamps tend to be slightly early; default trailing margin so the last word's audio fully plays. */
 export const CLIP_TRAILING_MARGIN_MS = 900;
 
-/** Returns the segments to actually render. Falls back to startMs/endMs + trim deltas for legacy clips. */
-export function getClipSegments(clip: ViralClip): ClipSegment[] {
-  if (clip.segments && clip.segments.length > 0) return clip.segments;
-  return [{
+/** Returns the effective source range to render, applying user trim deltas. */
+export function getClipRange(clip: ViralClip): ClipRange {
+  return {
     startMs: clip.startMs + (clip.trimStartDelta ?? 0),
     endMs: clip.endMs + (clip.trimEndDelta ?? CLIP_TRAILING_MARGIN_MS),
-  }];
+  };
 }
 
-/** Stable render key — single-segment clips keep the legacy `${startMs}-${endMs}` format for backwards compat with existing rendered files. */
-export function getClipRenderKey(clip: { startMs: number; endMs: number; segments?: ClipSegment[] }): string {
-  if (clip.segments && clip.segments.length > 1) {
-    return clip.segments.map((s) => `${s.startMs}-${s.endMs}`).join("_");
-  }
-  if (clip.segments && clip.segments.length === 1) {
-    return `${clip.segments[0].startMs}-${clip.segments[0].endMs}`;
-  }
-  return `${clip.startMs}-${clip.endMs}`;
+/** Stable render key derived from the effective (trimmed) range: `${startMs}-${endMs}`. */
+export function getClipRenderKey(clip: ViralClip): string {
+  const { startMs, endMs } = getClipRange(clip);
+  return `${startMs}-${endMs}`;
 }
 
 export interface CaptionWord {

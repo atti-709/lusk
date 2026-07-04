@@ -1,17 +1,16 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
 import type { Caption } from "@remotion/captions";
-import type { CaptionWord, ViralClip, ClipSegment, ClipRenderState, CaptionStyles } from "@lusk/shared";
+import type { CaptionWord, ViralClip, ClipRenderState, CaptionStyles } from "@lusk/shared";
 import {
   DEFAULT_CAPTION_STYLES,
-  getClipSegments,
+  getClipRange,
   getClipRenderKey,
 } from "@lusk/shared";
 import {
   VideoComposition,
   COMP_WIDTH,
   COMP_HEIGHT,
-  type CompSegment,
 } from "./VideoComposition";
 import { FONT_REGISTRY } from "./CaptionOverlay";
 import { useOutroConfig } from "../hooks/useOutroConfig";
@@ -81,24 +80,22 @@ function parseTimeInput(value: string): number | null {
   return null;
 }
 
-type SegmentLayout = {
+type ClipLayout = {
   startFromInFrames: number;
   durationInFrames: number;
   /** Frame-snapped source start in ms (used for caption remapping). */
   snappedStartMs: number;
 };
 
-/** Compute the per-segment frame layout. Mirrors RenderService.computeSegmentLayouts. */
-function buildSegmentLayouts(segments: ClipSegment[], fps: number): SegmentLayout[] {
-  return segments.map((seg) => {
-    const startFrame = Math.round((seg.startMs / 1000) * fps);
-    const snappedStartMs = (startFrame / fps) * 1000;
-    const durationInFrames = Math.max(
-      1,
-      Math.ceil(((seg.endMs - snappedStartMs) / 1000) * fps)
-    );
-    return { startFromInFrames: startFrame, durationInFrames, snappedStartMs };
-  });
+/** Compute the clip's frame layout. Mirrors RenderService.computeClipLayout. */
+function buildClipLayout(startMs: number, endMs: number, fps: number): ClipLayout {
+  const startFrame = Math.round((startMs / 1000) * fps);
+  const snappedStartMs = (startFrame / fps) * 1000;
+  const durationInFrames = Math.max(
+    1,
+    Math.ceil(((endMs - snappedStartMs) / 1000) * fps)
+  );
+  return { startFromInFrames: startFrame, durationInFrames, snappedStartMs };
 }
 
 export function StudioView({
@@ -123,31 +120,18 @@ export function StudioView({
 
   const [offsetX, setOffsetX] = useState(clip.speakerOffsetX ?? 0);
 
-  // Segments (canonical). Initialized from existing clip segments OR from legacy trim deltas.
-  const [segments, setSegments] = useState<ClipSegment[]>(() => getClipSegments(clip));
+  // Clip range (canonical). Initialized from the clip's effective range (base + any trim deltas).
+  const [range, setRange] = useState<{ startMs: number; endMs: number }>(() => getClipRange(clip));
 
-  // Per-segment editable text inputs (so partial typing doesn't wipe state).
-  const [segmentEdits, setSegmentEdits] = useState<{ start: string; end: string }[]>(() =>
-    getClipSegments(clip).map((s) => ({
-      start: formatTimeInput(s.startMs),
-      end: formatTimeInput(s.endMs),
-    }))
-  );
+  // Editable text inputs (so partial typing doesn't wipe state).
+  const [rangeEdits, setRangeEdits] = useState<{ start: string; end: string }>(() => {
+    const r = getClipRange(clip);
+    return { start: formatTimeInput(r.startMs), end: formatTimeInput(r.endMs) };
+  });
 
-  // Build segment layouts (frame-aligned).
-  const segmentLayouts = useMemo(() => buildSegmentLayouts(segments, fps), [segments, fps]);
-  const clipDurationInFrames = useMemo(
-    () => segmentLayouts.reduce((sum, s) => sum + s.durationInFrames, 0),
-    [segmentLayouts]
-  );
-
-  const compSegments: CompSegment[] = useMemo(
-    () => segmentLayouts.map((s) => ({
-      startFromInFrames: s.startFromInFrames,
-      durationInFrames: s.durationInFrames,
-    })),
-    [segmentLayouts]
-  );
+  // Build the frame-aligned clip layout.
+  const layout = useMemo(() => buildClipLayout(range.startMs, range.endMs, fps), [range, fps]);
+  const clipDurationInFrames = layout.durationInFrames;
 
   const handlePersistState = useCallback(
     (updates: Partial<ViralClip>) => {
@@ -156,78 +140,44 @@ export function StudioView({
     [clip, onClipUpdate]
   );
 
-  /** Persist segments as the canonical state; clear legacy trim deltas. */
-  const persistSegments = useCallback(
-    (next: ClipSegment[]) => {
-      handlePersistState({ segments: next, trimStartDelta: 0, trimEndDelta: 0 });
+  /** Persist the range as base start/end; trims are baked in so deltas stay zero. */
+  const persistRange = useCallback(
+    (next: { startMs: number; endMs: number }) => {
+      handlePersistState({
+        startMs: next.startMs,
+        endMs: next.endMs,
+        trimStartDelta: 0,
+        trimEndDelta: 0,
+      });
     },
     [handlePersistState]
   );
 
-  const updateSegmentBoundary = useCallback(
-    (index: number, key: "startMs" | "endMs", ms: number) => {
-      setSegments((prev) => {
-        const next = prev.map((s, i) => (i === index ? { ...s, [key]: ms } : s));
-        persistSegments(next);
-        return next;
-      });
-    },
-    [persistSegments]
-  );
-
-  const handleSegmentInputChange = useCallback(
-    (index: number, field: "start" | "end", raw: string) => {
-      setSegmentEdits((prev) =>
-        prev.map((e, i) => (i === index ? { ...e, [field]: raw } : e))
-      );
+  const handleRangeInputChange = useCallback(
+    (field: "start" | "end", raw: string) => {
+      setRangeEdits((prev) => ({ ...prev, [field]: raw }));
       const ms = parseTimeInput(raw);
       if (ms == null) return;
-      updateSegmentBoundary(index, field === "start" ? "startMs" : "endMs", ms);
-    },
-    [updateSegmentBoundary]
-  );
-
-  const addCut = useCallback(() => {
-    setSegments((prev) => {
-      const last = prev[prev.length - 1];
-      const gap = 1000;
-      const newStart = last.endMs + gap;
-      const newEnd = newStart + 5000;
-      const next = [...prev, { startMs: newStart, endMs: newEnd }];
-      persistSegments(next);
-      setSegmentEdits((edits) => [
-        ...edits,
-        { start: formatTimeInput(newStart), end: formatTimeInput(newEnd) },
-      ]);
-      return next;
-    });
-  }, [persistSegments]);
-
-  const removeSegment = useCallback(
-    (index: number) => {
-      setSegments((prev) => {
-        if (prev.length <= 1) return prev;
-        const next = prev.filter((_, i) => i !== index);
-        persistSegments(next);
-        setSegmentEdits((edits) => edits.filter((_, i) => i !== index));
+      setRange((prev) => {
+        const next = field === "start" ? { ...prev, startMs: ms } : { ...prev, endMs: ms };
+        persistRange(next);
         return next;
       });
     },
-    [persistSegments]
+    [persistRange]
   );
 
-  // Trimmed clip (canonical for render) — uses segments.
+  // Trimmed clip (canonical for render).
   const trimmedClip: ViralClip = useMemo(() => ({
     ...clip,
-    segments,
-    startMs: segments[0].startMs,
-    endMs: segments[segments.length - 1].endMs,
+    startMs: range.startMs,
+    endMs: range.endMs,
     speakerOffsetX: offsetX,
     trimStartDelta: 0,
     trimEndDelta: 0,
     captionEdits: clip.captionEdits,
     captionOffset: clip.captionOffset,
-  }), [clip, segments, offsetX]);
+  }), [clip, range, offsetX]);
 
   const key = getClipRenderKey(trimmedClip);
   const renderState = renders[key] ?? null;
@@ -254,15 +204,13 @@ export function StudioView({
   const overlap = outroDurationInFrames > 0 ? outroOverlap : 0;
   const durationInFrames = clipDurationInFrames + outroDurationInFrames - overlap;
 
-  // Captions overlapping any segment, sorted by source-time globalIndex (for the textarea).
+  // Captions overlapping the clip range, sorted by source-time globalIndex (for the textarea).
   const clipCaptionIndices = useMemo(
     () =>
       captions
         .map((c, i) => ({ caption: c, globalIndex: i }))
-        .filter(({ caption }) =>
-          segments.some((seg) => caption.endMs > seg.startMs && caption.startMs < seg.endMs)
-        ),
-    [captions, segments]
+        .filter(({ caption }) => caption.endMs > range.startMs && caption.startMs < range.endMs),
+    [captions, range]
   );
 
   const [captionEdits, setCaptionEdits] = useState<Record<number, string>>(clip.captionEdits ?? {});
@@ -362,43 +310,30 @@ export function StudioView({
 
   const isStylesModified = JSON.stringify(captionStyles) !== JSON.stringify(DEFAULT_CAPTION_STYLES);
 
-  // Build remotion captions remapped onto the multi-segment output timeline.
+  // Build remotion captions remapped onto the clip output timeline.
   const remotionCaptions: Caption[] = useMemo(() => {
     const result: Caption[] = [];
-    let cumOutputMs = 0;
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
-      const layout = segmentLayouts[i];
-      const segOutputMs = (layout.durationInFrames / fps) * 1000;
-      for (const { caption: c, globalIndex } of clipCaptionIndices) {
-        if (c.endMs <= seg.startMs || c.startMs >= seg.endMs) continue;
-        const clippedStart = Math.max(c.startMs, seg.startMs);
-        const clippedEnd = Math.min(c.endMs, seg.endMs);
-        const startMs = clippedStart - layout.snappedStartMs + cumOutputMs + captionOffset;
-        const endMs = clippedEnd - layout.snappedStartMs + cumOutputMs + captionOffset;
-        const tsMs =
+    for (const { caption: c, globalIndex } of clipCaptionIndices) {
+      if (c.endMs <= range.startMs || c.startMs >= range.endMs) continue;
+      const clippedStart = Math.max(c.startMs, range.startMs);
+      const clippedEnd = Math.min(c.endMs, range.endMs);
+      result.push({
+        text: captionEdits[globalIndex] ?? c.text,
+        startMs: clippedStart - layout.snappedStartMs + captionOffset,
+        endMs: clippedEnd - layout.snappedStartMs + captionOffset,
+        timestampMs:
           c.timestampMs != null
             ? Math.min(Math.max(c.timestampMs, clippedStart), clippedEnd) -
               layout.snappedStartMs +
-              cumOutputMs +
               captionOffset
-            : null;
-        result.push({
-          text: captionEdits[globalIndex] ?? c.text,
-          startMs,
-          endMs,
-          timestampMs: tsMs,
-          confidence: c.confidence,
-        });
-      }
-      cumOutputMs += segOutputMs;
+            : null,
+        confidence: c.confidence,
+      });
     }
     return result.sort((a, b) => a.startMs - b.startMs);
-  }, [segments, segmentLayouts, clipCaptionIndices, captionEdits, captionOffset, fps]);
+  }, [range, layout, clipCaptionIndices, captionEdits, captionOffset]);
 
-  const clipDurationSec = (
-    segments.reduce((sum, s) => sum + (s.endMs - s.startMs), 0) / 1000
-  ).toFixed(1);
+  const clipDurationSec = ((range.endMs - range.startMs) / 1000).toFixed(1);
   const totalDurationSec = (durationInFrames / fps).toFixed(1);
 
   const handleRender = useCallback(async () => {
@@ -408,8 +343,6 @@ export function StudioView({
     playerRef.current?.pause();
     onRender(trimmedClip, offsetX, remotionCaptions);
   }, [onRender, trimmedClip, offsetX, remotionCaptions, suggestedFilename]);
-
-  const isMultiSegment = segments.length > 1;
 
   return (
     <div className="studio">
@@ -438,8 +371,7 @@ export function StudioView({
                 videoUrl,
                 captions: remotionCaptions,
                 offsetX,
-                segments: compSegments,
-                startFrom: compSegments[0]?.startFromInFrames ?? 0,
+                startFrom: layout.startFromInFrames,
                 outroSrc: outroActive ? outroConfig.outroSrc : "",
                 outroDurationInFrames,
                 outroOverlapFrames: outroOverlap,
@@ -564,55 +496,33 @@ export function StudioView({
             )}
           </div>
 
-          {/* Segments (cuts) */}
+          {/* Clip range (start / end) */}
           <div className="control-group">
-            <label className="control-label">
-              {isMultiSegment ? `Segments (${segments.length})` : "Segment"}
-            </label>
+            <label className="control-label">Clip range</label>
             <div className="segments-list">
-              {segments.map((seg, i) => (
-                <div key={i} className="segment-row">
-                  <span className="segment-label">{i + 1}.</span>
-                  <input
-                    type="text"
-                    className="segment-time-input"
-                    value={segmentEdits[i]?.start ?? formatTimeInput(seg.startMs)}
-                    onChange={(e) => handleSegmentInputChange(i, "start", e.target.value)}
-                    onBlur={() => setSegmentEdits((prev) =>
-                      prev.map((p, j) => (j === i ? { ...p, start: formatTimeInput(segments[i].startMs) } : p))
-                    )}
-                    placeholder="0:00"
-                  />
-                  <span className="segment-dash">—</span>
-                  <input
-                    type="text"
-                    className="segment-time-input"
-                    value={segmentEdits[i]?.end ?? formatTimeInput(seg.endMs)}
-                    onChange={(e) => handleSegmentInputChange(i, "end", e.target.value)}
-                    onBlur={() => setSegmentEdits((prev) =>
-                      prev.map((p, j) => (j === i ? { ...p, end: formatTimeInput(segments[i].endMs) } : p))
-                    )}
-                    placeholder="0:00"
-                  />
-                  <span className="segment-duration">
-                    {((seg.endMs - seg.startMs) / 1000).toFixed(1)}s
-                  </span>
-                  {segments.length > 1 && (
-                    <button
-                      type="button"
-                      className="segment-remove"
-                      onClick={() => removeSegment(i)}
-                      title="Remove segment"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
+              <div className="segment-row">
+                <input
+                  type="text"
+                  className="segment-time-input"
+                  value={rangeEdits.start}
+                  onChange={(e) => handleRangeInputChange("start", e.target.value)}
+                  onBlur={() => setRangeEdits((prev) => ({ ...prev, start: formatTimeInput(range.startMs) }))}
+                  placeholder="0:00"
+                />
+                <span className="segment-dash">—</span>
+                <input
+                  type="text"
+                  className="segment-time-input"
+                  value={rangeEdits.end}
+                  onChange={(e) => handleRangeInputChange("end", e.target.value)}
+                  onBlur={() => setRangeEdits((prev) => ({ ...prev, end: formatTimeInput(range.endMs) }))}
+                  placeholder="0:00"
+                />
+                <span className="segment-duration">
+                  {((range.endMs - range.startMs) / 1000).toFixed(1)}s
+                </span>
+              </div>
             </div>
-            <button type="button" className="secondary segment-add" onClick={addCut}>
-              + Add cut
-            </button>
           </div>
 
           {/* Clip duration display */}

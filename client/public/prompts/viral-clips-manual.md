@@ -2,7 +2,7 @@
 
 I will provide a corrected transcript (.tsv) below.
 
-Based on the corrected transcript, identify 4-8 segments that would make the most viral short-form video clips.
+Based on the corrected transcript, identify 12-16 segments that would make the most viral short-form video clips. Mine the whole transcript, not just the first third — cover distinct topics, stories, and standout lines. Each clip is a **single contiguous range** — one start, one end. Never stitch or reorder parts of the transcript.
 
 ## Duration Requirements (CRITICAL)
 
@@ -21,14 +21,20 @@ Look for segments that contain:
 
 **Prefer complete segments** that tell a mini-story over short zingers. A 20-second clip with context + punchline always outperforms a 5-second soundbite.
 
-## Clip Boundaries
+## Clip Boundaries — CUT ONLY AT SENTENCE ENDS (THE #1 RULE)
 
-Pay CRITICAL attention to clip boundaries, especially the ENDINGS:
-1. **Start Strong:** Each clip must START at the beginning of a sentence or a clear thought. Never start mid-sentence.
-2. **Narrative Closure:** The end of the clip MUST resolve the premise introduced in the hook. If the current thought requires the next sentence to make sense, include it.
+The single most important rule: **every clip must begin at the first word of a sentence and end at the last word of a sentence.** A clip that starts or ends mid-sentence is REJECTED no matter how good the content — mid-sentence cuts produce jarring audio jumps and dangling grammar.
+
+- **Start:** copy the timestamp of the first word of your opening sentence. The word right before it in the TSV must end in `.`, `!`, or `?` (or it's the first word of the transcript).
+- **End:** find the word that ends your closing sentence (ends in `.`, `!`, or `?`) and use the NEXT word's timestamp so the closing word plays in full.
+- **Self-check:** read the words between start and end — they must begin a fresh thought and end on a completed sentence.
+
+On top of the boundary rule:
+1. **Start Strong:** Open on a sentence that hooks — a bold claim, question, or surprising setup. Never open on throat-clearing.
+2. **Narrative Closure:** The end MUST resolve the premise introduced in the hook. If the current thought requires the next sentence to make sense, include it (and end on ITS sentence boundary).
 3. **The "Mic-Drop" Rule:** The final sentence should feel like a natural, impactful conclusion, punchline, or thought-provoking statement. It should leave the viewer satisfied, not confused.
 4. **Avoid Cliffhangers:** Ensure the final sentence does not accidentally introduce a brand new idea that gets cut off.
-5. **Include the Takeaway:** The clip should contain enough context so the viewer understands the point AND the conclusion/takeaway. If the speaker reveals something interesting at second 10, include the 15 seconds of context before it AND the reaction/implication after it.
+5. **Include the Takeaway:** The clip should contain enough context so the viewer understands the point AND the conclusion/takeaway. If the speaker reveals something interesting at second 10, include the context before it AND the reaction/implication after it.
 
 ## Output Format
 
@@ -48,4 +54,4 @@ Takeaway: ...
 Start: ...
 End: ...
 
-IMPORTANT: Verify that (1) the exact text between your chosen Start and End timestamps forms a complete, logical, and satisfying narrative from start to finish, (2) the duration is between 10-30 seconds, and (3) the clip contains a clear takeaway. Use the exact timestamps from the TSV file. Do not approximate.
+IMPORTANT: Verify that (1) Start is a sentence boundary — the word before it ends in `.`, `!`, or `?` (or it's the first word), (2) End is a sentence boundary — taken from the next word right after a word ending in `.`, `!`, or `?`, (3) the exact text between Start and End forms a complete, logical, satisfying narrative that begins and ends on whole sentences, (4) the duration is between 10-30 seconds, and (5) the clip contains a clear takeaway. Use the exact timestamps from the TSV file. Do not approximate.

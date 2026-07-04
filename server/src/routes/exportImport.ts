@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { readdir } from "node:fs/promises";
 import type { ErrorResponse } from "@lusk/shared";
-import { getClipSegments, getClipRenderKey } from "@lusk/shared";
+import { getClipRenderKey } from "@lusk/shared";
 import { orchestrator } from "../services/Orchestrator.js";
 import { tempManager } from "../services/TempManager.js";
 
@@ -41,8 +41,7 @@ export async function exportImportRoute(app: FastifyInstance) {
       // Build a map from effective render key → clip title
       const nameMap = new Map<string, string>();
       for (const clip of session.viralClips ?? []) {
-        const segments = getClipSegments(clip);
-        const key = getClipRenderKey({ ...clip, segments });
+        const key = getClipRenderKey(clip);
         // Sanitize title for use as a filename
         const safeName = clip.title.replace(/[^\w\s\-]/g, "_").trim().slice(0, 60) || key;
         nameMap.set(key, safeName);
