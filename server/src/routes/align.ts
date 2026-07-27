@@ -38,18 +38,76 @@ function wordsToTsv(words: TranscriptWord[]): string {
   return words.map((w) => `${msToTimestamp(w.startMs)}\t${w.word}`).join("\n");
 }
 
+const TIMESTAMP_ONLY = /^\d{1,2}:\d{2}(:\d{2})?([.,]\d+)?$/;
+
+/**
+ * Parse a corrected TSV back into timed words.
+ *
+ * A correction may need to *insert* a word that was never transcribed as its own token —
+ * a missing preposition, say. Such a row can leave the timestamp column empty (or omit
+ * the tab entirely, or repeat the previous row's timestamp); it is then timed by
+ * subdividing the slot of the word before it. Every timestamped row keeps exactly the
+ * start it was given, so an insertion never shifts the words around it.
+ */
 export function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
   const lines = tsv.trim().split("\n").filter((l) => l.trim());
-  const words: TranscriptWord[] = [];
+
+  // startMs === null marks an inserted word, timed below from its neighbours
+  const parsed: { word: string; startMs: number | null }[] = [];
+  let lastAnchorMs = -1;
+
   for (const line of lines) {
-    const [timestamp, ...rest] = line.split("\t");
-    const word = rest.join("\t").trim();
-    if (!timestamp || !word) continue;
-    words.push({ word, startMs: timestampToMs(timestamp.trim()), endMs: 0 });
+    const tab = line.indexOf("\t");
+    const timestamp = tab === -1 ? "" : line.slice(0, tab).trim();
+    const word = (tab === -1 ? line : line.slice(tab + 1)).trim();
+    // A bare timestamp with no word carries nothing
+    if (!word || (tab === -1 && TIMESTAMP_ONLY.test(word))) continue;
+
+    if (!timestamp) {
+      parsed.push({ word, startMs: null });
+      continue;
+    }
+
+    const startMs = timestampToMs(timestamp);
+    // A repeated or backwards timestamp can't anchor a word — treat the row as inserted
+    parsed.push({ word, startMs: startMs > lastAnchorMs ? startMs : null });
+    if (startMs > lastAnchorMs) lastAnchorMs = startMs;
   }
+
+  const words: TranscriptWord[] = parsed.map((p) => ({
+    word: p.word,
+    startMs: p.startMs ?? 0,
+    endMs: 0,
+  }));
+
+  // Time each run of inserted words by splitting the slot between its surrounding anchors
+  for (let i = 0; i < parsed.length; i++) {
+    if (parsed[i].startMs !== null) continue;
+
+    let runEnd = i;
+    while (runEnd < parsed.length && parsed[runEnd].startMs === null) runEnd++;
+    const count = runEnd - i;
+    const next = runEnd < parsed.length ? (parsed[runEnd].startMs as number) : fallbackEndMs;
+
+    if (i > 0) {
+      // Split [prevStart, next) into count + 1 slices — the anchor keeps the first one,
+      // so only its endMs moves
+      const prev = words[i - 1].startMs;
+      const step = next > prev ? (next - prev) / (count + 1) : 120;
+      for (let k = 0; k < count; k++) words[i + k].startMs = Math.round(prev + step * (k + 1));
+    } else {
+      // Nothing before the run to borrow from — take the time ahead of the first anchor
+      const step = Math.min(next / (count + 1), 120);
+      for (let k = 0; k < count; k++) words[k].startMs = Math.round(next - step * (count - k));
+    }
+
+    i = runEnd - 1;
+  }
+
   // Compute endMs: next word's startMs, last word uses fallbackEndMs
   for (let i = 0; i < words.length; i++) {
-    words[i].endMs = i < words.length - 1 ? words[i + 1].startMs : fallbackEndMs;
+    const end = i < words.length - 1 ? words[i + 1].startMs : fallbackEndMs;
+    words[i].endMs = Math.max(end, words[i].startMs + 1);
   }
   return words;
 }

@@ -262,10 +262,12 @@ export function AlignStep({ sessionId, geminiAvailable = false }: AlignStepProps
         </div>
         <p className="align-section-desc">
           Paste the corrected TSV from Gemini's output below. It will be saved automatically when you click Next.
+          To add a missing word, insert a row and leave its timestamp empty — it borrows time from the
+          word before it, and the surrounding timings stay put.
         </p>
         <textarea
           className="align-textarea"
-          placeholder={"00:00:01.234\tPrvé\n00:00:01.567\tslovo\n..."}
+          placeholder={"00:00:01.234\tPrvé\n00:00:01.567\tslovo\n\tvložené\n..."}
           value={correctedTsv}
           onChange={(e) => setCorrectedTsv(e.target.value)}
           rows={10}
