@@ -12,8 +12,21 @@ import type { CaptionWord } from "@lusk/shared";
 import { getClipRange } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
 
-/** Computes the frame layout for a single clip range using the render's rounding rule. */
-function computeClipLayout(startMs: number, endMs: number, fps: number): {
+/**
+ * Computes the frame layout for a single clip range using the render's rounding rule.
+ *
+ * `sourceDurationMs` caps the range at the end of the source video. Remotion's
+ * OffthreadVideo does not fail when asked for a timestamp past the end of a file — it
+ * silently hands back the last decoded frame, so an over-long range renders as a frozen
+ * tail. `getClipRange` adds CLIP_TRAILING_MARGIN_MS to every clip end and `Math.ceil`
+ * adds up to a frame more, so clips near the end of a video overrun by default.
+ */
+export function computeClipLayout(
+  startMs: number,
+  endMs: number,
+  fps: number,
+  sourceDurationMs?: number | null
+): {
   startFromInFrames: number;
   durationInFrames: number;
   /** Frame-snapped source start in ms — used for caption remapping. */
@@ -21,10 +34,17 @@ function computeClipLayout(startMs: number, endMs: number, fps: number): {
 } {
   const startFromInFrames = Math.round((startMs / 1000) * fps);
   const snappedStartMs = (startFromInFrames / fps) * 1000;
-  const durationInFrames = Math.max(
+  let durationInFrames = Math.max(
     1,
     Math.ceil(((endMs - snappedStartMs) / 1000) * fps)
   );
+
+  if (sourceDurationMs != null && sourceDurationMs > 0) {
+    // Frame indices run 0..sourceFrames-1, so the clip must end by sourceFrames
+    const sourceFrames = Math.floor((sourceDurationMs / 1000) * fps);
+    durationInFrames = Math.max(1, Math.min(durationInFrames, sourceFrames - startFromInFrames));
+  }
+
   return { startFromInFrames, durationInFrames, snappedStartMs };
 }
 
@@ -215,8 +235,12 @@ class RenderService {
     const captionStyles = await settingsService.getCaptionStyles();
 
     const { startMs, endMs } = getClipRange(clip);
+    // Probe rather than trust the session: the clip range carries a trailing margin and
+    // user trims, neither of which is bounded by the video's actual length.
+    const sourceDurationSec = await this.probeDuration(path.join(sessionDir, "input.mp4"));
+    const sourceDurationMs = sourceDurationSec > 0 ? sourceDurationSec * 1000 : null;
     const { startFromInFrames, durationInFrames: clipDurationInFrames, snappedStartMs } =
-      computeClipLayout(startMs, endMs, fps);
+      computeClipLayout(startMs, endMs, fps, sourceDurationMs);
 
     const remotionCaptions: Caption[] =
       preProcessedCaptions ??

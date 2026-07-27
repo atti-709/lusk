@@ -41,6 +41,7 @@ interface StudioViewProps {
   renders: Record<string, ClipRenderState>;
   onClipUpdate: (clip: ViralClip) => void;
   sourceAspectRatio?: number | null;
+  videoDurationMs?: number | null;
 }
 
 /** Format ms as M:SS.s for editable text input. */
@@ -88,13 +89,27 @@ type ClipLayout = {
 };
 
 /** Compute the clip's frame layout. Mirrors RenderService.computeClipLayout. */
-function buildClipLayout(startMs: number, endMs: number, fps: number): ClipLayout {
+function buildClipLayout(
+  startMs: number,
+  endMs: number,
+  fps: number,
+  sourceDurationMs?: number | null
+): ClipLayout {
   const startFrame = Math.round((startMs / 1000) * fps);
   const snappedStartMs = (startFrame / fps) * 1000;
-  const durationInFrames = Math.max(
+  let durationInFrames = Math.max(
     1,
     Math.ceil(((endMs - snappedStartMs) / 1000) * fps)
   );
+
+  // Cap at the end of the source, exactly as the render does — past that the video
+  // element just holds its last frame, so the preview would promise a tail the
+  // exported file doesn't have.
+  if (sourceDurationMs != null && sourceDurationMs > 0) {
+    const sourceFrames = Math.floor((sourceDurationMs / 1000) * fps);
+    durationInFrames = Math.max(1, Math.min(durationInFrames, sourceFrames - startFrame));
+  }
+
   return { startFromInFrames: startFrame, durationInFrames, snappedStartMs };
 }
 
@@ -108,6 +123,7 @@ export function StudioView({
   renders,
   onClipUpdate,
   sourceAspectRatio,
+  videoDurationMs,
 }: StudioViewProps) {
   const playerRef = useRef<PlayerRef>(null);
   const { config: outroConfig, reload: reloadOutro } = useOutroConfig();
@@ -130,7 +146,10 @@ export function StudioView({
   });
 
   // Build the frame-aligned clip layout.
-  const layout = useMemo(() => buildClipLayout(range.startMs, range.endMs, fps), [range, fps]);
+  const layout = useMemo(
+    () => buildClipLayout(range.startMs, range.endMs, fps, videoDurationMs),
+    [range, fps, videoDurationMs]
+  );
   const clipDurationInFrames = layout.durationInFrames;
 
   const handlePersistState = useCallback(

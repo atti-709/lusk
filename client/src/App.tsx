@@ -818,6 +818,7 @@ function App() {
             onBack={handleBackToClips}
             renders={state.renders ?? {}}
             sourceAspectRatio={sourceAspectRatio}
+            videoDurationMs={state.videoDurationMs}
             onClipUpdate={(updatedClip) => {
               // Update local state for persistence
               setViralClips((prev) =>
