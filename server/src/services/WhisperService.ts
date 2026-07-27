@@ -34,6 +34,12 @@ interface WhisperXOutput {
   segments: WhisperXSegment[];
 }
 
+/** A word before unalignable entries have been given timestamps; null = not aligned. */
+type UntimedWord = { word: string; startMs: number | null; endMs: number | null };
+
+/** Duration assumed for an unalignable word with no aligned neighbour to borrow from. */
+const UNALIGNED_WORD_MS = 300;
+
 class WhisperService {
   async isAvailable(): Promise<boolean> {
     if (pythonEnvService.isReady()) return true;
@@ -260,24 +266,31 @@ class WhisperService {
     onProgress?.(96, "Processing results...");
 
     // Step 4: Extract word-level data from WhisperX segments.
-    const words: TranscriptWord[] = [];
+    //
+    // wav2vec2 aligns against a character vocabulary that holds letters only — the Slovak
+    // model has no digits whatsoever — so a token like "10" is unalignable and WhisperX
+    // returns it with no start/end at all. Leave those untimed here and interpolate them
+    // from their neighbours below; falling back to the segment's own span would park the
+    // word at the start of the sentence with a multi-second duration.
+    const untimed: UntimedWord[] = [];
 
     for (const segment of whisperXOutput.segments) {
       if (!segment.words?.length) continue;
 
       for (const w of segment.words) {
-        const startSec = w.start ?? segment.start;
-        const endSec = w.end ?? segment.end;
+        const word = w.word.trim();
+        if (!word) continue;
 
-        words.push({
-          word: w.word.trim(),
-          startMs: Math.round(startSec * 1000),
-          endMs: Math.round(endSec * 1000),
+        const aligned = w.start != null && w.end != null;
+        untimed.push({
+          word,
+          startMs: aligned ? Math.round(w.start! * 1000) : null,
+          endMs: aligned ? Math.round(w.end! * 1000) : null,
         });
       }
     }
 
-    this.interpolateMissingTimestamps(words);
+    const words = this.resolveMissingTimestamps(untimed);
 
     const captions: CaptionWord[] = words.map((w, i) => ({
       text: i === 0 ? w.word : ` ${w.word}`,
@@ -306,35 +319,51 @@ class WhisperService {
   }
 
   /**
-   * Fill in timestamps for words where alignment failed.
+   * Give every word wav2vec2 could not align (digits, symbols — anything outside its
+   * character vocabulary) a timestamp, by spreading each run of them across the gap
+   * between the nearest aligned words on either side. Aligned words keep their own
+   * timings untouched.
    */
-  private interpolateMissingTimestamps(words: TranscriptWord[]): void {
-    for (let i = 0; i < words.length; i++) {
-      if (words[i].startMs === words[i].endMs && i > 0) {
-        let nextAligned = i + 1;
-        while (
-          nextAligned < words.length &&
-          words[nextAligned].startMs === words[nextAligned].endMs
-        ) {
-          nextAligned++;
-        }
+  private resolveMissingTimestamps(untimed: UntimedWord[]): TranscriptWord[] {
+    const words: TranscriptWord[] = untimed.map((w) => ({
+      word: w.word,
+      startMs: w.startMs ?? 0,
+      endMs: w.endMs ?? 0,
+    }));
 
-        const prevEnd = words[i - 1].endMs;
-        const nextStart =
-          nextAligned < words.length
-            ? words[nextAligned].startMs
-            : prevEnd + (nextAligned - i + 1) * 300;
+    for (let i = 0; i < untimed.length; i++) {
+      if (untimed[i].startMs !== null) continue;
 
-        const count = nextAligned - i;
-        const step = (nextStart - prevEnd) / (count + 1);
+      // Run of consecutive unalignable words [i, runEnd)
+      let runEnd = i;
+      while (runEnd < untimed.length && untimed[runEnd].startMs === null) runEnd++;
+      const count = runEnd - i;
 
-        for (let j = 0; j < count; j++) {
-          const idx = i + j;
-          words[idx].startMs = Math.round(prevEnd + step * (j + 1));
-          words[idx].endMs = Math.round(prevEnd + step * (j + 2));
-        }
+      // The gap between the surrounding aligned words is exactly when these were spoken
+      const prevEnd = i > 0 ? words[i - 1].endMs : null;
+      const nextStart = runEnd < untimed.length ? (untimed[runEnd].startMs as number) : null;
+
+      let from = prevEnd ?? Math.max(0, (nextStart ?? 0) - count * UNALIGNED_WORD_MS);
+      const to = nextStart ?? from + count * UNALIGNED_WORD_MS;
+
+      // The aligned neighbours can leave no gap at all. Take the room from the tail of
+      // the previous word — trimming its end keeps every start where wav2vec2 put it.
+      if (to - from < count && i > 0) {
+        from = Math.max(words[i - 1].startMs + count, to - count * UNALIGNED_WORD_MS);
+        words[i - 1].endMs = Math.min(words[i - 1].endMs, from);
       }
+
+      const step = Math.max((to - from) / count, 1);
+
+      for (let j = 0; j < count; j++) {
+        words[i + j].startMs = Math.round(from + step * j);
+        words[i + j].endMs = Math.round(from + step * (j + 1));
+      }
+
+      i = runEnd - 1;
     }
+
+    return words;
   }
 }
 
