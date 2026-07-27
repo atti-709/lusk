@@ -112,6 +112,57 @@ export type CaptionOverlayProps = {
   captionStyles?: CaptionStyles;
 };
 
+type TikTokToken = TikTokPage["tokens"][number];
+
+// Abbreviations that end in a period without ending the sentence.
+const ABBREVIATIONS = new Set([
+  "napr.", "atď.", "atd.", "tzv.", "tj.", "t.j.", "resp.", "cca.", "č.", "c.",
+  "str.", "obr.", "tab.", "mil.", "mld.", "tis.", "hod.", "min.", "sek.",
+  "st.", "stor.", "roč.", "pozn.", "vs.", "kt.", "spol.", "ul.", "nám.",
+  "p.", "prof.", "doc.", "dr.", "mudr.", "ing.", "mgr.", "phdr.", "judr.", "bc.",
+  "s.r.o.", "a.s.",
+]);
+
+// Opening punctuation that can precede the first letter of a sentence
+const LEADING_PUNCTUATION = /^[„“"'(\[–—-]+/;
+
+function startsUppercase(text: string): boolean {
+  const first = text.replace(LEADING_PUNCTUATION, "").trim()[0];
+  if (!first) return false;
+  // Letters only — a digit has no case, so `toUpperCase()` leaves it unchanged
+  return first === first.toLocaleUpperCase("sk") && first !== first.toLocaleLowerCase("sk");
+}
+
+/**
+ * A trailing period is not enough: Slovak writes ordinals with one ("v 19. storočí",
+ * "5. marca", "2. miesto"), as do abbreviations. Splitting on those strands the number
+ * on a page of its own. Require the next token to start a new sentence instead.
+ */
+function isSentenceEnd(token: TikTokToken, next: TikTokToken | undefined): boolean {
+  const text = token.text.trim();
+  if (/[!?]$/.test(text)) return true;
+  if (!text.endsWith(".")) return false;
+  if (ABBREVIATIONS.has(text.toLocaleLowerCase("sk"))) return false;
+  return next ? startsUppercase(next.text) : true;
+}
+
+function makePage(chunk: TikTokToken[]): TikTokPage {
+  // `createTikTokStyleCaptions` strips the leading space off a page's first token and
+  // leaves it on every other one. Regrouping changes which token is first, so re-normalise
+  // — otherwise a page starts with a stray space or two words run together.
+  const tokens = chunk.map((t, i) => {
+    const text = i === 0 ? t.text.trimStart() : /^\s/.test(t.text) ? t.text : ` ${t.text}`;
+    return text === t.text ? t : { ...t, text };
+  });
+  const last = tokens[tokens.length - 1];
+  return {
+    startMs: tokens[0].fromMs,
+    tokens,
+    text: tokens.map((t) => t.text).join(""),
+    durationMs: last.toMs - tokens[0].fromMs,
+  };
+}
+
 /**
  * Split pages at sentence boundaries so the last word of a sentence
  * and the first word of the next never appear on screen together.
@@ -126,36 +177,65 @@ function splitAtSentenceBoundaries(pages: TikTokPage[]): TikTokPage[] {
       continue;
     }
 
-    // Find split points: after tokens whose text ends with sentence punctuation
+    // Find split points: after tokens that end a sentence
     let chunkStart = 0;
-    for (let i = 0; i < tokens.length; i++) {
-      const endsWithPunctuation = /[.!?]$/.test(tokens[i].text.trim());
-      const isLastToken = i === tokens.length - 1;
-
-      if (endsWithPunctuation && !isLastToken) {
-        // Split here: tokens[chunkStart..i] become one page
-        const chunk = tokens.slice(chunkStart, i + 1);
-        const lastChunkToken = chunk[chunk.length - 1];
-        result.push({
-          startMs: chunk[0].fromMs,
-          tokens: chunk,
-          text: chunk.map((t) => t.text).join(""),
-          durationMs: lastChunkToken.toMs - chunk[0].fromMs,
-        });
+    for (let i = 0; i < tokens.length - 1; i++) {
+      if (isSentenceEnd(tokens[i], tokens[i + 1])) {
+        result.push(makePage(tokens.slice(chunkStart, i + 1)));
         chunkStart = i + 1;
       }
     }
 
     // Push remaining tokens as the last chunk
     if (chunkStart < tokens.length) {
-      const chunk = tokens.slice(chunkStart);
-      const lastChunkToken = chunk[chunk.length - 1];
-      result.push({
-        startMs: chunk[0].fromMs,
-        tokens: chunk,
-        text: chunk.map((t) => t.text).join(""),
-        durationMs: lastChunkToken.toMs - chunk[0].fromMs,
-      });
+      result.push(chunkStart === 0 ? page : makePage(tokens.slice(chunkStart)));
+    }
+  }
+
+  return result;
+}
+
+/** `19.`, `5.` — an ordinal belongs with the noun that follows it. */
+const ORDINAL = /^\d+\.$/;
+/** `1`, `500`, `2,5`, `1.000` — a bare numeric group. */
+const NUMERIC = /^\d[\d.,]*$/;
+
+/**
+ * True when `token` must not be the last thing on a page — it reads as broken
+ * without the word after it.
+ */
+function stickyToNext(token: TikTokToken, next: TikTokToken): boolean {
+  const text = token.text.trim();
+  const nextText = next.text.trim();
+  // A year that closes a sentence ("…v roku 1990. Potom…") belongs to the page it ends
+  if (isSentenceEnd(token, next)) return false;
+  if (ORDINAL.test(text)) return true;
+  if (ABBREVIATIONS.has(text.toLocaleLowerCase("sk"))) return true;
+  // A number spelled in groups ("1 500") must not straddle a page break
+  return NUMERIC.test(text) && NUMERIC.test(nextText);
+}
+
+/**
+ * `createTikTokStyleCaptions` breaks pages purely on elapsed time, which can leave a
+ * page ending on a number that belongs with the next word. Push those trailing tokens
+ * onto the following page.
+ */
+function keepNumbersWhole(pages: TikTokPage[]): TikTokPage[] {
+  const result: TikTokPage[] = [];
+
+  // Walk backwards so a token moved onto the next page can itself pull the one before it
+  for (let i = pages.length - 1; i >= 0; i--) {
+    let tokens = pages[i].tokens;
+
+    while (result.length > 0 && tokens.length > 0 &&
+           stickyToNext(tokens[tokens.length - 1], result[0].tokens[0])) {
+      result[0] = makePage([tokens[tokens.length - 1], ...result[0].tokens]);
+      tokens = tokens.slice(0, -1);
+    }
+
+    // The page may have been emptied into its successor
+    if (tokens.length > 0) {
+      result.unshift(tokens === pages[i].tokens ? pages[i] : makePage(tokens));
     }
   }
 
@@ -172,7 +252,7 @@ export function CaptionOverlay({ captions, captionStyles }: CaptionOverlayProps)
       captions,
       combineTokensWithinMilliseconds: SWITCH_CAPTIONS_EVERY_MS,
     });
-    return splitAtSentenceBoundaries(pages);
+    return keepNumbersWhole(splitAtSentenceBoundaries(pages));
   }, [captions]);
 
   return (
