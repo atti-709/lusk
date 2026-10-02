@@ -72,17 +72,35 @@ Favor segments that contain:
 
 **Prefer complete mini-stories over short zingers.** A 24-second clip with context + punchline outperforms a 6-second soundbite every time.
 
+## Scoring
+
+Score every clip in four categories, 1-100 each. The scores exist to rank the set so the editor knows which clips to cut first — a set where every clip scores 85-92 is useless.
+
+**Calibrate against the set, not against "is this a good clip":** every clip you return already cleared the quality bar. Within that, spread the scores:
+- the median clip of the set scores around **65**;
+- **at most two** clips score 90 or more — the ones you would bet on going viral;
+- the weakest third of the set scores **below 60**;
+- the sub-scores must differ from each other: a clip with a weak opening line gets a low `hook_score` even if its payoff is great.
+
+- `hook_score` — would the first 3 seconds stop a stranger's scroll? A bold claim, a sharp question or a surprising setup scores high; a slow wind-up scores low.
+- `flow_score` — does it play as one self-contained thought that builds and lands cleanly, understandable with zero context?
+- `value_score` — does the viewer leave with something: an insight, comfort, conviction, a laugh?
+- `reach_score` — does it work for someone who has never heard of this show (felt-need topic, no insider jargon), or only for existing fans?
+
+Give `score_reason`: one sentence naming the clip's strongest and its weakest aspect.
+
 ## Output Format
 
-For each clip, output EXACTLY this format:
+Return JSON matching the response schema, one entry per clip, strongest moments first:
 
-CLIP 1
-Title: [Short catchy title]
-Hook: [The opening hook text that grabs attention]
-Takeaway: [The key insight or revelation the viewer gets]
-Cut 1: [start timestamp from TSV] - [end timestamp from TSV]
+- `title` — short catchy title, in the language of the transcript
+- `hook` — the opening hook sentence, verbatim from the transcript
+- `takeaway` — the key insight or revelation the viewer gets, one sentence
+- `start` — timestamp of the clip's first word, copied exactly from the TSV (`HH:MM:SS.mmm`)
+- `end` — timestamp of the word right after the clip's last sentence, copied exactly from the TSV
+- `hook_score`, `flow_score`, `value_score`, `reach_score`, `score_reason` — see Scoring
 
-Every clip has exactly ONE `Cut 1:` line. Do not output more than one cut per clip.
+Every clip is ONE contiguous range: a single `start` and a single `end`.
 
 IMPORTANT — before submitting, verify EACH clip against this checklist:
 1. **Start is a sentence boundary** — the word before your start ends in `.`, `!`, or `?` (or it's the first word of the transcript).

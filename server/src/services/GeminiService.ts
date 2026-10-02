@@ -17,6 +17,11 @@ setGlobalDispatcher(
 );
 
 const MODEL = "gemini-3.1-flash-lite";
+/**
+ * Clip selection is a judgement call over the whole transcript rather than a mechanical
+ * row-for-row rewrite, so it gets the full Flash model with thinking.
+ */
+const REASONING_MODEL = "gemini-flash-latest";
 const CHUNK_SIZE = 250;   // lines per API call
 const OVERLAP = 30;       // lines of overlap from previous chunk
 const MAX_RETRIES = 3;    // retries per chunk on transient API error
@@ -24,6 +29,52 @@ const ROW_MISMATCH_RETRY_THRESHOLD = 0.90; // only retry if output is below 90% 
 const RETRY_DELAY_MS = 5000; // wait between retries
 
 type ProgressCallback = (percent: number, message: string) => void;
+
+/** One suggested clip, as Gemini returns it (timestamps not yet resolved). */
+export interface GeminiClip {
+  title: string;
+  hook: string;
+  takeaway: string;
+  start: string;
+  end: string;
+  hook_score: number;
+  flow_score: number;
+  value_score: number;
+  reach_score: number;
+  score_reason: string;
+}
+
+const CLIP_SCHEMA = {
+  type: "object",
+  properties: {
+    clips: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Short catchy title, in the transcript's language" },
+          hook: { type: "string", description: "The opening hook sentence, verbatim" },
+          takeaway: { type: "string", description: "The key insight the viewer gets, one sentence" },
+          start: { type: "string", description: "HH:MM:SS.mmm of the clip's first word, copied from the TSV" },
+          end: { type: "string", description: "HH:MM:SS.mmm of the word right after the clip's last sentence, copied from the TSV" },
+          hook_score: { type: "integer", minimum: 1, maximum: 100 },
+          flow_score: { type: "integer", minimum: 1, maximum: 100 },
+          value_score: { type: "integer", minimum: 1, maximum: 100 },
+          reach_score: { type: "integer", minimum: 1, maximum: 100 },
+          score_reason: { type: "string", description: "One sentence: the clip's strongest and weakest aspect" },
+        },
+        required: ["title", "hook", "takeaway", "start", "end", "hook_score", "flow_score", "value_score", "reach_score", "score_reason"],
+        propertyOrdering: ["title", "hook", "takeaway", "start", "end", "hook_score", "flow_score", "value_score", "reach_score", "score_reason"],
+      },
+    },
+  },
+  required: ["clips"],
+};
+
+export function parseClipResponse(text: string): GeminiClip[] {
+  const parsed = JSON.parse(text) as { clips?: GeminiClip[] };
+  return Array.isArray(parsed.clips) ? parsed.clips : [];
+}
 
 export interface ChunkWindow {
   startIndex: number;  // inclusive
@@ -495,15 +546,16 @@ class GeminiService {
   }
 
   /**
-   * Detect viral clips from corrected transcript.
-   * Returns the raw clip text (CLIP 1\nTitle: ...) for parsing.
+   * Detect viral clips from the (corrected) transcript.
+   * Returns Gemini's clips as structured JSON (see CLIP_SCHEMA); timestamps are still
+   * the raw strings Gemini copied out of the TSV and are snapped to words by the caller.
    */
   async detectViralClips(
     correctedTsv: string,
     lastTimestamp: string,
     onProgress: ProgressCallback,
     signal?: AbortSignal,
-  ): Promise<string> {
+  ): Promise<GeminiClip[]> {
     if (signal?.aborted) throw new Error("Cancelled");
 
     onProgress(85, "Finding viral clips with Gemini...");
@@ -514,27 +566,39 @@ class GeminiService {
     const userMessage = [
       prompt,
       "",
-      `CONSTRAINT: The transcript ends at ${lastTimestamp}. All Start and End timestamps MUST fall within 00:00:00.000 – ${lastTimestamp}. Do NOT suggest clips that extend beyond this range.`,
+      `CONSTRAINT: The transcript ends at ${lastTimestamp}. All start and end timestamps MUST fall within 00:00:00.000 – ${lastTimestamp}. Do NOT suggest clips that extend beyond this range.`,
       "",
       "## Corrected Transcript (.tsv):",
       "",
       correctedTsv,
     ].join("\n");
 
-    let response;
-    try {
-      response = await ai.models.generateContent({
-        model: MODEL,
-        contents: userMessage,
-      });
-    } catch (err: unknown) {
-      const errObj = err instanceof Error ? err : new Error(String(err));
-      console.error("[GeminiService] Error during viral clip detection:", errObj.message);
-      console.error("[GeminiService] Request payload sample:", userMessage.substring(0, 500) + "...");
-      throw errObj;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model: REASONING_MODEL,
+          contents: userMessage,
+          config: {
+            abortSignal: signal,
+            responseMimeType: "application/json",
+            responseJsonSchema: CLIP_SCHEMA,
+          },
+        });
+        return parseClipResponse(response.text ?? "");
+      } catch (err: unknown) {
+        if (signal?.aborted) throw new Error("Cancelled");
+        const errObj = err instanceof Error ? err : new Error(String(err));
+        if (attempt < MAX_RETRIES && isRetryableError(errObj)) {
+          const delay = RETRY_DELAY_MS * (attempt + 1);
+          console.warn(`[GeminiService] Clip detection attempt ${attempt + 1} failed (${errObj.message}). Retrying in ${delay / 1000}s...`);
+          onProgress(85, `Gemini is busy — retrying in ${delay / 1000}s...`);
+          await sleep(delay);
+          continue;
+        }
+        console.error("[GeminiService] Error during viral clip detection:", errObj.message);
+        throw errObj;
+      }
     }
-
-    return response.text ?? "";
   }
 
   /**

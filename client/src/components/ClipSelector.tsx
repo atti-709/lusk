@@ -33,6 +33,22 @@ function parseTimeToMs(value: string): number | null {
   return null;
 }
 
+/** Colour band for a 1-100 virality score. */
+function scoreTier(score: number): "high" | "mid" | "low" {
+  return score >= 75 ? "high" : score >= 55 ? "mid" : "low";
+}
+
+type ClipSort = "score" | "time";
+const SORT_KEY = "lusk.clipSort";
+
+function readSort(): ClipSort {
+  try {
+    return localStorage.getItem(SORT_KEY) === "time" ? "time" : "score";
+  } catch {
+    return "score";
+  }
+}
+
 function ClipCard({
   clip,
   videoUrl,
@@ -53,6 +69,10 @@ function ClipCard({
   }, [clip.startMs]);
 
   const durationSec = Math.round((clip.endMs - clip.startMs) / 1000);
+  const score = clip.viralityScore;
+  const scoreTitle = clip.scores
+    ? `${clip.scoreReason ? clip.scoreReason + "\n\n" : ""}Hook ${clip.scores.hook} · Flow ${clip.scores.flow} · Value ${clip.scores.value} · Reach ${clip.scores.reach}`
+    : undefined;
 
   return (
     <button
@@ -70,10 +90,16 @@ function ClipCard({
           preload="metadata"
         />
         <span className="clip-card-duration">{durationSec}s</span>
+        {score != null && (
+          <span className={`clip-card-score ${scoreTier(score)}`} title={scoreTitle}>
+            {score}
+          </span>
+        )}
       </div>
       <div className="clip-card-body">
         <div className="clip-card-title">{clip.title}</div>
         <div className="clip-card-hook">"{clip.hookText}"</div>
+        {clip.takeaway && <div className="clip-card-takeaway">{clip.takeaway}</div>}
         <div className="clip-card-time">
           {formatMs(clip.startMs)} — {formatMs(clip.endMs)}
         </div>
@@ -324,6 +350,16 @@ interface ClipSelectorProps {
 export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, captions, geminiAvailable = false, onSelect, onBack, onAddClip, onClipsRegenerated }: ClipSelectorProps) {
   const { fps } = useAppSettings();
   const [showForm, setShowForm] = useState(false);
+  const [sort, setSort] = useState<ClipSort>(readSort);
+  const hasScores = clips.some((c) => c.viralityScore != null);
+  const changeSort = useCallback((next: ClipSort) => {
+    setSort(next);
+    try { localStorage.setItem(SORT_KEY, next); } catch { /* storage unavailable */ }
+  }, []);
+  // Best first for triage; unscored clips (added by hand) keep their place at the end
+  const orderedClips = sort === "score" && hasScores
+    ? [...clips].sort((a, b) => (b.viralityScore ?? -1) - (a.viralityScore ?? -1) || a.startMs - b.startMs)
+    : clips;
   // ── Batch render state ─────────────────────────────────────────────────
   type BatchState = "idle" | "rendering" | "zipping" | "done";
   const [batchState, setBatchState] = useState<BatchState>("idle");
@@ -588,6 +624,12 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
           <h2>Pick a clip to edit</h2>
           <p className="subtitle">
             {clips.length} clip{clips.length !== 1 ? "s" : ""}
+            {hasScores && (
+              <span className="clip-sort" role="radiogroup" aria-label="Sort clips">
+                <button type="button" role="radio" aria-checked={sort === "score"} className={sort === "score" ? "active" : ""} onClick={() => changeSort("score")}>Best first</button>
+                <button type="button" role="radio" aria-checked={sort === "time"} className={sort === "time" ? "active" : ""} onClick={() => changeSort("time")}>In order</button>
+              </span>
+            )}
           </p>
         </div>
         {(geminiAvailable || clips.length > 0) && (
@@ -645,9 +687,9 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
       </div>
 
       <div className="clip-grid">
-        {clips.map((clip, i) => (
+        {orderedClips.map((clip) => (
           <ClipCard
-            key={i}
+            key={`${clip.startMs}-${clip.endMs}-${clip.title}`}
             clip={clip}
             videoUrl={videoUrl}
             disabled={batchState === "rendering" || batchState === "zipping"}

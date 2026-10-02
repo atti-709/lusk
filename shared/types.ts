@@ -50,6 +50,34 @@ export interface ClipRange {
   endMs: number;
 }
 
+/** Gemini's 1-100 sub-scores for a suggested clip. */
+export interface ClipScores {
+  /** Would the opening seconds stop a stranger's scroll? */
+  hook: number;
+  /** One self-contained thought that builds and lands cleanly? */
+  flow: number;
+  /** Does the viewer leave with something — insight, comfort, a laugh? */
+  value: number;
+  /** Does it work for someone outside the show's audience? */
+  reach: number;
+}
+
+/** Hook-weighted composite of the sub-scores (OpusClip-style Hook/Flow/Value/Trend). */
+export function viralityScore(s: ClipScores): number {
+  return Math.round(0.35 * s.hook + 0.2 * s.flow + 0.25 * s.value + 0.2 * s.reach);
+}
+
+/**
+ * How the 9:16 crop is positioned over a landscape source.
+ * - `manual`: a fixed horizontal offset (`speakerOffsetX`)
+ * - `face`: follows the biggest, most confident face
+ * - `pick`: follows the person at `subjectX`, picked by hand
+ * - `speaker`: gives the frame to whoever is talking and cuts between them
+ */
+export type FramingMode = "manual" | "face" | "pick" | "speaker";
+
+export const DEFAULT_FRAMING_MODE: FramingMode = "speaker";
+
 export interface ViralClip {
   title: string;
   /** Base clip start in the source video (sentence boundary). */
@@ -57,6 +85,14 @@ export interface ViralClip {
   /** Base clip end in the source video (sentence boundary). */
   endMs: number;
   hookText: string;
+  /** Gemini's one-sentence summary of the key insight. */
+  takeaway?: string;
+  /** Gemini's sub-scores; absent on clips added by hand or parsed from manual output. */
+  scores?: ClipScores;
+  /** Composite 1-100 score (see `viralityScore`). */
+  viralityScore?: number;
+  /** One sentence naming the clip's strongest and weakest aspect. */
+  scoreReason?: string;
   // UI State Persistence
   captionEdits?: Record<number, string>;
   captionOffset?: number;

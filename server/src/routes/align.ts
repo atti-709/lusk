@@ -3,6 +3,8 @@ import { orchestrator } from "../services/Orchestrator.js";
 import { settingsService, type TranscriptionLanguage } from "../services/SettingsService.js";
 import archiver from "archiver";
 import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord, TranslatedBlock } from "@lusk/shared";
+import { viralityScore } from "@lusk/shared";
+import type { GeminiClip } from "../services/GeminiService.js";
 import { runGeminiAutomation, regenerateViralClips, activeGeminiOperations, GEMINI_CANCELLED } from "./transcribe.js";
 import { geminiService } from "../services/GeminiService.js";
 
@@ -167,6 +169,68 @@ export function parseViralClipText(text: string): ViralClip[] {
     });
   }
   return clips;
+}
+
+/** How far a Gemini timestamp may sit from a real word boundary and still be snapped to it. */
+const SNAP_TOLERANCE_MS = 2000;
+
+/** The word boundary nearest to `ms`, or `ms` itself when none is within tolerance. */
+function snapToWordStart(ms: number, words: TranscriptWord[]): number {
+  let best = ms;
+  let bestDist = SNAP_TOLERANCE_MS;
+  for (const w of words) {
+    const d = Math.abs(w.startMs - ms);
+    if (d < bestDist) { best = w.startMs; bestDist = d; }
+    if (w.startMs > ms + SNAP_TOLERANCE_MS) break;
+  }
+  return best;
+}
+
+/**
+ * Turn Gemini's structured clips into ViralClips: timestamps parsed and snapped onto real
+ * word starts (Gemini copies them from the TSV but sometimes reformats or rounds them),
+ * scores combined, and out-of-range clips dropped. Sorted chronologically.
+ */
+export function geminiClipsToViralClips(
+  clips: GeminiClip[],
+  words: TranscriptWord[],
+  transcriptEndMs: number,
+): ViralClip[] {
+  const lastEnd = words.at(-1)?.endMs ?? transcriptEndMs;
+  const out: ViralClip[] = [];
+  for (const c of clips) {
+    let startMs: number;
+    let endMs: number;
+    try {
+      startMs = snapToWordStart(timestampToMs(c.start), words);
+      endMs = timestampToMs(c.end);
+    } catch {
+      continue;
+    }
+    // The end is the next word's start; just past the last word it is the transcript's end
+    if (endMs > lastEnd + SNAP_TOLERANCE_MS) continue;
+    endMs = endMs >= lastEnd ? lastEnd : snapToWordStart(endMs, words);
+    if (startMs < 0 || endMs <= startMs || (transcriptEndMs > 0 && endMs > transcriptEndMs)) continue;
+
+    const clamp = (n: unknown) => Math.max(1, Math.min(100, Math.round(Number(n) || 1)));
+    const scores = {
+      hook: clamp(c.hook_score),
+      flow: clamp(c.flow_score),
+      value: clamp(c.value_score),
+      reach: clamp(c.reach_score),
+    };
+    out.push({
+      title: c.title?.trim() || "Untitled",
+      hookText: c.hook?.trim() ?? "",
+      takeaway: c.takeaway?.trim() || undefined,
+      startMs,
+      endMs,
+      scores,
+      viralityScore: viralityScore(scores),
+      scoreReason: c.score_reason?.trim() || undefined,
+    });
+  }
+  return out.sort((a, b) => a.startMs - b.startMs);
 }
 
 export function wordsToCaptions(words: TranscriptWord[]): CaptionWord[] {

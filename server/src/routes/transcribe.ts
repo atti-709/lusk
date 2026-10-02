@@ -4,8 +4,8 @@ import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
 import { geminiService, wordsToTsv, msToTimestamp } from "../services/GeminiService.js";
 import { settingsService } from "../services/SettingsService.js";
-import { parseTsv, parseViralClipText, wordsToCaptions, groupCaptionBlocks } from "./align.js";
-import type { TranscribeRequest, ErrorResponse, ViralClip } from "@lusk/shared";
+import { parseTsv, wordsToCaptions, groupCaptionBlocks, geminiClipsToViralClips } from "./align.js";
+import type { TranscribeRequest, ErrorResponse, ViralClip, TranscriptWord } from "@lusk/shared";
 
 type Logger = Pick<FastifyInstance["log"], "error">;
 
@@ -67,7 +67,7 @@ export async function runGeminiAutomation(
   if (!session) return;
 
   try {
-    let tsvForClips: string;
+    let words: TranscriptWord[];
 
     if (session.scriptText) {
       orchestrator.updateProgress(sessionId, 5, "Starting Gemini correction...");
@@ -81,45 +81,22 @@ export async function runGeminiAutomation(
         signal,
       );
 
-      // Parse and apply corrected transcript
       const last = rawTranscript.words.at(-1);
       const fallbackEndMs = last ? last.endMs : 0;
-      const correctedWords = parseTsv(correctedTsv, fallbackEndMs);
-
-      orchestrator.setTranscript(sessionId, { text: "", words: correctedWords });
-      orchestrator.setCorrectedTranscriptRaw(sessionId, correctedTsv);
-      orchestrator.setCaptions(sessionId, wordsToCaptions(correctedWords));
-
-      tsvForClips = correctedTsv;
+      words = parseTsv(correctedTsv, fallbackEndMs);
     } else {
-      // No script — use raw transcript TSV directly
-      tsvForClips = wordsToTsv(rawTranscript.words);
-      orchestrator.setCorrectedTranscriptRaw(sessionId, tsvForClips);
+      words = rawTranscript.words;
       orchestrator.updateProgress(sessionId, 5, "Starting Gemini viral clip detection...");
     }
 
+    const tsvForClips = wordsToTsv(words);
+    orchestrator.setTranscript(sessionId, { text: "", words });
+    orchestrator.setCorrectedTranscriptRaw(sessionId, tsvForClips);
+    orchestrator.setCaptions(sessionId, wordsToCaptions(words));
+
     // 2. Detect viral clips
-    const lastWord = rawTranscript.words.at(-1);
-    const transcriptEndMs = lastWord ? lastWord.endMs : 0;
-    const lastTimestamp = msToTimestamp(transcriptEndMs);
-
-    const viralClipText = await geminiService.detectViralClips(
-      tsvForClips,
-      lastTimestamp,
-      (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
-      signal,
-    );
-
-    const rawClips = viralClipText.trim() ? parseViralClipText(viralClipText) : [];
-
-    // Filter out clips with invalid time ranges.
-    const clips = rawClips.filter(c =>
-      c.startMs >= 0 && c.endMs > c.startMs && c.endMs <= transcriptEndMs
-    );
-    if (clips.length < rawClips.length) {
-      console.log(`[runGeminiAutomation] Filtered out ${rawClips.length - clips.length} clips exceeding transcript duration (${lastTimestamp})`);
-    }
-
+    const transcriptEndMs = rawTranscript.words.at(-1)?.endMs ?? 0;
+    const clips = await detectClips(sessionId, tsvForClips, words, transcriptEndMs, signal);
     orchestrator.setViralClips(sessionId, clips);
 
     // 3. Translate captions to English (if source language is not English)
@@ -171,6 +148,28 @@ export async function runGeminiAutomation(
   }
 }
 
+/** Ask Gemini for clips and resolve them against the transcript's words. */
+async function detectClips(
+  sessionId: string,
+  tsv: string,
+  words: TranscriptWord[],
+  transcriptEndMs: number,
+  signal?: AbortSignal,
+): Promise<ViralClip[]> {
+  const lastTimestamp = msToTimestamp(transcriptEndMs);
+  const raw = await geminiService.detectViralClips(
+    tsv,
+    lastTimestamp,
+    (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
+    signal,
+  );
+  const clips = geminiClipsToViralClips(raw, words, transcriptEndMs);
+  if (clips.length < raw.length) {
+    console.log(`[detectClips] Dropped ${raw.length - clips.length} clip(s) with invalid time ranges (transcript ends ${lastTimestamp})`);
+  }
+  return clips;
+}
+
 /**
  * Re-run only the viral clip detection for a session that is already in READY.
  * Reuses the previously corrected transcript (never re-runs correction, to avoid
@@ -199,39 +198,16 @@ export async function regenerateViralClips(
   // fall back to the probed video duration. If neither is known, skip the
   // upper-bound check entirely rather than filtering everything out.
   const transcriptEndMs = Math.max(wordsEndMs, session.videoDurationMs ?? 0);
-  const lastTimestamp = msToTimestamp(wordsEndMs || (session.videoDurationMs ?? 0));
 
   try {
-    const viralClipText = await geminiService.detectViralClips(
-      tsvForClips,
-      lastTimestamp,
-      (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
-      signal,
-    );
-
-    const rawClips = viralClipText.trim() ? parseViralClipText(viralClipText) : [];
-
-    // Filter out clips with invalid time ranges. Only apply the upper bound when
-    // we actually know the transcript/video length.
-    const clips = rawClips.filter(c =>
-      c.startMs >= 0 &&
-      c.endMs > c.startMs &&
-      (transcriptEndMs <= 0 || c.endMs <= transcriptEndMs)
-    );
-    if (clips.length < rawClips.length) {
-      console.log(`[regenerateViralClips] Filtered out ${rawClips.length - clips.length} clips exceeding transcript duration (${lastTimestamp})`);
-    }
+    const clips = await detectClips(sessionId, tsvForClips, words, transcriptEndMs, signal);
 
     // Never destroy the user's existing clips on an empty/failed suggestion —
     // an empty Gemini response (blocked/rate-limited/parse failure) would
     // otherwise silently wipe every clip. Fail loudly and keep what we had.
     if (clips.length === 0) {
       orchestrator.updateProgress(sessionId, 100, "Ready to review");
-      throw new Error(
-        rawClips.length === 0
-          ? "Gemini returned no clips — try again"
-          : "Gemini's suggested clips were all out of range — try again"
-      );
+      throw new Error("Gemini returned no usable clips — try again");
     }
 
     orchestrator.setViralClips(sessionId, clips);
