@@ -135,6 +135,8 @@ class Face:
     # vertical inner-lip aperture as a fraction of the face's own box: comparable between
     # a face near the camera and one further away. None if landmarks failed.
     openness: float | None
+    # face box height as a fraction of the frame height
+    h: float = 0.0
 
 
 @dataclass
@@ -272,7 +274,8 @@ def detect_samples(video: str, width: int, height: int, start: float, duration: 
                 continue
             bb = r.boundingBox()  # normalized, origin bottom-left
             cx = bb.origin.x + bb.size.width / 2
-            seen.append(Face(float(cx), float(r.confidence()), lip_aperture(r) if landmarks else None))
+            seen.append(Face(float(cx), float(r.confidence()), lip_aperture(r) if landmarks else None,
+                             float(bb.size.height)))
             score = r.confidence() * np.sqrt(bb.size.height)
             if last is not None:
                 # favor the face nearest the running track, and drop the ones too far from
@@ -861,6 +864,56 @@ def solve_camera(t_grid: np.ndarray, subject: np.ndarray, cuts: list[float],
     return camera
 
 
+FIT_MIN_SEC = 1.0  # nobody on screen for this long is a graphic (title card, diagram, quote)...
+FIT_MERGE_SEC = 0.5  # ...two such stretches this close together are one graphic
+FIT_SNAP_SEC = 0.6  # a graphic's edge within this of a scene change starts/ends exactly on it
+FIT_FACE_MIN_H = 0.1  # smaller faces (of the frame height) are pictures, not people: the
+# faces in E60's icon painting measured 0.07, the host 0.19+ even in E67's wide shot
+
+
+def fit_ranges(samples: list[Sample], frames: list[list[Face]], cut_candidates: list[float],
+               span: float) -> list[list[float]]:
+    """Stretches with nobody on screen — burned-in graphics, which a 9:16 crop of a 16:9
+    frame cuts to an unreadable strip (E60's diagrams and quote cards). The composition
+    shows these whole, fitted to the frame width over a blurred fill, instead of cropped.
+
+    Judged on faces only, of anybody (so a pick that isn't on screen isn't a graphic):
+    the body detector fires on the figures in an icon or a photo on a quote card. Every
+    faceless stretch of a second or more measured on E60/E64/E67 was a graphic (verse
+    and quote cards, diagrams, the logo bumper); the face detector does not lose a host
+    who looks down at their notes for that long."""
+    empty = [not any(f.h >= FIT_FACE_MIN_H for f in frames[i]) for i in range(len(samples))]
+    runs: list[list[float]] = []
+    i = 0
+    while i < len(empty):
+        if not empty[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(empty) and empty[j]:
+            j += 1
+        start, end = i / SAMPLE_HZ, min(span, j / SAMPLE_HZ)
+        if runs and start - runs[-1][1] <= FIT_MERGE_SEC:
+            runs[-1][1] = end
+        else:
+            runs.append([start, end])
+        i = j
+
+    def snap(t: float) -> float:
+        near = [c for c in cut_candidates if abs(c - t) <= FIT_SNAP_SEC]
+        return min(near, key=lambda c: abs(c - t)) if near else t
+
+    out = []
+    for start, end in runs:
+        if end - start < FIT_MIN_SEC:
+            continue
+        a = 0.0 if start < 1.0 / SAMPLE_HZ else snap(start)
+        b = span if end >= span - 1.0 / SAMPLE_HZ else snap(end)
+        if b - a >= FIT_MIN_SEC:
+            out.append([round(a, 3), round(b, 3)])
+    return out
+
+
 CUT_LEAD_SEC = 0.02  # a step lands this far before the cut — half a frame at 25 fps. The
 # cut time is the pts of the new shot's first frame; the clip's own frame grid is offset
 # from the source's by up to half a frame (its start is snapped to a frame), so stepping
@@ -945,6 +998,7 @@ def main() -> None:
     progress(5)
     samples, frames = detect_samples(args.video, args.width, args.height, args.start, args.duration,
                                      seed_x=subject_x, landmarks=follow_speaker)
+    raw_samples = list(samples)
     detected = sum(1 for s in samples if s.kind != "none")
     faces = sum(1 for s in samples if s.kind == "face")
     log(f"detections: {detected}/{len(samples)} samples ({faces} face, {detected - faces} body)")
@@ -976,7 +1030,11 @@ def main() -> None:
     log(f"emitted {len(keyframes)} keyframes, {len(cuts)} cuts")
 
     with open(args.out, "w", encoding="utf-8") as f:
+        fit = fit_ranges(raw_samples, frames, cut_candidates, span)
+        if fit:
+            log(f"graphics shown whole: {', '.join(f'{a:.1f}-{b:.1f}s' for a, b in fit)}")
         json.dump({
+            "fit": fit,
             "cropWidthFraction": round(crop_w, 6),
             "cuts": [round(c, 3) for c in cuts],
             "keyframes": keyframes,

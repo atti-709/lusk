@@ -287,7 +287,8 @@ class RenderService {
     outroConfig?: OutroConfig | null,
     sourceAspectRatio?: number | null,
     cancelSignal?: CancelSignal,
-    framing?: FramingKeyframe[] | null
+    framing?: FramingKeyframe[] | null,
+    fitRanges?: [number, number][] | null
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress, outroConfig != null);
     const segmentFileName = `source_${outputFileName}`;
@@ -342,6 +343,7 @@ class RenderService {
         sourceAspectRatio: sourceAspectRatio ?? null,
         captionStyles: captionStyles ?? undefined,
         framing: framing ?? null,
+        fitRanges: fitRanges ?? null,
       };
 
       const totalDurationInFrames =

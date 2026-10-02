@@ -31,7 +31,8 @@ class FramingService {
     const pick = req.mode === "pick" && req.subjectX != null
       ? `-x${req.subjectX.toFixed(3)}-t${(req.subjectT ?? 0).toFixed(1)}`
       : "";
-    return `${req.mode}-${Math.round(req.startMs)}-${Math.round(req.endMs)}${pick}`;
+    // v2: solves carry `fit` (graphic stretches); older cache files don't
+    return `v2-${req.mode}-${Math.round(req.startMs)}-${Math.round(req.endMs)}${pick}`;
   }
 
   async getFraming(

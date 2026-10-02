@@ -23,11 +23,14 @@ function ClipVideo({
   startFromInFrames,
   offsetX,
   sourceAspectRatio,
+  fit,
 }: {
   src: string;
   startFromInFrames: number;
   offsetX: number;
   sourceAspectRatio?: number | null;
+  /** Show the whole landscape frame, fitted to the width, instead of the 9:16 crop. */
+  fit?: boolean;
 }) {
   const isPortrait = sourceAspectRatio != null && sourceAspectRatio < 1;
   const landscapeWidthPct =
@@ -35,6 +38,7 @@ function ClipVideo({
       ? (COMP_HEIGHT * sourceAspectRatio / COMP_WIDTH) * 100
       : (COMP_HEIGHT * (16 / 9) / COMP_WIDTH) * 100;
 
+  const fitHeight = COMP_WIDTH / (sourceAspectRatio ?? 16 / 9);
   const videoStyle = isPortrait
     ? {
         width: "100%",
@@ -43,6 +47,14 @@ function ClipVideo({
         position: "absolute" as const,
         left: 0,
         top: 0,
+      }
+    : fit
+    ? {
+        width: COMP_WIDTH,
+        height: fitHeight,
+        position: "absolute" as const,
+        left: 0,
+        top: (COMP_HEIGHT - fitHeight) / 2,
       }
     : {
         width: `${landscapeWidthPct}%`,
@@ -58,6 +70,42 @@ function ClipVideo({
   return (
     <Sequence from={-startFromInFrames}>
       <OffthreadVideo src={src} muted style={videoStyle} />
+    </Sequence>
+  );
+}
+
+/**
+ * Behind a graphic shown whole: the same frame filling 9:16, blurred and darkened, so the
+ * bands above and below the fitted picture aren't flat black. Mounted only for the fit
+ * stretch, and timed like the main video (`startFromInFrames` is the clip's source start).
+ */
+function FitBackdrop({
+  src,
+  startFromInFrames,
+  fromFrame,
+  sourceAspectRatio,
+}: {
+  src: string;
+  startFromInFrames: number;
+  fromFrame: number;
+  sourceAspectRatio?: number | null;
+}) {
+  const widthPct = (COMP_HEIGHT * (sourceAspectRatio ?? 16 / 9) / COMP_WIDTH) * 100;
+  return (
+    <Sequence from={-(startFromInFrames + fromFrame)}>
+      <OffthreadVideo
+        src={src}
+        muted
+        style={{
+          width: `${widthPct}%`,
+          height: "100%",
+          objectFit: "cover",
+          position: "absolute",
+          left: "50%",
+          transform: "translateX(-50%) scale(1.15)",
+          filter: "blur(36px) brightness(0.45)",
+        }}
+      />
     </Sequence>
   );
 }
@@ -93,6 +141,8 @@ export type VideoCompositionProps = {
   captionStyles?: CaptionStyles;
   /** Tracked camera path for the clip (t = seconds from the clip start); overrides offsetX. */
   framing?: FramingKeyframe[] | null;
+  /** Graphic stretches (seconds from the clip start) to show whole instead of cropped. */
+  fitRanges?: [number, number][] | null;
 };
 
 export function VideoComposition({
@@ -106,12 +156,16 @@ export function VideoComposition({
   sourceAspectRatio,
   captionStyles,
   framing,
+  fitRanges,
 }: VideoCompositionProps) {
   const { durationInFrames, fps } = useVideoConfig();
   const frame = useCurrentFrame();
   const cropOffsetX = framing && framing.length > 0
     ? offsetForCenter(framingCenterAt(framing, frame / fps), sourceAspectRatio)
     : offsetX;
+  const isLandscape = sourceAspectRatio == null || sourceAspectRatio > 9 / 16 + 0.01;
+  const fits = isLandscape ? (fitRanges ?? []) : [];
+  const inFit = fits.some(([a, b]) => frame >= a * fps && frame < b * fps);
 
   const hasOutro = !!outroSrc && outroDurationInFrames > 0;
   const overlap = hasOutro ? outroOverlapFrames : 0;
@@ -133,8 +187,22 @@ export function VideoComposition({
       {/* Main clip: video + audio + captions */}
       <Sequence durationInFrames={clipDurationInFrames}>
         <AbsoluteFill>
+          {videoUrl && fits.map(([a, b]) => {
+            const from = Math.round(a * fps);
+            return (
+              <Sequence key={a} from={from} durationInFrames={Math.max(1, Math.round(b * fps) - from)}>
+                <FitBackdrop
+                  src={videoUrl}
+                  startFromInFrames={startFrom}
+                  fromFrame={from}
+                  sourceAspectRatio={sourceAspectRatio}
+                />
+              </Sequence>
+            );
+          })}
           {videoUrl && (
             <ClipVideo
+              fit={inFit}
               src={videoUrl}
               startFromInFrames={startFrom}
               offsetX={cropOffsetX}

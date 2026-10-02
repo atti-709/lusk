@@ -21,8 +21,14 @@ export function useFraming(
   subjectX: number | undefined,
   subjectT: number | undefined,
   enabled: boolean,
-): { keyframes: FramingKeyframe[] | null; status: FramingStatus; error: string | null } {
+): {
+  keyframes: FramingKeyframe[] | null;
+  fit: [number, number][] | null;
+  status: FramingStatus;
+  error: string | null;
+} {
   const [keyframes, setKeyframes] = useState<FramingKeyframe[] | null>(null);
+  const [fit, setFit] = useState<[number, number][] | null>(null);
   const [status, setStatus] = useState<FramingStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +58,7 @@ export function useFraming(
           throw new Error(data.error ?? "Tracking failed");
         }
         setKeyframes((data as Framing).keyframes);
+        setFit((data as Framing).fit ?? null);
         setStatus("ready");
       } catch (err) {
         if (cancelled) return;
@@ -65,5 +72,5 @@ export function useFraming(
     };
   }, [active, sessionId, range.startMs, range.endMs, mode, subjectX, subjectT]);
 
-  return { keyframes: active ? keyframes : null, status, error };
+  return { keyframes: active ? keyframes : null, fit: active ? fit : null, status, error };
 }

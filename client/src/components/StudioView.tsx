@@ -422,6 +422,7 @@ export function StudioView({
                 captions: remotionCaptions,
                 offsetX: framingMode === "manual" ? offsetX : 0,
                 framing: framing.keyframes,
+                fitRanges: framing.fit,
                 startFrom: layout.startFromInFrames,
                 outroSrc: outroActive ? outroConfig.outroSrc : "",
                 outroDurationInFrames,

@@ -112,7 +112,8 @@ async function runRender(
       outroConfig,
       sourceAspectRatio,
       cancelSignal,
-      framing?.keyframes ?? null
+      framing?.keyframes ?? null,
+      framing?.fit ?? null
     );
 
     const outputUrl = `/static/${sessionId}/${outputFileName}?t=${Date.now()}`;

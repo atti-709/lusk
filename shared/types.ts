@@ -125,6 +125,12 @@ export interface Framing {
   cropWidthFraction: number;
   cuts: number[];
   keyframes: FramingKeyframe[];
+  /**
+   * Stretches (seconds from the clip start) with nobody on screen — burned-in graphics
+   * such as quote cards and diagrams. They are shown whole, fitted to the frame width,
+   * since a 9:16 crop would cut them to an unreadable strip. Absent on older caches.
+   */
+  fit?: [number, number][];
 }
 
 /** A clip's framing mode; clips positioned by hand before tracking existed stay manual. */
