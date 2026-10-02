@@ -86,20 +86,24 @@ export async function runGeminiAutomation(
       words = parseTsv(correctedTsv, fallbackEndMs);
     } else {
       words = rawTranscript.words;
-      orchestrator.updateProgress(sessionId, 5, "Starting Gemini viral clip detection...");
+      orchestrator.updateProgress(sessionId, 5, "Starting Gemini proofreading...");
     }
+
+    // 2. Proofread: a sparse word-level pass that catches what the row-for-row
+    //    correction misses (and is the only correction a script-less project gets)
+    words = await proofread(sessionId, words, session.scriptText ?? null, signal);
 
     const tsvForClips = wordsToTsv(words);
     orchestrator.setTranscript(sessionId, { text: "", words });
     orchestrator.setCorrectedTranscriptRaw(sessionId, tsvForClips);
     orchestrator.setCaptions(sessionId, wordsToCaptions(words));
 
-    // 2. Detect viral clips
+    // 3. Detect viral clips
     const transcriptEndMs = rawTranscript.words.at(-1)?.endMs ?? 0;
     const clips = await detectClips(sessionId, tsvForClips, words, transcriptEndMs, signal);
     orchestrator.setViralClips(sessionId, clips);
 
-    // 3. Translate captions to English (if source language is not English)
+    // 4. Translate captions to English (if source language is not English)
     const lang = await settingsService.getTranscriptionLanguage();
     if (lang !== "en") {
       const currentSession = orchestrator.getSession(sessionId);
@@ -145,6 +149,41 @@ export async function runGeminiAutomation(
         ? "Gemini returned wrong row count — try again or use manual workflow"
         : "Gemini failed — use manual workflow below";
     orchestrator.updateProgress(sessionId, 100, reason);
+  }
+}
+
+/**
+ * Proofread the transcript with Gemini. Never fatal: a failed pass logs and leaves the
+ * transcript as it was, since everything downstream works without it.
+ */
+async function proofread(
+  sessionId: string,
+  words: TranscriptWord[],
+  scriptText: string | null,
+  signal?: AbortSignal,
+): Promise<TranscriptWord[]> {
+  try {
+    const lang = await settingsService.getTranscriptionLanguage();
+    const result = await geminiService.proofreadTranscript(
+      words,
+      scriptText,
+      lang,
+      sessionId,
+      (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
+      signal,
+    );
+    for (const e of result.applied) {
+      console.log(`[proofread] ${msToTimestamp(e.atMs)}  "${e.from}" → "${e.to}"${e.reason ? `  (${e.reason})` : ""}`);
+    }
+    if (result.rejected.length) {
+      console.log(`[proofread] dropped ${result.rejected.length} edit(s) that didn't match the transcript:`, JSON.stringify(result.rejected));
+    }
+    orchestrator.updateProgress(sessionId, 85, `Proofread fixed ${result.applied.length} word${result.applied.length === 1 ? "" : "s"}`);
+    return result.words;
+  } catch (err: any) {
+    if (signal?.aborted) throw err;
+    console.warn("[proofread] failed, continuing without:", err?.message);
+    return words;
   }
 }
 

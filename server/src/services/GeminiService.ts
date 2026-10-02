@@ -5,6 +5,13 @@ import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
 import { tempManager } from "./TempManager.js";
+import {
+  applyProofreadEdits,
+  buildProofreadLines,
+  type ProofreadEdit,
+  type ProofreadLine,
+  type ProofreadResult,
+} from "./proofread.js";
 
 // Increase global fetch timeouts to 15 minutes to prevent Headers Timeout Error
 // because undici defaults to 5 minutes (300_000ms) which breaks long Gemini streams.
@@ -18,8 +25,8 @@ setGlobalDispatcher(
 
 const MODEL = "gemini-3.1-flash-lite";
 /**
- * Clip selection is a judgement call over the whole transcript rather than a mechanical
- * row-for-row rewrite, so it gets the full Flash model with thinking.
+ * Clip selection and proofreading are judgement calls over the whole transcript rather
+ * than a mechanical row-for-row rewrite, so they get the full Flash model with thinking.
  */
 const REASONING_MODEL = "gemini-flash-latest";
 const CHUNK_SIZE = 250;   // lines per API call
@@ -29,6 +36,11 @@ const ROW_MISMATCH_RETRY_THRESHOLD = 0.90; // only retry if output is below 90% 
 const RETRY_DELAY_MS = 5000; // wait between retries
 
 type ProgressCallback = (percent: number, message: string) => void;
+
+const LANGUAGE_NAMES: Record<string, string> = { sk: "Slovak", cs: "Czech", en: "English" };
+
+/** Sentences per proofread request — small enough that every line gets real attention. */
+const PROOFREAD_CHUNK_LINES = 120;
 
 /** One suggested clip, as Gemini returns it (timestamps not yet resolved). */
 export interface GeminiClip {
@@ -69,6 +81,27 @@ const CLIP_SCHEMA = {
     },
   },
   required: ["clips"],
+};
+
+const PROOFREAD_SCHEMA = {
+  type: "object",
+  properties: {
+    edits: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          line: { type: "integer", description: "The line number the words are on" },
+          find: { type: "string", description: "The wrong word(s), copied exactly as written on that line, contiguous" },
+          replace: { type: "string", description: "The corrected word(s); empty string to delete" },
+          reason: { type: "string", description: "A few words: what kind of error this is" },
+        },
+        required: ["line", "find", "replace", "reason"],
+        propertyOrdering: ["line", "find", "replace", "reason"],
+      },
+    },
+  },
+  required: ["edits"],
 };
 
 export function parseClipResponse(text: string): GeminiClip[] {
@@ -599,6 +632,94 @@ class GeminiService {
         throw errObj;
       }
     }
+  }
+
+  /**
+   * Proofread a timed transcript and return the word-level fixes as sparse edits.
+   *
+   * Rewriting the transcript row-for-row is what the correction pass does, and it is
+   * where errors slip through: the model spends its effort keeping 250 rows and their
+   * timestamps intact. Here it reads plain sentences and only reports what is wrong —
+   * a short list of {find → replace} spans — so there is nothing to keep in sync, and
+   * a span that does not match the transcript verbatim is simply dropped (see
+   * `applyProofreadEdits`). That makes the pass safe to run on top of any transcript.
+   */
+  async proofreadTranscript(
+    words: TranscriptWord[],
+    scriptText: string | null,
+    language: string,
+    sessionId: string,
+    onProgress: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<ProofreadResult> {
+    const ai = await this.getClient();
+    const template = await settingsService.getProofreadPrompt();
+    const prompt = template
+      .replaceAll("{{LANGUAGE}}", LANGUAGE_NAMES[language] ?? language)
+      .replace(
+        "{{SCRIPT_NOTE}}",
+        scriptText
+          ? "## Reference script\n\nThe speaker worked from the reference script below (often written without diacritics). Use it to resolve names, terms, quotations and what a garbled word was meant to be. But the transcript records what was actually said: where the speaker deviated from the script, keep the spoken words."
+          : "",
+      );
+    const lines = buildProofreadLines(words);
+    const chunks: ProofreadLine[][] = [];
+    for (let i = 0; i < lines.length; i += PROOFREAD_CHUNK_LINES) {
+      chunks.push(lines.slice(i, i + PROOFREAD_CHUNK_LINES));
+    }
+
+    const edits: ProofreadEdit[] = [];
+    for (let ci = 0; ci < chunks.length; ci++) {
+      if (signal?.aborted) throw new Error("Cancelled");
+      const chunk = chunks[ci];
+      const label = chunks.length > 1 ? ` (part ${ci + 1}/${chunks.length})` : "";
+      onProgress(80 + Math.round((ci / chunks.length) * 5), `Proofreading transcript${label}...`);
+
+      const body = chunk.map((l) => `${l.id}: ${l.words.map((i) => words[i].word).join(" ")}`).join("\n");
+      const userMessage = [
+        prompt,
+        ...(scriptText ? ["", "## Reference Script:", "", scriptText] : []),
+        "",
+        "## Transcript:",
+        "",
+        body,
+      ].join("\n");
+      const hash = createHash("md5").update("proofread_v1:" + userMessage).digest("hex");
+
+      let raw = await this.getCachedChunk(sessionId, hash).then((l) => l?.join("\n") ?? null);
+      for (let attempt = 0; raw === null; attempt++) {
+        try {
+          const response = await ai.models.generateContent({
+            model: REASONING_MODEL,
+            contents: userMessage,
+            config: {
+              abortSignal: signal,
+              responseMimeType: "application/json",
+              responseJsonSchema: PROOFREAD_SCHEMA,
+            },
+          });
+          raw = response.text ?? "";
+          JSON.parse(raw); // only cache a well-formed answer
+          await this.setCachedChunk(sessionId, hash, [raw]);
+        } catch (err: unknown) {
+          raw = null;
+          if (signal?.aborted) throw new Error("Cancelled");
+          const errObj = err instanceof Error ? err : new Error(String(err));
+          if (attempt < MAX_RETRIES && (isRetryableError(errObj) || errObj instanceof SyntaxError)) {
+            const delay = RETRY_DELAY_MS * (attempt + 1);
+            console.warn(`[GeminiService] Proofread chunk ${ci} attempt ${attempt + 1} failed (${errObj.message}). Retrying in ${delay / 1000}s...`);
+            await sleep(delay);
+            continue;
+          }
+          throw errObj;
+        }
+      }
+
+      const parsed = JSON.parse(raw) as { edits?: ProofreadEdit[] };
+      edits.push(...(parsed.edits ?? []));
+    }
+
+    return applyProofreadEdits(words, lines, edits);
   }
 
   /**

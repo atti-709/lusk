@@ -90,6 +90,12 @@ class SettingsService {
     return this.getDefaultViralClipsManualPrompt();
   }
 
+  /** The proofread pass has no user override yet; `{{LANGUAGE}}` is filled in by the caller. */
+  async getProofreadPrompt(): Promise<string> {
+    const promptPath = join(getClientPublicDir(), "prompts", "proofread-api.md");
+    return readFile(promptPath, "utf-8");
+  }
+
   async getDefaultViralClipsPrompt(): Promise<string> {
     const promptPath = join(getClientPublicDir(), "prompts", "viral-clips-api.md");
     return readFile(promptPath, "utf-8");
