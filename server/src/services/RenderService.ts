@@ -292,6 +292,9 @@ class RenderService {
     const videoUrl = `${LUSK_SERVER_ORIGIN}/static/${sessionId}/${segmentFileName}`;
     const segmentPath = path.join(sessionDir, segmentFileName);
     const outputPath = path.join(sessionDir, outputFileName);
+    // Render beside the target and move it into place only when complete: a cancelled or
+    // failed render must not leave a truncated file — or clobber an earlier good export
+    const partialPath = `${outputPath}.partial.mp4`;
 
     const fps = await settingsService.getFps();
     const outroOverlapFrames = await settingsService.getOutroOverlapFrames();
@@ -359,7 +362,7 @@ class RenderService {
         codec: "h264" as const,
         videoBitrate: "6000k",
         hardwareAcceleration: "if-possible" as const,
-        outputLocation: outputPath,
+        outputLocation: partialPath,
         inputProps,
         timeoutInMilliseconds: 120_000,
         onProgress: ({ progress }: { progress: number }) => {
@@ -373,10 +376,12 @@ class RenderService {
           : renderOptions
       );
 
+      fs.renameSync(partialPath, outputPath);
       onProgress?.(95, "Render complete");
       return outputPath;
     } finally {
       fs.rmSync(segmentPath, { force: true });
+      fs.rmSync(partialPath, { force: true });
     }
   }
 }

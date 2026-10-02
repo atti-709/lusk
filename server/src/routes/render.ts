@@ -110,6 +110,12 @@ async function runRender(
   }
 }
 
+/** Cancel every in-flight render — Remotion then stops its browser and compositor. */
+export function cancelAllRenders(): void {
+  for (const { cancel } of activeRenderCancels.values()) cancel();
+  activeRenderCancels.clear();
+}
+
 export async function renderRoute(app: FastifyInstance) {
   // Outro config endpoint: returns file paths + durations for client-side preview
   app.get("/api/outro-config", async () => {

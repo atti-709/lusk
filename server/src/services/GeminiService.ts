@@ -405,6 +405,7 @@ class GeminiService {
             model: MODEL,
             contents,
             config: {
+              abortSignal: signal,
               thinkingConfig: {
                 thinkingLevel: ThinkingLevel.MINIMAL,
               }
@@ -452,6 +453,7 @@ class GeminiService {
           await this.setCachedChunk(sessionId, chunkHash, resultLines);
           break;
         } catch (err: unknown) {
+          if (signal?.aborted) throw new Error("Cancelled");
           const errObj = err instanceof Error ? err : new Error(String(err));
 
           if (attempt < MAX_RETRIES && (isRetryableError(errObj) || isRowMismatchError(errObj))) {
@@ -603,6 +605,7 @@ class GeminiService {
             model: MODEL,
             contents: userMessage,
             config: {
+              abortSignal: signal,
               thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
             },
           });
@@ -626,6 +629,7 @@ class GeminiService {
           }
           break;
         } catch (err: unknown) {
+          if (signal?.aborted) throw new Error("Cancelled");
           const errObj = err instanceof Error ? err : new Error(String(err));
           if (attempt < MAX_RETRIES && (isRetryableError(errObj) || isRowMismatchError(errObj))) {
             const delay = RETRY_DELAY_MS * (attempt + 1);

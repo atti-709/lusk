@@ -1,11 +1,12 @@
 import path from "node:path";
 import fs from "node:fs";
-import { execSync, execFileSync, spawn } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { access, readFile, unlink } from "node:fs/promises";
 import type { TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
 import { getFFmpegPath } from "../config/ffmpeg.js";
 import { settingsService } from "./SettingsService.js";
 import { pythonEnvService } from "./PythonEnvService.js";
+import { spawnGroup, killGroup } from "./ChildProcesses.js";
 
 const WHISPERX_MODEL = "large-v3-turbo";
 
@@ -99,7 +100,8 @@ class WhisperService {
   async extractAudio(
     inputPath: string,
     outputPath: string,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<void> {
     onProgress?.(1, "Extracting audio...");
     await access(inputPath);
@@ -113,21 +115,34 @@ class WhisperService {
       );
     }
 
-    try {
-      execFileSync(ffmpeg, [
+    // Asynchronous on purpose: reading a long (often cloud-synced) source takes a minute,
+    // and a synchronous call froze the whole server for it — progress, other projects,
+    // even the cancel request that should have stopped it
+    await new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) return reject(new Error("Transcription cancelled"));
+      const proc = spawnGroup(ffmpeg, [
         "-i", inputPath,
         "-ar", "16000",
         "-ac", "1",
         "-c:a", "pcm_s16le",
         outputPath,
         "-y",
-      ], { stdio: "pipe" });
-    } catch (err: any) {
-      const stderr = err?.stderr?.toString?.() ?? "";
-      throw new Error(
-        `ffmpeg audio extraction failed (binary: ${ffmpeg}): ${stderr || err.message}`
-      );
-    }
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+      const onAbort = () => {
+        killGroup(proc);
+        reject(new Error("Transcription cancelled"));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      let stderr = "";
+      proc.stderr!.on("data", (c: Buffer) => { stderr = (stderr + c.toString()).slice(-2000); });
+      proc.on("error", (err) => reject(new Error(`ffmpeg audio extraction failed (binary: ${ffmpeg}): ${err.message}`)));
+      proc.on("close", (code) => {
+        signal?.removeEventListener("abort", onAbort);
+        if (signal?.aborted) return;
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg audio extraction failed (binary: ${ffmpeg}): ${stderr.trim()}`));
+      });
+    });
 
     onProgress?.(5, "Audio extracted");
   }
@@ -165,13 +180,13 @@ class WhisperService {
         return reject(new Error("Transcription cancelled"));
       }
 
-      const proc = spawn(python3, ["-u", ...args], {
+      const proc = spawnGroup(python3, ["-u", ...args], {
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env, PYTHONUNBUFFERED: "1", PATH: envPath },
       });
 
       const onAbort = () => {
-        proc.kill("SIGTERM");
+        killGroup(proc);
         reject(new Error("Transcription cancelled"));
       };
       signal?.addEventListener("abort", onAbort, { once: true });
@@ -195,13 +210,13 @@ class WhisperService {
         return remaining;
       };
 
-      proc.stderr.on("data", (chunk: Buffer) => {
+      proc.stderr!.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
         lastStderr = (lastStderr + text).slice(-500);
         partialErr = parseProgress(text, partialErr);
       });
 
-      proc.stdout.on("data", (chunk: Buffer) => {
+      proc.stdout!.on("data", (chunk: Buffer) => {
         partialOut = parseProgress(chunk.toString(), partialOut);
       });
 
@@ -248,7 +263,7 @@ class WhisperService {
     const audioWav = path.join(sessionDir, "audio.wav");
 
     // Step 1: Extract audio
-    await this.extractAudio(inputVideo, audioWav, onProgress);
+    await this.extractAudio(inputVideo, audioWav, onProgress, signal);
     if (signal?.aborted) throw new Error("Transcription cancelled");
 
     // Resolve the ffmpeg binary path so WhisperX can find it

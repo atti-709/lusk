@@ -176,6 +176,9 @@ async function startServer(): Promise<void> {
     env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
     cwd: app.getPath("home"), // Ensure cwd is home dir so Remotion resolves ~/.remotion correctly
     stdio: ["ignore", "pipe", "pipe"],
+    // Its own process group, so quitting can signal everything the server started
+    // (ffmpeg, Remotion's headless Chrome) and not just the server itself
+    detached: true,
   });
 
   let serverStderr = "";
@@ -213,7 +216,13 @@ async function startServer(): Promise<void> {
 
 function killServer(): void {
   if (serverProcess && !serverProcess.killed) {
-    serverProcess.kill();
+    // The server stops its jobs on SIGTERM (Python helpers run in groups of their own);
+    // signalling its whole group also reaches anything it spawned directly
+    try {
+      if (serverProcess.pid != null) process.kill(-serverProcess.pid, "SIGTERM");
+    } catch {
+      serverProcess.kill();
+    }
     serverProcess = null;
   }
 }

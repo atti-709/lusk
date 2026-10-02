@@ -9,6 +9,8 @@ import type { TranscribeRequest, ErrorResponse, ViralClip } from "@lusk/shared";
 
 type Logger = Pick<FastifyInstance["log"], "error">;
 
+export const GEMINI_CANCELLED = "Gemini cancelled — run it again or use the manual workflow below";
+
 /** Active transcription abort controllers, keyed by sessionId. */
 const activeTranscriptions = new Map<string, AbortController>();
 
@@ -253,6 +255,11 @@ async function runTranscription(sessionId: string, log: Logger): Promise<void> {
     await doTranscribe(sessionId, log, controller.signal);
   } catch (err: any) {
     if (controller.signal.aborted) {
+      if (orchestrator.getSession(sessionId)?.state === "ALIGNING") {
+        // Cancelled during the Gemini steps: the transcript is done and kept
+        orchestrator.updateProgress(sessionId, 100, GEMINI_CANCELLED);
+        return;
+      }
       // Cancelled — revert to UPLOADING so the user can retry
       orchestrator.transition(sessionId, "UPLOADING");
       orchestrator.updateProgress(sessionId, 0, "Transcription cancelled");
@@ -264,6 +271,12 @@ async function runTranscription(sessionId: string, log: Logger): Promise<void> {
   } finally {
     activeTranscriptions.delete(sessionId);
   }
+}
+
+/** Abort every transcription and Gemini job (server shutdown). */
+export function abortAllJobs(): void {
+  for (const c of activeTranscriptions.values()) c.abort();
+  for (const c of activeGeminiOperations.values()) c.abort();
 }
 
 export async function transcribeRoute(app: FastifyInstance) {

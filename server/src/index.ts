@@ -4,8 +4,9 @@ import { uploadRoute } from "./routes/upload.js";
 import { staticPlugin } from "./plugins/static.js";
 import { eventsRoute } from "./routes/events.js";
 import { projectRoute } from "./routes/project.js";
-import { transcribeRoute } from "./routes/transcribe.js";
-import { renderRoute } from "./routes/render.js";
+import { transcribeRoute, abortAllJobs } from "./routes/transcribe.js";
+import { renderRoute, cancelAllRenders } from "./routes/render.js";
+import { killAllGroups } from "./services/ChildProcesses.js";
 import { alignRoute } from "./routes/align.js";
 import { exportImportRoute } from "./routes/exportImport.js";
 import { projectsRoute } from "./routes/projects.js";
@@ -65,5 +66,22 @@ try {
   server.log.error(err);
   process.exit(1);
 }
+
+// Node does not stop its children when it exits. Without this, quitting the app mid-job
+// left WhisperX (or Remotion's headless Chrome) running with nobody to read its output.
+let shuttingDown = false;
+function shutdown(signal: NodeJS.Signals): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] ${signal} — stopping running jobs`);
+  abortAllJobs();
+  cancelAllRenders();
+  killAllGroups();
+  // Give Remotion a moment to close its browser, then go regardless
+  setTimeout(() => process.exit(0), 1500).unref();
+  server.close().finally(() => setTimeout(() => process.exit(0), 300).unref());
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 export { server };

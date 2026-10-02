@@ -3,7 +3,7 @@ import { orchestrator } from "../services/Orchestrator.js";
 import { settingsService, type TranscriptionLanguage } from "../services/SettingsService.js";
 import archiver from "archiver";
 import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord, TranslatedBlock } from "@lusk/shared";
-import { runGeminiAutomation, regenerateViralClips, activeGeminiOperations } from "./transcribe.js";
+import { runGeminiAutomation, regenerateViralClips, activeGeminiOperations, GEMINI_CANCELLED } from "./transcribe.js";
 import { geminiService } from "../services/GeminiService.js";
 
 // ── Helpers ──
@@ -733,7 +733,10 @@ export async function alignRoute(app: FastifyInstance) {
       activeGeminiOperations.set(projectId, controller);
 
       runGeminiAutomation(projectId, original, app.log, controller.signal)
-        .catch(() => {})
+        .catch(() => {
+          // Leave the step usable instead of frozen on the last progress message
+          if (controller.signal.aborted) orchestrator.updateProgress(projectId, 100, GEMINI_CANCELLED);
+        })
         .finally(() => activeGeminiOperations.delete(projectId));
 
       return { success: true as const };
