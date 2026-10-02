@@ -36,28 +36,29 @@
 
 ### **2. Transcription (Server Side)**
 
-* **Tool:** WhisperX (`python3 -m whisperx`), called from `WhisperService.ts`.
-* **Model:** `large-v3-turbo`, language `sk`, compute type `int8`.
-* **Flow:** Server extracts audio to `audio.wav` (16kHz mono via ffmpeg), then runs WhisperX which performs transcription and forced word-level alignment in a single pass using wav2vec2.
+* **Tool:** `server/scripts/transcribe.py`, run in the managed Python env by `WhisperService.ts`.
+* **Model:** `large-v3-turbo`, language from settings (default `sk`).
+* **Flow:** Server extracts audio to `audio.wav` (16kHz mono via ffmpeg). The script transcribes with **mlx-whisper on the Apple GPU** (Metal; ~6× faster than WhisperX's CPU-only faster-whisper), then runs **WhisperX's wav2vec2 forced alignment** for per-word timings. Without MLX it falls back to WhisperX's own transcriber. Output is WhisperX's JSON shape.
 * **Output:** Per-word `start`/`end` timestamps in seconds. Words with missing alignment are interpolated linearly between their neighbours.
-* **First-run model download:** WhisperX automatically downloads its models (~3-4 GB: `large-v3-turbo` + Slovak wav2vec2 alignment model) on first use.
-* **Note:** `server/whisper.cpp/` and `server/scripts/whisperx_align.py` are legacy artifacts — they are not used.
+* **First-run model download:** the MLX model (`mlx-community/whisper-large-v3-turbo`, ~1.6 GB) and the Slovak wav2vec2 alignment model download on first use into `~/.cache/huggingface`.
+* **Note:** `server/whisper.cpp/` is a legacy artifact — it is not used.
 
 ### **3. Viral Clip Detection (Server Side)**
 
-* **Tool:** Gemini Flash API via `GeminiService.ts` (`/server/src/services/GeminiService.ts`).
-* **Flow:** After transcription/correction, Gemini analyzes the transcript and suggests 12-16 viral clip candidates.
+* **Tool:** Gemini via `GeminiService.ts` (`/server/src/services/GeminiService.ts`), model `gemini-flash-latest` (`REASONING_MODEL`).
+* **Flow:** After transcription/correction/proofreading, Gemini analyzes the transcript and suggests 12-16 viral clip candidates as **structured JSON** (`responseJsonSchema`, see `CLIP_SCHEMA`) — no text parsing. Timestamps are snapped onto real word starts by `geminiClipsToViralClips` (`routes/align.ts`).
+* **Scores:** each clip carries 1-100 `hook`/`flow`/`value`/`reach` sub-scores, a hook-weighted composite `viralityScore` (`shared/types.ts`, OpusClip-style) and a one-sentence `scoreReason`. The clip grid sorts best-first by default.
 * **Single-cut only:** every clip is one contiguous range (`startMs`/`endMs`). There is no multi-cut/concatenation — clips play straight through from the source. The clip's effective render range applies user trim deltas via `getClipRange` (`shared/types.ts`); `getClipRenderKey` derives the `${startMs}-${endMs}` output filename key from it.
-* **Prompt:** `client/public/prompts/viral-clips-api.md` — instructs Gemini to find 20-30 second single-cut clips optimized for Instagram Reels, cutting **only at sentence boundaries** (start and end must be whole sentences; never mid-sentence).
-* **Users can also add clips manually** via the UI.
+* **Prompt:** `client/public/prompts/viral-clips-api.md` — instructs Gemini to find 20-30 second single-cut clips optimized for Instagram Reels, cutting **only at sentence boundaries** (start and end must be whole sentences; never mid-sentence), and defines the scoring rubric.
+* **Manual workflow:** `viral-clips-manual.md` output is pasted back as text and parsed by `parseViralClipText` (no scores).
+* **Users can also add clips manually** via the UI. Studio edits to a clip (trim, captions, framing) are saved with `PUT /api/projects/:id/clips`.
 * **Legacy:** `server/models/meta-llama-3-8b-instruct.Q4_K_M.gguf` is a leftover from the previous offline LLM approach and is not loaded.
 
 ### **4. Text Correction (Server Side)**
 
-* **Algorithm:** **Needleman-Wunsch** (Global Alignment).
-* **Location:** /server/src/services/AlignmentService.ts.
-* **Task:** Run alignment on the server immediately after transcription if a script is provided.
-* **Fuzzy Logic:** Normalize text (strip diacritics) before aligning to handle "Script vs Spoken" differences.
+* **Script correction:** with a reference script, `GeminiService.correctTranscript` rewrites the transcript row-for-row in 250-row TSV chunks (`gemini-3.1-flash-lite`, prompt `correction-api.md`).
+* **Proofread pass:** always runs next (`GeminiService.proofreadTranscript` + `services/proofread.ts`, prompt `proofread-api.md`). Gemini reads numbered sentences and returns only **sparse edits** `{line, find, replace}`; an edit is applied only if `find` matches that line verbatim and isn't a rewrite, and new words are timed inside the span they replace. This catches what the row-for-row pass misses (mishearings, run-together words, dropped "sa", stray punctuation, capitals). Failures are non-fatal.
+* **Legacy:** `/server/src/services/AlignmentService.ts` (Needleman-Wunsch) no longer exists; alignment is Gemini-based.
 
 ### **5. Caption Rendering (Client Side)**
 
@@ -69,9 +70,21 @@
 
 * **Engine:** @remotion/renderer via `RenderService` (`/server/src/services/RenderService.ts`).
 * **Bundling:** `@remotion/bundler` bundles `client/src/remotion/index.ts` once (cached in memory after first render). The `publicDir` is set to `client/public/` so static assets (outro, etc.) are included.
-* **Rendering:** `renderMedia()` with `selectComposition()` to set per-clip duration and inputProps.
+* **Rendering:** `renderMedia()` with `selectComposition()` to set per-clip duration and inputProps. Output goes to `output_{key}.mp4.partial.mp4` and is renamed on success, so a cancelled render never leaves a truncated file.
+* **Frame source:** `OffthreadVideo`. `@remotion/media`'s `<Video>` (WebCodecs) was measured on a 25 s E67 clip and rendered no faster (~19 s either way): the source is already cut into a short local H.264 segment first (`cutSourceSegment`), which removes the per-frame extraction cost `<Video>` would save.
 * **Hardware Acceleration:** `hardwareAcceleration: 'if-possible'`, `videoBitrate: '6000k'`, codec `h264`. On Apple Silicon this uses VideoToolbox automatically.
 * **Delivery:** Server renders to `.lusk_temp/{sessionId}/output_{startMs}-{endMs}.mp4` and sets the download URL via orchestrator.
+
+### **6b. Speaker Tracking / 9:16 Framing (Server + Client)**
+
+* **Script:** `server/scripts/track_speaker.py` (ported from the sermon pipeline) — Apple Vision face detection via `pyobjc-framework-Vision`, a virtual-camera solver (holds still, pans with minimum-jerk), and hard cuts on camera changes.
+* **Modes** (`FramingMode` in `shared/types.ts`): `speaker` (whoever talks, judged from mouth movement on voiced audio; cuts between people — default), `face` (biggest face), `pick` (person clicked in the Studio's full-frame view, `subjectX`), `manual` (the old fixed `speakerOffsetX` slider; clips that had an offset stay manual).
+* **Service:** `FramingService.ts` runs the script for a clip range and caches the result in `{sessionDir}/framing/`. `POST /api/projects/:id/framing` serves the Studio preview; renders solve (or reuse) the framing server-side, so Render All tracks too.
+* **Composition:** `VideoComposition` takes `framing` keyframes (crop center as a fraction of source width over clip time) and converts them per frame to the horizontal offset. Only for sources wider than 9:16.
+
+### **6c. Source Playability**
+
+* Electron's Chromium plays delivery codecs in any common container (H.264 in `.mkv`, PCM in `.mov`). Editing codecs (ProRes, DNxHD) are not decodable — `PlayableVideo.ts` makes `input.mp4` an H.264 copy (VideoToolbox) for those instead of a symlink, stamped by source size/mtime so it's made once.
 
 ### **7. Outro (Client + Server)**
 
@@ -173,11 +186,13 @@ The DMG build has a different runtime environment than `npm run dev`. Common iss
 * **No `ffprobe` in bundle:** `ffmpeg-static` only ships `ffmpeg`, not `ffprobe`. Any code that calls `ffprobe` must have an `ffmpeg -i` stderr-parsing fallback (see `probeVideoDurationMs` pattern). Remotion ships its own ffmpeg/ffprobe in `@remotion/compositor-darwin-arm64`.
 * **macOS quarantine on binaries:** All native binaries in the bundle (`ffmpeg-static/ffmpeg`, `@remotion/compositor-darwin-arm64/{ffmpeg,ffprobe,remotion}`) must have quarantine attributes cleared in `electron/scripts/bundle.ts` via `xattr -dr com.apple.quarantine`.
 * **No npm workspace symlinks:** The `@lusk/shared` workspace package isn't linked in the bundle. `bundle.ts` must copy `shared/` into `client/node_modules/@lusk/shared` so Remotion's webpack bundler can resolve it at render time.
+* **Child processes:** long-running Python helpers run in their own process groups (`ChildProcesses.ts`) so cancel kills everything they started; the server stops all jobs on SIGTERM, and Electron spawns the server detached and signals its whole group on quit — otherwise quitting mid-job orphaned WhisperX / headless Chrome.
 * **Fastify empty body rejection:** `POST` requests with `Content-Type: application/json` and no body cause a 400 error. Don't set the JSON content-type header on requests that send no body.
 
 ### Python Environment (Managed via uv)
 
-* **Service:** `PythonEnvService.ts` manages a self-contained Python 3.11 venv with pinned dependencies (`server/requirements-whisperx.txt`).
+* **Service:** `PythonEnvService.ts` manages a self-contained Python 3.11 venv with pinned dependencies (`server/requirements-whisperx.txt`: WhisperX, mlx-whisper, pyobjc Vision).
+* **Updates:** a `requirements.sha256` stamp in the env dir records what was installed; `ensureUpToDate()` (called before transcription and tracking) runs an incremental `uv pip install` when the requirements file changed. Helper scripts live in `server/scripts/` and are copied into the bundle by `bundle.ts`.
 * **Location:** `~/Library/Application Support/@lusk/electron/python-env/` (Electron) or `.python-env/` (dev).
 * **Pins:** `torch`, `torchaudio`, and `whisperx` are pinned together — they must be compatible. `transformers` 5.x requires `torch >= 2.6` (CVE-2025-32434). WhisperX 3.8.x requires `torch ~= 2.8.0` and `numpy >= 2.1.0`.
 * **Setup flow:** Electron shows a setup dialog on first launch that streams progress via SSE from `POST /api/python-env/setup`. The SSE endpoint uses `reply.hijack()` to prevent Fastify from interfering.
