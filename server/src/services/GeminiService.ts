@@ -104,6 +104,21 @@ const PROOFREAD_SCHEMA = {
   required: ["edits"],
 };
 
+/**
+ * Drop images embedded in a reference script. A Google Docs Markdown export inlines every
+ * picture as a base64 data URI (`[image1]: <data:image/png;base64,...>` plus `![][image1]`
+ * where it sits) — E60's script was 774 KB of which 6 KB was text, and the script goes
+ * out with every correction chunk.
+ */
+export function stripEmbeddedImages(script: string): string {
+  return script
+    .replace(/^\[[^\]]*\]:\s*<?data:[^\s>]*>?[ \t]*$/gm, "") // reference definitions
+    .replace(/!\[[^\]]*\]\((?:<)?data:[^)]*\)/g, "")           // inline ![](data:...)
+    .replace(/!\[[^\]]*\]\[[^\]]*\]/g, "")                      // ![][image1] references
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function parseClipResponse(text: string): GeminiClip[] {
   const parsed = JSON.parse(text) as { clips?: GeminiClip[] };
   return Array.isArray(parsed.clips) ? parsed.clips : [];
@@ -424,6 +439,7 @@ class GeminiService {
   ): Promise<string> {
     const ai = await this.getClient();
     const prompt = await this.getCorrectionPrompt();
+    scriptText = stripEmbeddedImages(scriptText);
     const fullTsv = wordsToTsv(words);
     const lines = fullTsv.split("\n");
 
@@ -653,6 +669,7 @@ class GeminiService {
     signal?: AbortSignal,
   ): Promise<ProofreadResult> {
     const ai = await this.getClient();
+    if (scriptText) scriptText = stripEmbeddedImages(scriptText);
     const template = await settingsService.getProofreadPrompt();
     const prompt = template
       .replaceAll("{{LANGUAGE}}", LANGUAGE_NAMES[language] ?? language)

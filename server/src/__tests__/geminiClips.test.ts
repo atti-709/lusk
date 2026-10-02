@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { TranscriptWord } from "@lusk/shared";
 import { framingCenterAt, getFramingMode, viralityScore } from "@lusk/shared";
 import { geminiClipsToViralClips } from "../routes/align.js";
-import { parseClipResponse, type GeminiClip } from "../services/GeminiService.js";
+import { parseClipResponse, stripEmbeddedImages, type GeminiClip } from "../services/GeminiService.js";
 
 const words: TranscriptWord[] = Array.from({ length: 100 }, (_, i) => ({
   word: `w${i}`,
@@ -107,5 +107,25 @@ describe("getFramingMode", () => {
     expect(getFramingMode(base)).toBe("speaker");
     expect(getFramingMode({ ...base, speakerOffsetX: 120 })).toBe("manual");
     expect(getFramingMode({ ...base, speakerOffsetX: 120, framingMode: "face" })).toBe("face");
+  });
+});
+
+describe("stripEmbeddedImages", () => {
+  it("removes Google Docs reference images and inline data URIs, keeping the text", () => {
+    const md = [
+      "Prvý odsek.",
+      "![][image1]",
+      "Druhý ![alt](data:image/png;base64,AAAA) odsek.",
+      "",
+      "[image1]: <data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==>",
+      "",
+      "[link]: https://example.com",
+    ].join("\n");
+    const out = stripEmbeddedImages(md);
+    expect(out).not.toContain("data:");
+    expect(out).not.toContain("![");
+    expect(out).toContain("Prvý odsek.");
+    expect(out).toContain("Druhý  odsek.");
+    expect(out).toContain("[link]: https://example.com");
   });
 });
