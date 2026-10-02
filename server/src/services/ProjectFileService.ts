@@ -9,6 +9,8 @@ import {
   copyFile,
   access,
   unlink,
+  lstat,
+  rm,
 } from "node:fs/promises";
 import { join, basename, dirname, relative, resolve, isAbsolute } from "node:path";
 import { homedir } from "node:os";
@@ -21,6 +23,7 @@ import type {
   PipelineState,
 } from "@lusk/shared";
 import { tempManager } from "./TempManager.js";
+import { makePlayableCopy, planPlayable, probeCodecs } from "./PlayableVideo.js";
 
 const MAX_RECENT = 20;
 
@@ -223,9 +226,21 @@ async function updateRegistryEntry(
 async function setupCache(
   projectId: string,
   videoPath: string,
+  onProgress?: (percent: number) => void,
 ): Promise<string> {
   const cacheDir = await tempManager.ensureSessionDir(projectId);
   const linkPath = join(cacheDir, "input.mp4");
+
+  // A source the app's Chromium can't decode (ProRes, DNxHD...) gets a playable copy
+  // instead of the link; ffmpeg-side work reads the same file, so nothing else changes
+  const codecs = await probeCodecs(videoPath).catch(() => null);
+  const plan = codecs ? planPlayable(codecs) : null;
+  if (plan && !plan.direct) {
+    const link = await lstat(linkPath).catch(() => null);
+    if (link?.isSymbolicLink()) await unlink(linkPath);
+    await makePlayableCopy(videoPath, linkPath, plan, codecs!.durationSec, onProgress);
+    return cacheDir;
+  }
 
   // Check if symlink already exists and points to the right target
   try {
@@ -233,11 +248,12 @@ async function setupCache(
     if (existingTarget === videoPath) {
       return cacheDir;
     }
-    // Wrong target – remove and re-create
-    await unlink(linkPath);
   } catch {
     // No existing symlink – that's fine
   }
+  // Wrong target, or a copy left from a previous source — replace it
+  await rm(linkPath, { force: true });
+  await rm(`${linkPath}.source.json`, { force: true });
 
   // Try symlink first; fall back to copy for cross-volume
   try {
@@ -509,8 +525,8 @@ class ProjectFileService {
   }
 
   /** Set up the cache directory with a symlink to the source video. */
-  async setupCache(projectId: string, videoPath: string): Promise<void> {
-    await setupCache(projectId, videoPath);
+  async setupCache(projectId: string, videoPath: string, onProgress?: (percent: number) => void): Promise<void> {
+    await setupCache(projectId, videoPath, onProgress);
   }
 
   /** Remove a single entry from the recent projects registry by project ID. */

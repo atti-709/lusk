@@ -289,9 +289,18 @@ function App() {
     setPendingVideoPath(filePath);
   }, [VIDEO_EXTENSIONS]);
 
+  // A source the preview can't decode (ProRes...) gets a playable copy first, which
+  // can take a while — the Start button reports it instead of looking stuck
+  const [preparingVideo, setPreparingVideo] = useState(false);
+
   const handleIdleNext = useCallback(async () => {
     if (!pendingVideoPath || !sessionId) return;
-    await selectVideoForProject(pendingVideoPath);
+    setPreparingVideo(true);
+    try {
+      await selectVideoForProject(pendingVideoPath);
+    } finally {
+      setPreparingVideo(false);
+    }
     fetch("/api/transcribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -684,12 +693,15 @@ function App() {
 
           {pendingVideoPath && (
             <div className="idle-next-row">
-              <button className="primary" onClick={handleIdleNext}>
+              <button className="primary" onClick={handleIdleNext} disabled={preparingVideo}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M15 4V2" /><path d="M15 16v-2" /><path d="M8 9h2" /><path d="M20 9h2" /><path d="M17.8 11.8 19 13" /><path d="M15 9h.01" /><path d="M17.8 6.2 19 5" /><path d="m3 21 9-9" /><path d="M12.2 6.2 11 5" />
                 </svg>
-                Start
+                {preparingVideo ? "Preparing video…" : "Start"}
               </button>
+              {preparingVideo && state.message && (
+                <p className="idle-filename-hint">{state.message}</p>
+              )}
             </div>
           )}
         </div>

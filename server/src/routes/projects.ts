@@ -220,8 +220,10 @@ export const projectsRoute: FastifyPluginAsync = async (server) => {
           .send({ success: false, error: "Session not found" });
       }
 
-      // Set up cache (symlink / copy video into temp dir)
-      await projectFileService.setupCache(projectId, videoPath);
+      // Set up cache (symlink, or a playable copy for codecs the preview can't decode)
+      await projectFileService.setupCache(projectId, videoPath, (percent) => {
+        orchestrator.updateProgress(projectId, percent, `Making a playable copy of the video... ${Math.round(percent)}%`);
+      });
 
       // Update session fields
       session.videoPath = videoPath;
