@@ -4,7 +4,7 @@ import { spawn, execSync, ChildProcess } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const PORT = 3000;
+const PORT = parseInt(process.env.LUSK_PORT ?? "3000", 10);
 let serverProcess: ChildProcess | null = null;
 
 // ── Terminal color helpers ──────────────────────────────────────────────────
@@ -24,6 +24,12 @@ function prefixLines(prefix: string, data: Buffer): string {
     .map((line) => `${prefix} ${line}`)
     .join("\n");
 }
+
+// Test/automation overrides (see electron/e2e/). Must run before app is ready.
+if (process.env.LUSK_USER_DATA_DIR) {
+  app.setPath("userData", process.env.LUSK_USER_DATA_DIR);
+}
+const autoUpdateDisabled = process.env.LUSK_DISABLE_AUTO_UPDATE === "1";
 
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
@@ -134,7 +140,8 @@ async function startServer(): Promise<void> {
     LUSK_PUBLIC_DIR: publicDir,
     LUSK_REMOTION_ENTRY: remotionEntry,
     LUSK_SERVER_ORIGIN: `http://localhost:${PORT}`,
-    LUSK_PYTHON_ENV_DIR: path.join(app.getPath("userData"), "python-env"),
+    LUSK_PYTHON_ENV_DIR:
+      process.env.LUSK_PYTHON_ENV_DIR ?? path.join(app.getPath("userData"), "python-env"),
   };
 
   // Use Electron itself as the Node runtime (ELECTRON_RUN_AS_NODE=1).
@@ -403,7 +410,7 @@ app.whenReady().then(async () => {
   createWindow();
 
   // Check for updates (only in packaged app — dev builds have no publish config)
-  if (app.isPackaged) {
+  if (app.isPackaged && !autoUpdateDisabled) {
     setupAutoUpdater();
   }
 
