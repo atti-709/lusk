@@ -2,9 +2,12 @@ import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import { autoUpdater } from "electron-updater";
 import { spawn, execSync, ChildProcess } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import path from "node:path";
 
-const PORT = parseInt(process.env.LUSK_PORT ?? "3000", 10);
+const PREFERRED_PORT = parseInt(process.env.LUSK_PORT ?? "3000", 10);
+/** Resolved in app.whenReady() — falls back past ports held by other apps. */
+let PORT = PREFERRED_PORT;
 let serverProcess: ChildProcess | null = null;
 
 // ── Terminal color helpers ──────────────────────────────────────────────────
@@ -96,6 +99,29 @@ function getLoginShellPath(): string {
 }
 
 const LOGIN_PATH = getLoginShellPath();
+
+function canListen(port: number, host: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.once("error", (err: NodeJS.ErrnoException) => {
+      // No IPv6 on this machine isn't a conflict
+      resolve(err.code === "EAFNOSUPPORT" || err.code === "EADDRNOTAVAIL");
+    });
+    probe.listen({ port, host, exclusive: true }, () => probe.close(() => resolve(true)));
+  });
+}
+
+/**
+ * First port from `preferred` that is free on both IPv4 and IPv6. Checking
+ * IPv6 matters: `localhost` resolves to ::1 first, so another app on [::]:3000
+ * would answer our requests even though the server's 0.0.0.0 bind succeeds.
+ */
+async function findFreePort(preferred: number, attempts = 50): Promise<number> {
+  for (let port = preferred; port < preferred + attempts; port++) {
+    if ((await canListen(port, "0.0.0.0")) && (await canListen(port, "::"))) return port;
+  }
+  throw new Error(`No free port in ${preferred}-${preferred + attempts - 1}`);
+}
 
 async function waitForServer(retries = 30, delayMs = 500): Promise<void> {
   for (let i = 0; i < retries; i++) {
@@ -396,6 +422,10 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   try {
+    PORT = await findFreePort(PREFERRED_PORT);
+    if (PORT !== PREFERRED_PORT) {
+      console.log(`${C.yellow}[lusk]${C.reset} port ${PREFERRED_PORT} is in use, using ${PORT}`);
+    }
     await startServer();
   } catch (err) {
     dialog.showErrorBox(

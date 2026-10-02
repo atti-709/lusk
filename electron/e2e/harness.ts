@@ -43,10 +43,11 @@ export interface Lusk {
   app: ElectronApplication;
   /** The main window (http://localhost:{port}). */
   window: Page;
+  /** Port the app actually serves on (LUSK_PORT, or the next free one). */
   port: number;
   baseUrl: string;
   userDataDir: string;
-  /** Combined main-process + server stdout/stderr. */
+  /** Combined main-process + server stdout/stderr (output printed before launch() resolves is not captured). */
   logs: string[];
   /** Make the next native save dialog(s) return this path (null = cancel). */
   stubSaveDialog(filePath: string | null): Promise<void>;
@@ -97,8 +98,7 @@ function findReal(file: string): string | null {
 export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk> {
   const target = opts.target ?? resolveTarget();
   const verbose = opts.verbose ?? process.env.LUSK_E2E_VERBOSE === "1";
-  const port = await freePort();
-  const baseUrl = `http://localhost:${port}`;
+  const requestedPort = await freePort();
 
   const isTempProfile = !opts.userDataDir;
   const userDataDir = opts.userDataDir ?? (await mkdtemp(path.join(tmpdir(), "lusk-e2e-")));
@@ -112,7 +112,7 @@ export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk> {
 
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
-    LUSK_PORT: String(port),
+    LUSK_PORT: String(requestedPort),
     LUSK_USER_DATA_DIR: userDataDir,
     LUSK_DISABLE_AUTO_UPDATE: "1",
     ...opts.env,
@@ -156,7 +156,8 @@ export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk> {
 
   // The Python setup window may come first; wait for the main window.
   // Server startup + Python env check can take a while on a cold start.
-  const isMain = (p: Page) => p.url().startsWith(baseUrl);
+  // The app may fall back to another port if the requested one got taken.
+  const isMain = (p: Page) => p.url().startsWith("http://localhost:");
   let window = app.windows().find(isMain);
   const deadline = Date.now() + 90_000;
   while (!window) {
@@ -169,6 +170,8 @@ export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk> {
     window = next && isMain(next) ? next : app.windows().find(isMain);
   }
   await window.waitForLoadState("domcontentloaded");
+  const port = Number(new URL(window.url()).port);
+  const baseUrl = `http://localhost:${port}`;
 
   const stubDialog = (kind: "save" | "open") => (filePath: string | null) =>
     app.evaluate(

@@ -124,7 +124,7 @@ Claude has full testing control over the Electron app via Playwright (`electron/
 * **Harness:** `launchLusk()` in `electron/e2e/harness.ts` returns `{ app, window, api(), stubSaveDialog(), stubOpenDialog(), logs, close() }`. Native dialogs are stubbed in the main process. `app.evaluate()` gives main-process access.
 * **Ad hoc:** write a throwaway script that imports the harness by absolute path, run it with `npx tsx` from `electron/`, and take `window.screenshot()` to inspect the UI visually.
 * **Fixtures:** `sampleVideo()` (`electron/e2e/fixtures.ts`) generates a 5s synthetic clip via ffmpeg (no speech — use a real podcast clip to exercise transcription).
-* **Main-process env overrides** (`electron/src/main.ts`): `LUSK_PORT`, `LUSK_USER_DATA_DIR`, `LUSK_PYTHON_ENV_DIR`, `LUSK_DISABLE_AUTO_UPDATE=1`.
+* **Main-process env overrides** (`electron/src/main.ts`): `LUSK_PORT` (preferred port, default 3000 — the app falls back to the next port free on both IPv4 and IPv6), `LUSK_USER_DATA_DIR`, `LUSK_PYTHON_ENV_DIR`, `LUSK_DISABLE_AUTO_UPDATE=1`.
 
 ## **Distribution (Electron)**
 
