@@ -1,4 +1,6 @@
 torch==2.8.0
 torchaudio==2.8.0
-whisperx==3.8.2
+whisperx==3.8.4
 requests
+# Transcription on the Apple GPU (Metal); WhisperX still does the word alignment
+mlx-whisper==0.4.3

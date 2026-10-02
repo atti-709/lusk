@@ -54,6 +54,12 @@ fs.copyFileSync(
   path.join(serverBundle, "requirements-whisperx.txt"),
 );
 
+// Python helpers run in the managed env
+fs.mkdirSync(path.join(serverBundle, "scripts"), { recursive: true });
+for (const script of ["transcribe.py"]) {
+  fs.copyFileSync(path.join(ROOT, "server/scripts", script), path.join(serverBundle, "scripts", script));
+}
+
 // Client: dist, public, full src, and node_modules for Remotion bundler
 copyDir(path.join(ROOT, "client/dist"), path.join(BUNDLE, "client/dist"));
 copyDir(path.join(ROOT, "client/public"), path.join(BUNDLE, "client/public"));

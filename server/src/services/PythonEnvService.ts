@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createWriteStream, statSync } from "node:fs";
-import { chmod, mkdir, access, unlink } from "node:fs/promises";
+import { chmod, mkdir, access, unlink, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import path from "node:path";
@@ -60,6 +61,55 @@ class PythonEnvService {
     return this.setupPromise !== null;
   }
 
+  /** Records which requirements file the venv was last installed from. */
+  private get stampPath(): string {
+    return path.join(this.envDir, "requirements.sha256");
+  }
+
+  private async requirementsHash(): Promise<string> {
+    const text = await readFile(this.resolveRequirementsPath(), "utf-8");
+    return createHash("sha256").update(text).digest("hex");
+  }
+
+  private updatePromise: Promise<void> | null = null;
+
+  /**
+   * Bring an existing venv up to the current requirements file. An app update can add
+   * or bump Python packages (mlx-whisper, the Vision bindings); `uv pip install` only
+   * fetches what changed, so this costs seconds and runs once per requirements change.
+   * A no-op for the dev fallback on system Python, which manages its own packages.
+   */
+  async ensureUpToDate(onProgress?: (message: string) => void): Promise<void> {
+    if (!this.isReady()) return;
+    if (this.updatePromise) return this.updatePromise;
+
+    this.updatePromise = (async () => {
+      const wanted = await this.requirementsHash();
+      const installed = await readFile(this.stampPath, "utf-8").catch(() => "");
+      if (installed.trim() === wanted) return;
+      onProgress?.("Updating Python dependencies...");
+      await this.installDeps((_step, _pct, line) => onProgress?.(line));
+      await writeFile(this.stampPath, wanted, "utf-8");
+    })().finally(() => {
+      this.updatePromise = null;
+    });
+    return this.updatePromise;
+  }
+
+  /** Absolute path of one of the server's Python helper scripts. */
+  getScriptPath(name: string): string {
+    const candidates = [
+      path.join(import.meta.dirname, "../../scripts", name), // server/{src,dist}/services -> server/scripts
+      path.join(process.cwd(), "server/scripts", name),     // dev: repo root
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (statSync(candidate).isFile()) return candidate;
+      } catch {}
+    }
+    throw new Error(`Python helper script not found: ${name}`);
+  }
+
   async setup(onProgress?: SetupProgressCallback): Promise<void> {
     // Concurrency guard: if setup is already running, wait on the same promise
     if (this.setupPromise) {
@@ -96,6 +146,7 @@ class PythonEnvService {
     // Step 4: Install dependencies
     onProgress?.("installing-deps", 45, "Installing WhisperX and dependencies (this may take a few minutes)...");
     await this.installDeps(onProgress);
+    await writeFile(this.stampPath, await this.requirementsHash(), "utf-8");
     onProgress?.("installing-deps", 95, "Dependencies installed");
 
     // Step 5: Verify

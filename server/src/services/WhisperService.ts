@@ -10,6 +10,13 @@ import { spawnGroup, killGroup } from "./ChildProcesses.js";
 
 const WHISPERX_MODEL = "large-v3-turbo";
 
+/** Where Hugging Face caches the MLX build of the model — absent before the first run. */
+const MLX_MODEL_CACHE = path.join(
+  process.env.HF_HOME ?? path.join(process.env.HOME ?? "", ".cache", "huggingface"),
+  "hub",
+  "models--mlx-community--whisper-large-v3-turbo",
+);
+
 export interface TranscriptionResult {
   transcript: TranscriptData;
   captions: CaptionWord[];
@@ -148,8 +155,9 @@ class WhisperService {
   }
 
   /**
-   * Run WhisperX CLI: transcribe + forced alignment in one pass.
-   * Produces a JSON file with word-level timestamps from wav2vec2.
+   * Run `scripts/transcribe.py`: mlx-whisper on the Apple GPU for the text, then WhisperX's
+   * wav2vec2 forced alignment for per-word timestamps (WhisperX transcribes on the CPU
+   * when MLX is unavailable). Produces WhisperX's JSON shape.
    */
   private async runWhisperX(
     audioPath: string,
@@ -160,18 +168,16 @@ class WhisperService {
     onProgress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<WhisperXOutput> {
-    return new Promise<WhisperXOutput>((resolve, reject) => {
-      const args = [
-        "-m", "whisperx",
-        audioPath,
-        "--model", WHISPERX_MODEL,
-        "--language", language,
-        "--compute_type", "int8",
-        "--output_format", "json",
-        "--output_dir", outputDir,
-        "--print_progress", "True",
-      ];
+    const jsonPath = path.join(outputDir, "audio.json");
+    const args = [
+      pythonEnvService.getScriptPath("transcribe.py"),
+      audioPath,
+      "--model", WHISPERX_MODEL,
+      "--language", language,
+      "--out", jsonPath,
+    ];
 
+    return new Promise<WhisperXOutput>((resolve, reject) => {
       // Prepend ffmpeg's directory to PATH so WhisperX can find it
       const ffmpegDir = path.dirname(ffmpegPath);
       const envPath = process.env.PATH ? `${ffmpegDir}:${process.env.PATH}` : ffmpegDir;
@@ -191,21 +197,42 @@ class WhisperService {
       };
       signal?.addEventListener("abort", onAbort, { once: true });
 
+      // Each stage owns a slice of the progress bar
+      const PHASES: Record<string, { from: number; to: number; message: string }> = {
+        "transcribe:mlx": { from: 10, to: 70, message: "Transcribing (Apple GPU)..." },
+        "transcribe:whisperx": { from: 10, to: 70, message: "Transcribing..." },
+        align: { from: 70, to: 95, message: "Aligning words..." },
+      };
+      let current = PHASES["transcribe:mlx"];
+      let lastStderr = "";
       let partialErr = "";
       let partialOut = "";
-      let lastStderr = "";
 
-      const parseProgress = (text: string, partial: string): string => {
-        const combined = partial + text;
-        const parts = combined.split(/[\r\n]/);
+      const report = (pct: number) => {
+        onProgress?.(current.from + Math.round((current.to - current.from) * Math.min(pct, 100) / 100), current.message);
+      };
+
+      const parseLines = (text: string, partial: string): string => {
+        const parts = (partial + text).split(/[\r\n]/);
         const remaining = parts.pop() ?? "";
-
         for (const line of parts) {
-          const pctMatch = /(\d+)%\|/.exec(line);
-          if (pctMatch) {
-            const pct = 10 + Math.round(parseInt(pctMatch[1]) * 0.8);
-            onProgress?.(pct, "Transcribing & aligning...");
+          const phase = /^PHASE (\S+)/.exec(line);
+          if (phase) {
+            if (phase[1] === "transcribe:mlx" && !fs.existsSync(MLX_MODEL_CACHE)) {
+              onProgress?.(current.from, "Downloading the transcription model (first run, ~1.6 GB)...");
+            }
+            if (PHASES[phase[1]]) {
+              current = PHASES[phase[1]];
+              report(0);
+            }
+            continue;
           }
+          // mlx-whisper's tqdm bar counts audio frames ("45%|...| 12000/30000 frames");
+          // other bars (model downloads: "Fetching 4 files: 100%|") are not progress.
+          // WhisperX reports its own as "Progress: 45.00%..."
+          const bar = /(\d+)%\|/.exec(line);
+          const pct = bar && /frames/.test(line) ? bar : /Progress: ([\d.]+)%/.exec(line);
+          if (pct) report(parseFloat(pct[1]));
         }
         return remaining;
       };
@@ -213,35 +240,24 @@ class WhisperService {
       proc.stderr!.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
         lastStderr = (lastStderr + text).slice(-500);
-        partialErr = parseProgress(text, partialErr);
+        partialErr = parseLines(text, partialErr);
       });
 
       proc.stdout!.on("data", (chunk: Buffer) => {
-        partialOut = parseProgress(chunk.toString(), partialOut);
+        partialOut = parseLines(chunk.toString(), partialOut);
       });
 
       proc.on("close", async (code) => {
         signal?.removeEventListener("abort", onAbort);
-
-        for (const buf of [partialErr, partialOut]) {
-          const m = /(\d+)%\|/.exec(buf);
-          if (m) {
-            const pct = 10 + Math.round(parseInt(m[1]) * 0.8);
-            onProgress?.(pct, "Transcribing & aligning...");
-          }
-        }
-
         if (signal?.aborted) return; // already rejected by onAbort
 
         if (code !== 0) {
           return reject(
-            new Error(`whisperx exited with code ${code}: ${lastStderr}`)
+            new Error(`transcription exited with code ${code}: ${lastStderr}`)
           );
         }
 
         try {
-          const stem = path.basename(audioPath, path.extname(audioPath));
-          const jsonPath = path.join(outputDir, `${stem}.json`);
           const raw = await readFile(jsonPath, "utf-8");
           const parsed: WhisperXOutput = JSON.parse(raw);
           resolve(parsed);
@@ -269,13 +285,14 @@ class WhisperService {
     // Resolve the ffmpeg binary path so WhisperX can find it
     const ffmpegPath = getFFmpegPath();
 
-    // Step 2: Ensure WhisperX is available
+    // Step 2: Ensure WhisperX is available (and the managed env has this version's packages)
     const python3 = await this.ensureInstalled(onProgress);
+    await pythonEnvService.ensureUpToDate((message) => onProgress?.(6, message));
     if (signal?.aborted) throw new Error("Transcription cancelled");
 
     // Step 3: Run WhisperX (transcription + forced alignment)
     const language = await settingsService.getTranscriptionLanguage();
-    onProgress?.(10, "Starting WhisperX...");
+    onProgress?.(10, "Starting transcription...");
     const whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, language, onProgress, signal);
 
     onProgress?.(96, "Processing results...");
