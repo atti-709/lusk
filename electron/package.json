@@ -14,12 +14,14 @@
     "start": "electron .",
     "bundle": "tsx scripts/bundle.ts",
     "dist": "npm run bundle && electron-builder --publish never",
-    "release": "npm run bundle && GH_TOKEN=$(gh auth token) electron-builder --publish always"
+    "release": "npm run bundle && GH_TOKEN=$(gh auth token) electron-builder --publish always",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "electron-updater": "^6.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "electron": "33.4.11",
     "electron-builder": "^25.1.0",
     "tsx": "^4.19.0",

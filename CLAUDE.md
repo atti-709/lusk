@@ -115,6 +115,17 @@ npm run dev          # starts server (port 3000) + client (port 5173) concurrent
 | ffmpeg | Audio extraction, video probing | `brew install ffmpeg` |
 | Python 3 + WhisperX | Transcription + word alignment | `pip3 install whisperx` |
 
+## **Testing the Electron App (E2E)**
+
+Claude has full testing control over the Electron app via Playwright (`electron/e2e/`). **Verify Electron-facing changes end-to-end in the real app, not just with unit tests** — and against the packaged build when the change touches binaries, paths or module resolution (see Bundle Pitfalls).
+
+* **Run:** `npm run test:e2e` (builds, then runs against `electron/dist/main.js`) · `npm run test:e2e:packaged` (runs against `electron/out/mac-arm64/Lusk.app` — rebuild it first with `npm run package`; `LUSK_E2E_APP=/path/Lusk.app` overrides).
+* **Isolation:** every launch gets a free port and a temp profile (`LUSK_USER_DATA_DIR`), so it never touches real projects and doesn't collide with whatever holds port 3000. `config.json` (Gemini key) and the Python env are reused from the real profile. Builds without these overrides are refused.
+* **Harness:** `launchLusk()` in `electron/e2e/harness.ts` returns `{ app, window, api(), stubSaveDialog(), stubOpenDialog(), logs, close() }`. Native dialogs are stubbed in the main process. `app.evaluate()` gives main-process access.
+* **Ad hoc:** write a throwaway script that imports the harness by absolute path, run it with `npx tsx` from `electron/`, and take `window.screenshot()` to inspect the UI visually.
+* **Fixtures:** `sampleVideo()` (`electron/e2e/fixtures.ts`) generates a 5s synthetic clip via ffmpeg (no speech — use a real podcast clip to exercise transcription).
+* **Main-process env overrides** (`electron/src/main.ts`): `LUSK_PORT`, `LUSK_USER_DATA_DIR`, `LUSK_PYTHON_ENV_DIR`, `LUSK_DISABLE_AUTO_UPDATE=1`.
+
 ## **Distribution (Electron)**
 
 ### Packaging
@@ -142,7 +153,7 @@ npm run dev          # starts server (port 3000) + client (port 5173) concurrent
 
 ### User Data Paths (macOS)
 
-* **App data:** `~/Library/Application Support/Lusk/` — persists across installs/updates.
+* **App data:** `~/Library/Application Support/@lusk/electron/` (dev and packaged builds alike) — persists across installs/updates.
   * `config.json` — user settings (Gemini API key).
   * `recent-projects.json` — registry of recent projects (max 20, LRU).
   * `lusk_temp/{projectId}/` — session temp files (video symlinks, rendered clips).

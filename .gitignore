@@ -14,3 +14,5 @@ electron/out/
 electron/bundle/
 .worktrees/
 .python-env/
+electron/test-results/
+electron/e2e/.fixtures/

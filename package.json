@@ -15,6 +15,8 @@
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
     "build:electron": "npm run build && npm run build -w @lusk/electron",
     "package": "npm run build:electron && npm run dist -w @lusk/electron",
-    "release": "npm run build:electron && npm run release -w @lusk/electron"
+    "release": "npm run build:electron && npm run release -w @lusk/electron",
+    "test:e2e": "npm run build:electron && npm run test:e2e -w @lusk/electron",
+    "test:e2e:packaged": "LUSK_E2E_TARGET=packaged npm run test:e2e -w @lusk/electron"
   }
 }
