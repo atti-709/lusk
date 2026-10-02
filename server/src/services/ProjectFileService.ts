@@ -447,6 +447,7 @@ class ProjectFileService {
       correctedTranscriptRaw: session.correctedTranscriptRaw ?? null,
       scriptText: session.scriptText ?? null,
       captions: session.captions,
+      translatedCaptions: session.translatedCaptions ?? null,
       viralClips: session.viralClips,
     };
 
