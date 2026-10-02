@@ -61,6 +61,17 @@ describe("geminiClipsToViralClips", () => {
   });
 });
 
+describe("geminiClipsToViralClips overlap", () => {
+  it("keeps the stronger of two clips covering the same moment", () => {
+    const clips = geminiClipsToViralClips([
+      clip({ start: "00:00:01.000", end: "00:00:27.000", hook_score: 90 }),
+      clip({ start: "00:00:05.000", end: "00:00:27.000", hook_score: 40 }),
+      clip({ start: "00:00:20.000", end: "00:00:45.000", hook_score: 60 }), // 7 s of 26 shared — kept
+    ], words, 100_000);
+    expect(clips.map((c) => c.startMs)).toEqual([1_000, 20_000]);
+  });
+});
+
 describe("parseClipResponse", () => {
   it("reads the clips array and tolerates a missing one", () => {
     expect(parseClipResponse(JSON.stringify({ clips: [clip({})] }))).toHaveLength(1);

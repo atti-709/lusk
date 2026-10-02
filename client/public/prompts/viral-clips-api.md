@@ -4,7 +4,7 @@ Below this prompt, under the header "**## Corrected Transcript (.tsv):**", you w
 
 Your job: select **12-16 single-cut clips** — the strongest self-contained moments in the conversation. Each clip is **one contiguous range** of the transcript (a single start and a single end). You never stitch, splice, or reorder — the audio and video play straight through exactly as they appear in the source.
 
-Pick the moments that would genuinely stop a thumb mid-scroll on Instagram Reels. Aim for 12-16, and be thorough — mine the whole transcript, not just the first third. Cover distinct topics, stories, and standout lines so the editor has a rich set to choose from. Each clip must still clear the quality bar below; don't submit filler just to hit the number, but a long conversation usually contains well over a dozen genuinely strong moments — find them.
+Pick the moments that would genuinely stop a thumb mid-scroll on Instagram Reels. Aim for 12-16, and be thorough — mine the whole transcript, not just the first third. Cover distinct topics, stories, and standout lines so the editor has a rich set to choose from. **Clips must not overlap** — each moment of the transcript belongs to at most one clip. A short episode holds fewer clips: never more than one per ~35 seconds of transcript. Each clip must still clear the quality bar below; don't submit filler just to hit the number, but a long conversation usually contains well over a dozen genuinely strong moments — find them.
 
 ## Duration Requirements (CRITICAL)
 

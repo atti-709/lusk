@@ -119,6 +119,13 @@ export function stripEmbeddedImages(script: string): string {
     .trim();
 }
 
+/** No more than one clip per ~35 s of transcript, capped at the prompt's 16. */
+function maxClipsFor(lastTimestamp: string): number {
+  const [h, m, sec] = lastTimestamp.split(":").map(Number);
+  const totalSec = (h || 0) * 3600 + (m || 0) * 60 + (sec || 0);
+  return Math.max(3, Math.min(16, Math.floor(totalSec / 35)));
+}
+
 export function parseClipResponse(text: string): GeminiClip[] {
   const parsed = JSON.parse(text) as { clips?: GeminiClip[] };
   return Array.isArray(parsed.clips) ? parsed.clips : [];
@@ -616,6 +623,7 @@ class GeminiService {
       prompt,
       "",
       `CONSTRAINT: The transcript ends at ${lastTimestamp}. All start and end timestamps MUST fall within 00:00:00.000 – ${lastTimestamp}. Do NOT suggest clips that extend beyond this range.`,
+      `CONSTRAINT: Return at most ${maxClipsFor(lastTimestamp)} clips, none overlapping another.`,
       "",
       "## Corrected Transcript (.tsv):",
       "",

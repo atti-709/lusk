@@ -230,7 +230,27 @@ export function geminiClipsToViralClips(
       scoreReason: c.score_reason?.trim() || undefined,
     });
   }
-  return out.sort((a, b) => a.startMs - b.startMs);
+  return dropOverlapping(out).sort((a, b) => a.startMs - b.startMs);
+}
+
+/** Clips sharing more than this fraction of the shorter one are the same moment twice. */
+const MAX_OVERLAP = 0.3;
+
+/**
+ * Keep the stronger of any two clips that are substantially the same stretch of the
+ * episode. Asked for a fixed number of clips, Gemini pads a short episode with
+ * near-duplicates (E60: 0.8-27.3 s and 4.7-27.3 s, 13.1-39.0 s, 19.1-47.8 s...).
+ */
+function dropOverlapping(clips: ViralClip[]): ViralClip[] {
+  const kept: ViralClip[] = [];
+  for (const c of [...clips].sort((a, b) => (b.viralityScore ?? 0) - (a.viralityScore ?? 0))) {
+    const clash = kept.some((k) => {
+      const shared = Math.min(k.endMs, c.endMs) - Math.max(k.startMs, c.startMs);
+      return shared > MAX_OVERLAP * Math.min(k.endMs - k.startMs, c.endMs - c.startMs);
+    });
+    if (!clash) kept.push(c);
+  }
+  return kept;
 }
 
 export function wordsToCaptions(words: TranscriptWord[]): CaptionWord[] {
