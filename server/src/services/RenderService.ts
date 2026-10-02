@@ -259,7 +259,8 @@ class RenderService {
         },
       }),
       onProgress: (progress) => {
-        onProgress?.(5 + Math.round(progress * 15), "Bundling composition...");
+        // Remotion reports bundling progress as 0-100
+        onProgress?.(5 + Math.round((progress / 100) * 15), "Bundling composition...");
       },
     });
     onProgress?.(20, "Bundle ready");
