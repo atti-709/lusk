@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Player } from "@remotion/player";
 import type { Caption } from "@remotion/captions";
 import { Dashboard } from "./components/Dashboard";
@@ -374,6 +374,21 @@ function App() {
     }
     setSelectedClip(null);
   }, [sessionId, state?.renders]);
+
+  // Studio edits (trim, captions, framing) are saved to the project, debounced — they
+  // used to live only in client state and were lost on the next update or reload
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveClips = useCallback((clips: ViralClip[]) => {
+    if (!sessionId) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      fetch(`/api/projects/${sessionId}/clips`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clips }),
+      }).catch((e: unknown) => console.error(e));
+    }, 400);
+  }, [sessionId]);
 
   const handleAddClip = useCallback(async (clip: ViralClip) => {
     if (!sessionId) return;
@@ -820,25 +835,16 @@ function App() {
             sourceAspectRatio={sourceAspectRatio}
             videoDurationMs={state.videoDurationMs}
             onClipUpdate={(updatedClip) => {
-              // Update local state for persistence
-              setViralClips((prev) =>
-                prev.map((c) => {
-                  // Match by reference or ID if available, but here we can match by original start/end?
-                  // Actually, since we update the object itself, we need a stable ID. 
-                  // Let's assume the clip object reference or title+start/end matches.
-                  if (c === selectedClip) return updatedClip;
-                   // Fallback: match by title/start/end if object ref doesn't work (e.g. from server refresh)
-                  if (
-                    c.title === selectedClip.title &&
-                    c.startMs === selectedClip.startMs &&
-                    c.endMs === selectedClip.endMs
-                  ) {
-                    return updatedClip;
-                  }
-                  return c;
-                })
+              // Match by reference, or by title + range after a server refresh replaced the objects
+              const next = viralClips.map((c) =>
+                c === selectedClip ||
+                (c.title === selectedClip.title && c.startMs === selectedClip.startMs && c.endMs === selectedClip.endMs)
+                  ? updatedClip
+                  : c
               );
+              setViralClips(next);
               setSelectedClip(updatedClip);
+              saveClips(next);
             }}
           />
         </div>

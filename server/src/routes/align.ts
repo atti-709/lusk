@@ -660,6 +660,32 @@ export async function alignRoute(app: FastifyInstance) {
     }
   );
 
+  // 5d-b. Save the clip list after edits made in the Studio (trim, captions, framing).
+  // Without this those edits only lived in the client and were lost on the next
+  // state update or reload.
+  app.put<{
+    Params: { projectId: string };
+    Body: { clips: ViralClip[] };
+    Reply: { success: true } | ErrorResponse;
+  }>(
+    "/api/projects/:projectId/clips",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+      const { clips } = (request.body ?? {}) as Partial<{ clips: ViralClip[] }>;
+      if (!Array.isArray(clips) || clips.some((c) => c == null || c.startMs == null || c.endMs == null)) {
+        return reply.status(400).send({ success: false, error: "clips must be an array of clips" });
+      }
+      orchestrator.setViralClips(projectId, clips);
+      // Push the saved list to every client so a stale copy can't overwrite it later
+      orchestrator.emitAndPersist(projectId);
+      return { success: true as const };
+    }
+  );
+
   // 5e. Go back to align step from READY
   app.post<{
     Params: { projectId: string };
