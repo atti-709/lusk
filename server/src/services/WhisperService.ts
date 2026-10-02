@@ -7,6 +7,7 @@ import { getFFmpegPath } from "../config/ffmpeg.js";
 import { settingsService } from "./SettingsService.js";
 import { pythonEnvService } from "./PythonEnvService.js";
 import { spawnGroup, killGroup } from "./ChildProcesses.js";
+import { probeCodecs } from "./PlayableVideo.js";
 
 const WHISPERX_MODEL = "large-v3-turbo";
 
@@ -40,6 +41,19 @@ interface WhisperXSegment {
 
 interface WhisperXOutput {
   segments: WhisperXSegment[];
+}
+
+/** Length of a 16 kHz mono s16 WAV, from its size (the header is 44 bytes; close enough). */
+function wavDurationSec(wavPath: string): number {
+  try {
+    return Math.max(0, fs.statSync(wavPath).size - 44) / (16000 * 2);
+  } catch {
+    return 0;
+  }
+}
+
+function fmtSec(sec: number): string {
+  return `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
 }
 
 /** A word before unalignable entries have been given timestamps; null = not aligned. */
@@ -104,6 +118,14 @@ class WhisperService {
     return python3;
   }
 
+  /**
+   * Extract 16 kHz mono audio, and check it really covers the whole source.
+   *
+   * ffmpeg treats a read that comes up short as the end of the file and exits 0, and a
+   * Google Drive / iCloud file that is still streaming in can do exactly that: E60's
+   * audio came back 234 s long out of 494 s, and half the episode silently went missing
+   * from the transcript. A short result is retried once, then reported.
+   */
   async extractAudio(
     inputPath: string,
     outputPath: string,
@@ -112,6 +134,24 @@ class WhisperService {
   ): Promise<void> {
     onProgress?.(1, "Extracting audio...");
     await access(inputPath);
+    const sourceSec = (await probeCodecs(inputPath).catch(() => null))?.durationSec ?? null;
+
+    for (let attempt = 1; ; attempt++) {
+      await this.extractAudioOnce(inputPath, outputPath, signal);
+      const gotSec = wavDurationSec(outputPath);
+      if (sourceSec == null || gotSec >= sourceSec - Math.max(2, sourceSec * 0.01)) break;
+      const msg = `Audio came back ${fmtSec(gotSec)} long, but the video is ${fmtSec(sourceSec)}`;
+      if (attempt >= 2) {
+        throw new Error(`${msg} — the source couldn't be read to the end. Is it fully downloaded (Google Drive / iCloud)?`);
+      }
+      console.warn(`[WhisperService] ${msg}; reading the source again`);
+      onProgress?.(2, "Audio came back short — reading the video again...");
+    }
+
+    onProgress?.(5, "Audio extracted");
+  }
+
+  private async extractAudioOnce(inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void> {
 
     const ffmpeg = getFFmpegPath();
 
@@ -150,8 +190,6 @@ class WhisperService {
         else reject(new Error(`ffmpeg audio extraction failed (binary: ${ffmpeg}): ${stderr.trim()}`));
       });
     });
-
-    onProgress?.(5, "Audio extracted");
   }
 
   /**
