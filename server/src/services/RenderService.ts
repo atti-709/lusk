@@ -76,6 +76,67 @@ function remapCaptions(
 
 const execFileAsync = promisify(execFile);
 
+/** Extra source kept past the clip end so OffthreadVideo never runs off the segment and freezes. */
+const SEGMENT_TAIL_PAD_SEC = 1;
+/** Generous ceiling for the segment cut — a cloud-only source must first stream the range in. */
+const SEGMENT_CUT_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Cuts [startSec, startSec + durationSec] out of the source into a short local H.264 file.
+ *
+ * Remotion downloads every http asset in full before it can extract a single frame, and
+ * input.mp4 is usually a symlink into Google Drive / iCloud. Handing it the whole source
+ * meant streaming a 1-1.5 GB cloud-only file per render (subject to Remotion's 20s
+ * no-data and 120s delayRender timeouts) — renders stalled at "Rendering video...".
+ * ffmpeg seeks with range reads, so only the clip's bytes are fetched.
+ *
+ * Input-side `-ss` with a re-encode is frame-accurate: segment time t matches source time startSec + t.
+ */
+async function cutSourceSegment(
+  inputPath: string,
+  outputPath: string,
+  startSec: number,
+  durationSec: number,
+  cancelSignal?: CancelSignal
+): Promise<void> {
+  const controller = new AbortController();
+  cancelSignal?.(() => controller.abort());
+  try {
+    await execFileAsync(
+      getFFmpegPath(),
+      [
+        "-v", "error",
+        "-y",
+        "-hwaccel", "videotoolbox", // falls back to software decode if unsupported
+        "-ss", startSec.toFixed(6),
+        "-i", inputPath,
+        "-t", durationSec.toFixed(6),
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "14",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "256k",
+        "-movflags", "+faststart",
+        outputPath,
+      ],
+      { signal: controller.signal, timeout: SEGMENT_CUT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }
+    );
+  } catch (err) {
+    fs.rmSync(outputPath, { force: true });
+    if (controller.signal.aborted) throw new Error("Render cancelled");
+    const stderr = (err as { stderr?: string }).stderr?.trim();
+    const killed = (err as { killed?: boolean }).killed;
+    throw new Error(
+      killed
+        ? `Timed out reading the source video (is it a cloud file that couldn't be downloaded?)`
+        : `Failed to cut source segment: ${stderr || (err as Error).message}`
+    );
+  }
+}
+
 
 const COMPOSITION_ID = "LuskClip";
 const LUSK_SERVER_ORIGIN =
@@ -227,7 +288,9 @@ class RenderService {
     cancelSignal?: CancelSignal
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress, outroConfig != null);
-    const videoUrl = `${LUSK_SERVER_ORIGIN}/static/${sessionId}/input.mp4`;
+    const segmentFileName = `source_${outputFileName}`;
+    const videoUrl = `${LUSK_SERVER_ORIGIN}/static/${sessionId}/${segmentFileName}`;
+    const segmentPath = path.join(sessionDir, segmentFileName);
     const outputPath = path.join(sessionDir, outputFileName);
 
     const fps = await settingsService.getFps();
@@ -239,7 +302,7 @@ class RenderService {
     // user trims, neither of which is bounded by the video's actual length.
     const sourceDurationSec = await this.probeDuration(path.join(sessionDir, "input.mp4"));
     const sourceDurationMs = sourceDurationSec > 0 ? sourceDurationSec * 1000 : null;
-    const { startFromInFrames, durationInFrames: clipDurationInFrames, snappedStartMs } =
+    const { durationInFrames: clipDurationInFrames, snappedStartMs } =
       computeClipLayout(startMs, endMs, fps, sourceDurationMs);
 
     const remotionCaptions: Caption[] =
@@ -252,55 +315,69 @@ class RenderService {
       : 0;
     const overlap = hasOutro ? outroOverlapFrames : 0;
 
-    const inputProps = {
-      videoUrl,
-      captions: remotionCaptions,
-      offsetX,
-      startFrom: startFromInFrames,
-      outroSrc: hasOutro ? outroConfig.outroSrc : "",
-      outroDurationInFrames,
-      outroOverlapFrames,
-      sourceAspectRatio: sourceAspectRatio ?? null,
-      captionStyles: captionStyles ?? undefined,
-    };
-
-    const totalDurationInFrames =
-      clipDurationInFrames + outroDurationInFrames - overlap;
-
-    onProgress?.(20, "Preparing composition...");
-
-    const composition = await selectComposition({
-      serveUrl,
-      id: COMPOSITION_ID,
-      inputProps,
-    });
-
-    composition.durationInFrames = totalDurationInFrames;
-
-    onProgress?.(25, "Rendering video...");
-
-    const renderOptions = {
-      composition,
-      serveUrl,
-      codec: "h264" as const,
-      videoBitrate: "6000k",
-      hardwareAcceleration: "if-possible" as const,
-      outputLocation: outputPath,
-      inputProps,
-      timeoutInMilliseconds: 120_000,
-      onProgress: ({ progress }: { progress: number }) => {
-        const pct = 25 + Math.round(progress * 70);
-        onProgress?.(pct, "Rendering video...");
-      },
-    };
-    await renderMedia(
+    onProgress?.(20, "Reading source video...");
+    await cutSourceSegment(
+      path.join(sessionDir, "input.mp4"),
+      segmentPath,
+      snappedStartMs / 1000,
+      clipDurationInFrames / fps + SEGMENT_TAIL_PAD_SEC,
       cancelSignal
-        ? { ...renderOptions, cancelSignal }
-        : renderOptions
     );
 
-    onProgress?.(95, "Render complete");
-    return outputPath;
+    try {
+      const inputProps = {
+        videoUrl,
+        captions: remotionCaptions,
+        offsetX,
+        // The segment already starts at the clip start
+        startFrom: 0,
+        outroSrc: hasOutro ? outroConfig.outroSrc : "",
+        outroDurationInFrames,
+        outroOverlapFrames,
+        sourceAspectRatio: sourceAspectRatio ?? null,
+        captionStyles: captionStyles ?? undefined,
+      };
+
+      const totalDurationInFrames =
+        clipDurationInFrames + outroDurationInFrames - overlap;
+
+      onProgress?.(22, "Preparing composition...");
+
+      const composition = await selectComposition({
+        serveUrl,
+        id: COMPOSITION_ID,
+        inputProps,
+      });
+
+      composition.durationInFrames = totalDurationInFrames;
+
+      onProgress?.(25, "Rendering video...");
+
+      const renderOptions = {
+        composition,
+        serveUrl,
+        codec: "h264" as const,
+        videoBitrate: "6000k",
+        hardwareAcceleration: "if-possible" as const,
+        outputLocation: outputPath,
+        inputProps,
+        timeoutInMilliseconds: 120_000,
+        onProgress: ({ progress }: { progress: number }) => {
+          const pct = 25 + Math.round(progress * 70);
+          onProgress?.(pct, "Rendering video...");
+        },
+      };
+      await renderMedia(
+        cancelSignal
+          ? { ...renderOptions, cancelSignal }
+          : renderOptions
+      );
+
+      onProgress?.(95, "Render complete");
+      return outputPath;
+    } finally {
+      fs.rmSync(segmentPath, { force: true });
+    }
   }
 }
 
