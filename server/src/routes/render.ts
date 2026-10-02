@@ -7,8 +7,9 @@ import { orchestrator } from "../services/Orchestrator.js";
 import { tempManager } from "../services/TempManager.js";
 import { renderService } from "../services/RenderService.js";
 import { settingsService } from "../services/SettingsService.js";
-import type { RenderRequest, ErrorResponse, CaptionWord, ViralClip } from "@lusk/shared";
-import { getClipRenderKey } from "@lusk/shared";
+import { framingService } from "../services/FramingService.js";
+import type { RenderRequest, ErrorResponse, CaptionWord, ViralClip, Framing, FramingRequest, ProjectState } from "@lusk/shared";
+import { getClipRenderKey, getClipRange, getFramingMode } from "@lusk/shared";
 
 const RENDER_LOG = "/tmp/lusk-render.log";
 function routeLog(msg: string): void {
@@ -22,6 +23,20 @@ const activeRenderCancels = new Map<string, { cancel: () => void; clipKey: strin
 
 function clipKey(clip: ViralClip): string {
   return getClipRenderKey(clip);
+}
+
+/** Tracking only applies to a source wider than the 9:16 frame. */
+function isLandscape(session: ProjectState): boolean {
+  return session.videoWidth != null && session.videoHeight != null &&
+    session.videoWidth / session.videoHeight > 9 / 16 + 0.01;
+}
+
+/** The framing request a clip's settings imply, or null for a fixed (manual) crop. */
+function framingRequestFor(clip: ViralClip): FramingRequest | null {
+  const mode = getFramingMode(clip);
+  if (mode === "manual" || (mode === "pick" && clip.subjectX == null)) return null;
+  const { startMs, endMs } = getClipRange(clip);
+  return { startMs, endMs, mode, subjectX: clip.subjectX, subjectT: clip.subjectT };
 }
 
 async function runRender(
@@ -45,7 +60,8 @@ async function runRender(
   });
 
   const { cancelSignal, cancel } = makeCancelSignal();
-  activeRenderCancels.set(sessionId, { cancel, clipKey: key });
+  let cancelled = false;
+  activeRenderCancels.set(sessionId, { cancel: () => { cancelled = true; cancel(); }, clipKey: key });
 
   try {
     const settings = await settingsService.load();
@@ -55,6 +71,27 @@ async function runRender(
       session.videoWidth != null && session.videoHeight != null
         ? session.videoWidth / session.videoHeight
         : null;
+
+    // Tracked framing is solved here rather than trusted from the client, so batch
+    // renders (Render All) track too; the preview's solve is reused from the cache
+    let framing: Framing | null = null;
+    const framingReq = isLandscape(session) ? framingRequestFor(clip) : null;
+    if (framingReq) {
+      framing = await framingService.getFraming(
+        { sessionId, width: session.videoWidth!, height: session.videoHeight! },
+        framingReq,
+        {
+          onProgress: (percent, message) => orchestrator.updateClipRender(sessionId, key, {
+            status: "rendering",
+            progress: Math.round(percent * 0.05),
+            message,
+            outputUrl: null,
+          }),
+        },
+      );
+      // A cancel that arrived while tracking ran has nothing in Remotion to stop yet
+      if (cancelled) throw new Error("Render cancelled");
+    }
 
     await renderService.renderClip(
       sessionId,
@@ -74,7 +111,8 @@ async function runRender(
       preProcessedCaptions as any,
       outroConfig,
       sourceAspectRatio,
-      cancelSignal
+      cancelSignal,
+      framing?.keyframes ?? null
     );
 
     const outputUrl = `/static/${sessionId}/${outputFileName}?t=${Date.now()}`;
@@ -171,6 +209,39 @@ export async function renderRoute(app: FastifyInstance) {
       });
 
       return { success: true as const };
+    }
+  );
+
+  // Solve (or fetch the cached) tracked camera path for a clip range — the Studio preview
+  app.post<{ Params: { projectId: string }; Body: FramingRequest; Reply: Framing | ErrorResponse }>(
+    "/api/projects/:projectId/framing",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
+      if (!session) return reply.status(404).send({ success: false, error: "Session not found" });
+      if (!isLandscape(session)) {
+        return reply.status(409).send({ success: false, error: "Tracking needs a landscape source" });
+      }
+      const body = (request.body ?? {}) as Partial<FramingRequest>;
+      const { startMs, endMs, mode, subjectX, subjectT } = body;
+      if (startMs == null || endMs == null || endMs <= startMs || !mode || !["face", "pick", "speaker"].includes(mode)) {
+        return reply.status(400).send({ success: false, error: "startMs, endMs and a tracking mode are required" });
+      }
+      if (mode === "pick" && (subjectX == null || subjectX < 0 || subjectX > 1)) {
+        return reply.status(400).send({ success: false, error: "pick mode needs subjectX in [0, 1]" });
+      }
+      try {
+        return await framingService.getFraming(
+          { sessionId: projectId, width: session.videoWidth!, height: session.videoHeight! },
+          { startMs, endMs, mode, subjectX, subjectT },
+          { preview: true },
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("cancelled")) return reply.status(409).send({ success: false, error: "Superseded" });
+        request.log.error(err, "Speaker tracking failed");
+        return reply.status(500).send({ success: false, error: message });
+      }
     }
   );
 

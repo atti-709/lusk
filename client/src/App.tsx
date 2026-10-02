@@ -825,6 +825,7 @@ function App() {
         <div className="pipeline-stage">
           <StudioView
             key={`clip-${selectedClip.startMs}-${selectedClip.endMs}`}
+            sessionId={sessionId!}
             videoUrl={state.videoUrl}
             captions={captions}
             clip={selectedClip}

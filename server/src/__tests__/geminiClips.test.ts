@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { TranscriptWord } from "@lusk/shared";
-import { viralityScore } from "@lusk/shared";
+import { framingCenterAt, getFramingMode, viralityScore } from "@lusk/shared";
 import { geminiClipsToViralClips } from "../routes/align.js";
 import { parseClipResponse, type GeminiClip } from "../services/GeminiService.js";
 
@@ -72,5 +72,40 @@ describe("viralityScore", () => {
   it("weights the hook most", () => {
     expect(viralityScore({ hook: 100, flow: 0, value: 0, reach: 0 })).toBe(35);
     expect(viralityScore({ hook: 50, flow: 50, value: 50, reach: 50 })).toBe(50);
+  });
+});
+
+describe("framingCenterAt", () => {
+  const kf = [
+    { t: 0, cx: 0.3 },
+    { t: 2, cx: 0.3 },
+    { t: 3, cx: 0.5 },
+    { t: 5.979, cx: 0.5 },
+    { t: 5.98, cx: 0.8 },
+  ];
+
+  it("holds the ends and interpolates between keyframes", () => {
+    expect(framingCenterAt(kf, -1)).toBe(0.3);
+    expect(framingCenterAt(kf, 1)).toBe(0.3);
+    expect(framingCenterAt(kf, 2.5)).toBeCloseTo(0.4);
+    expect(framingCenterAt(kf, 10)).toBe(0.8);
+  });
+
+  it("steps at a cut", () => {
+    expect(framingCenterAt(kf, 5.97)).toBe(0.5);
+    expect(framingCenterAt(kf, 5.99)).toBe(0.8);
+  });
+
+  it("centers without keyframes", () => {
+    expect(framingCenterAt([], 1)).toBe(0.5);
+  });
+});
+
+describe("getFramingMode", () => {
+  it("defaults to speaker tracking, but keeps hand-positioned clips manual", () => {
+    const base = { title: "", startMs: 0, endMs: 1, hookText: "" };
+    expect(getFramingMode(base)).toBe("speaker");
+    expect(getFramingMode({ ...base, speakerOffsetX: 120 })).toBe("manual");
+    expect(getFramingMode({ ...base, speakerOffsetX: 120, framingMode: "face" })).toBe("face");
   });
 });

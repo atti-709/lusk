@@ -54,9 +54,9 @@ fs.copyFileSync(
   path.join(serverBundle, "requirements-whisperx.txt"),
 );
 
-// Python helpers run in the managed env
+// Python helpers run in the managed env (transcription, speaker tracking)
 fs.mkdirSync(path.join(serverBundle, "scripts"), { recursive: true });
-for (const script of ["transcribe.py"]) {
+for (const script of ["transcribe.py", "track_speaker.py"]) {
   fs.copyFileSync(path.join(ROOT, "server/scripts", script), path.join(serverBundle, "scripts", script));
 }
 

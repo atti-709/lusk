@@ -1,11 +1,12 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
 import type { Caption } from "@remotion/captions";
-import type { CaptionWord, ViralClip, ClipRenderState, CaptionStyles } from "@lusk/shared";
+import type { CaptionWord, ViralClip, ClipRenderState, CaptionStyles, FramingMode } from "@lusk/shared";
 import {
   DEFAULT_CAPTION_STYLES,
   getClipRange,
   getClipRenderKey,
+  getFramingMode,
 } from "@lusk/shared";
 import {
   VideoComposition,
@@ -14,6 +15,8 @@ import {
 } from "./VideoComposition";
 import { FONT_REGISTRY } from "./CaptionOverlay";
 import { useOutroConfig } from "../hooks/useOutroConfig";
+import { useFraming } from "../hooks/useFraming";
+import { FramingControl } from "./FramingControl";
 import { useAppSettings } from "../contexts/AppSettingsContext";
 import "./StudioView.css";
 
@@ -32,6 +35,7 @@ function splitIntoTokens(text: string, count: number): string[] {
 }
 
 interface StudioViewProps {
+  sessionId: string;
   videoUrl: string;
   captions: CaptionWord[];
   clip: ViralClip;
@@ -114,6 +118,7 @@ function buildClipLayout(
 }
 
 export function StudioView({
+  sessionId,
   videoUrl,
   captions,
   clip,
@@ -128,13 +133,15 @@ export function StudioView({
   const playerRef = useRef<PlayerRef>(null);
   const { config: outroConfig, reload: reloadOutro } = useOutroConfig();
   const { fps, captionStyles, updateCaptionStyles, outroEnabled, setOutroEnabled } = useAppSettings();
-  const isVerticalSource = sourceAspectRatio != null && sourceAspectRatio < 1;
 
   const [stylesOpen, setStylesOpen] = useState(false);
   const [outroOpen, setOutroOpen] = useState(false);
   const [outroUploading, setOutroUploading] = useState(false);
 
   const [offsetX, setOffsetX] = useState(clip.speakerOffsetX ?? 0);
+  const [framingMode, setFramingMode] = useState<FramingMode>(() => getFramingMode(clip));
+  const [subjectX, setSubjectX] = useState<number | undefined>(clip.subjectX);
+  const [subjectT, setSubjectT] = useState<number | undefined>(clip.subjectT);
 
   // Clip range (canonical). Initialized from the clip's effective range (base + any trim deltas).
   const [range, setRange] = useState<{ startMs: number; endMs: number }>(() => getClipRange(clip));
@@ -151,6 +158,10 @@ export function StudioView({
     [range, fps, videoDurationMs]
   );
   const clipDurationInFrames = layout.durationInFrames;
+
+  // Tracked framing only applies when the source is wider than the 9:16 frame
+  const canTrack = sourceAspectRatio != null && sourceAspectRatio > 9 / 16 + 0.01;
+  const framing = useFraming(sessionId, range, framingMode, subjectX, subjectT, canTrack);
 
   const handlePersistState = useCallback(
     (updates: Partial<ViralClip>) => {
@@ -192,11 +203,14 @@ export function StudioView({
     startMs: range.startMs,
     endMs: range.endMs,
     speakerOffsetX: offsetX,
+    framingMode,
+    subjectX,
+    subjectT,
     trimStartDelta: 0,
     trimEndDelta: 0,
     captionEdits: clip.captionEdits,
     captionOffset: clip.captionOffset,
-  }), [clip, range, offsetX]);
+  }), [clip, range, offsetX, framingMode, subjectX, subjectT]);
 
   const key = getClipRenderKey(trimmedClip);
   const renderState = renders[key] ?? null;
@@ -247,6 +261,23 @@ export function StudioView({
     (val: number) => {
       setOffsetX(val);
       handlePersistState({ speakerOffsetX: val });
+    },
+    [handlePersistState]
+  );
+
+  const updateFramingMode = useCallback(
+    (mode: FramingMode) => {
+      setFramingMode(mode);
+      handlePersistState({ framingMode: mode });
+    },
+    [handlePersistState]
+  );
+
+  const updateSubjectX = useCallback(
+    (x: number, t: number) => {
+      setSubjectX(x);
+      setSubjectT(t);
+      handlePersistState({ framingMode: "pick", subjectX: x, subjectT: t });
     },
     [handlePersistState]
   );
@@ -389,7 +420,8 @@ export function StudioView({
               inputProps={{
                 videoUrl,
                 captions: remotionCaptions,
-                offsetX,
+                offsetX: framingMode === "manual" ? offsetX : 0,
+                framing: framing.keyframes,
                 startFrom: layout.startFromInFrames,
                 outroSrc: outroActive ? outroConfig.outroSrc : "",
                 outroDurationInFrames,
@@ -549,23 +581,24 @@ export function StudioView({
             Clip: {clipDurationSec}s{outroDurationInFrames > 0 && ` + outro = ${totalDurationSec}s`}
           </div>
 
-          {/* Speaker position */}
-          {!isVerticalSource && (
-          <div className="control-group">
-            <label className="control-label">
-              Speaker position
-              <span className="control-value">{offsetX}px</span>
-            </label>
-            <input
-              type="range"
-              min={-300}
-              max={300}
-              step={5}
-              value={offsetX}
-              onChange={(e) => updateOffsetX(Number(e.target.value))}
-              className="offset-slider"
+          {/* Framing: tracked or manual 9:16 crop */}
+          {canTrack && (
+            <FramingControl
+              mode={framingMode}
+              subjectX={subjectX}
+              offsetX={offsetX}
+              status={framing.status}
+              error={framing.error}
+              keyframes={framing.keyframes}
+              clipStartMs={layout.snappedStartMs}
+              fps={fps}
+              videoUrl={videoUrl}
+              sourceAspectRatio={sourceAspectRatio!}
+              playerRef={playerRef}
+              onModeChange={updateFramingMode}
+              onSubjectChange={updateSubjectX}
+              onOffsetChange={updateOffsetX}
             />
-          </div>
           )}
 
           {/* Caption Offset */}
@@ -658,7 +691,12 @@ export function StudioView({
                 Rendering...
               </button>
             ) : (
-              <button className="primary" onClick={handleRender}>
+              <button
+                className="primary"
+                onClick={handleRender}
+                disabled={framingMode === "pick" && subjectX == null && canTrack}
+                title={framingMode === "pick" && subjectX == null && canTrack ? "Pick the person to follow first" : undefined}
+              >
                 Render Video
               </button>
             )}

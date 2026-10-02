@@ -4,3 +4,5 @@ whisperx==3.8.4
 requests
 # Transcription on the Apple GPU (Metal); WhisperX still does the word alignment
 mlx-whisper==0.4.3
+# Apple Vision face detection for the speaker-tracking 9:16 crop
+pyobjc-framework-Vision==12.2.2

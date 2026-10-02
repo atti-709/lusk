@@ -8,7 +8,7 @@ import { settingsService, getConfigDir } from "./SettingsService.js";
 import { bundle } from "@remotion/bundler";
 import type { CancelSignal } from "@remotion/renderer";
 import { renderMedia, selectComposition } from "@remotion/renderer";
-import type { CaptionWord } from "@lusk/shared";
+import type { CaptionWord, FramingKeyframe } from "@lusk/shared";
 import { getClipRange } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
 
@@ -285,7 +285,8 @@ class RenderService {
     preProcessedCaptions?: Caption[],
     outroConfig?: OutroConfig | null,
     sourceAspectRatio?: number | null,
-    cancelSignal?: CancelSignal
+    cancelSignal?: CancelSignal,
+    framing?: FramingKeyframe[] | null
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress, outroConfig != null);
     const segmentFileName = `source_${outputFileName}`;
@@ -339,6 +340,7 @@ class RenderService {
         outroOverlapFrames,
         sourceAspectRatio: sourceAspectRatio ?? null,
         captionStyles: captionStyles ?? undefined,
+        framing: framing ?? null,
       };
 
       const totalDurationInFrames =

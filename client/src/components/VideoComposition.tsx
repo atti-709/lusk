@@ -3,11 +3,13 @@ import {
   Audio,
   Sequence,
   OffthreadVideo,
+  useCurrentFrame,
   useVideoConfig,
 } from "remotion";
 import type { Caption } from "@remotion/captions";
 import { CaptionOverlay } from "./CaptionOverlay";
-import type { CaptionStyles } from "@lusk/shared";
+import type { CaptionStyles, FramingKeyframe } from "@lusk/shared";
+import { framingCenterAt } from "@lusk/shared";
 
 export const COMP_WIDTH = 1080;
 export const COMP_HEIGHT = 1920;
@@ -60,6 +62,13 @@ function ClipVideo({
   );
 }
 
+/** Horizontal shift (composition px) that puts the crop center at `cx` (fraction of source width). */
+function offsetForCenter(cx: number, sourceAspectRatio: number | null | undefined): number {
+  const videoWidth = COMP_HEIGHT * (sourceAspectRatio ?? 16 / 9);
+  const maxShift = Math.max(0, (videoWidth - COMP_WIDTH) / 2);
+  return Math.max(-maxShift, Math.min(maxShift, (0.5 - cx) * videoWidth));
+}
+
 function OutroVideo({ src }: { src: string }) {
   return (
     <AbsoluteFill>
@@ -82,6 +91,8 @@ export type VideoCompositionProps = {
   outroOverlapFrames?: number;
   sourceAspectRatio?: number | null;  // videoWidth / videoHeight; null → assume landscape
   captionStyles?: CaptionStyles;
+  /** Tracked camera path for the clip (t = seconds from the clip start); overrides offsetX. */
+  framing?: FramingKeyframe[] | null;
 };
 
 export function VideoComposition({
@@ -94,8 +105,13 @@ export function VideoComposition({
   outroOverlapFrames = OUTRO_OVERLAP_FRAMES,
   sourceAspectRatio,
   captionStyles,
+  framing,
 }: VideoCompositionProps) {
   const { durationInFrames, fps } = useVideoConfig();
+  const frame = useCurrentFrame();
+  const cropOffsetX = framing && framing.length > 0
+    ? offsetForCenter(framingCenterAt(framing, frame / fps), sourceAspectRatio)
+    : offsetX;
 
   const hasOutro = !!outroSrc && outroDurationInFrames > 0;
   const overlap = hasOutro ? outroOverlapFrames : 0;
@@ -121,7 +137,7 @@ export function VideoComposition({
             <ClipVideo
               src={videoUrl}
               startFromInFrames={startFrom}
-              offsetX={offsetX}
+              offsetX={cropOffsetX}
               sourceAspectRatio={sourceAspectRatio}
             />
           )}

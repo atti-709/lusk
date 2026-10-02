@@ -101,6 +101,64 @@ export interface ViralClip {
   /** User trim relative to `endMs` (ms; defaults to CLIP_TRAILING_MARGIN_MS). */
   trimEndDelta?: number;
   speakerOffsetX?: number;
+  /** Absent = DEFAULT_FRAMING_MODE. */
+  framingMode?: FramingMode;
+  /** Normalized [0..1] x of the person to follow in `pick` mode. */
+  subjectX?: number;
+  /** Seconds into the clip at which that person was picked (the shot they were picked in). */
+  subjectT?: number;
+}
+
+/** One point on the tracked camera path: crop center `cx` (normalized source x) at `t` seconds into the clip. */
+export interface FramingKeyframe {
+  t: number;
+  cx: number;
+}
+
+/** A solved camera path for one clip range. Values between keyframes are linear; a cut is two keyframes 1 ms apart. */
+export interface Framing {
+  version: 1;
+  mode: Exclude<FramingMode, "manual">;
+  startMs: number;
+  endMs: number;
+  /** Crop width as a fraction of the source width (0.316 for 16:9 → 9:16). */
+  cropWidthFraction: number;
+  cuts: number[];
+  keyframes: FramingKeyframe[];
+}
+
+/** A clip's framing mode; clips positioned by hand before tracking existed stay manual. */
+export function getFramingMode(clip: ViralClip): FramingMode {
+  if (clip.framingMode) return clip.framingMode;
+  return clip.speakerOffsetX ? "manual" : DEFAULT_FRAMING_MODE;
+}
+
+export interface FramingRequest {
+  startMs: number;
+  endMs: number;
+  mode: Exclude<FramingMode, "manual">;
+  subjectX?: number;
+  subjectT?: number;
+}
+
+/** Crop center at `t` seconds into the clip, interpolated linearly between keyframes. */
+export function framingCenterAt(keyframes: FramingKeyframe[], t: number): number {
+  if (keyframes.length === 0) return 0.5;
+  if (t <= keyframes[0].t) return keyframes[0].cx;
+  const last = keyframes[keyframes.length - 1];
+  if (t >= last.t) return last.cx;
+  // Binary search for the segment containing t
+  let lo = 0;
+  let hi = keyframes.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (keyframes[mid].t <= t) lo = mid;
+    else hi = mid;
+  }
+  const a = keyframes[lo];
+  const b = keyframes[hi];
+  const span = b.t - a.t;
+  return span > 0 ? a.cx + ((b.cx - a.cx) * (t - a.t)) / span : b.cx;
 }
 
 /** Whisper timestamps tend to be slightly early; default trailing margin so the last word's audio fully plays. */
@@ -224,6 +282,7 @@ export interface TranscribeRequest {
 export interface RenderRequest {
   sessionId: string;
   clip: ViralClip;
+  /** Fixed crop offset for `manual` framing; tracked modes are solved by the server. */
   offsetX: number;
   captions?: CaptionWord[];
 }
