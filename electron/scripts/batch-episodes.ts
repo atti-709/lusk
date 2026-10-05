@@ -9,7 +9,8 @@
  *
  * For each episode folder (`E## Title/`) it decides what is missing:
  *   - subtitles: `E##_captions_sk.srt` / `E##_captions_en.srt` at the episode root
- *   - shorts:    a `SHORTS/LUSK*` folder with at least one .mp4
+ *   - shorts:    a `SHORTS/LUSK*` folder with at least one .mp4 — and an episode missing
+ *                either subtitle file gets new shorts even if such a folder exists
  * and runs the real app (via the Playwright harness, isolated profile) on the episode's
  * source: transcribe → script correction (if a .md exists) → proofread → clips →
  * translation → render every clip at 1080×1920 with speaker tracking. Outputs go to:
@@ -151,11 +152,12 @@ function discover(): Episode[] {
       return /^LUSK/i.test(s) && statSync(p).isDirectory() && readdirSync(p).some((f) => f.toLowerCase().endsWith(".mp4"));
     });
     const { file, note } = chooseSource(code, dir, videos);
+    const needSk = !existsSync(path.join(dir, `${code}_captions_sk.srt`));
+    const needEn = !existsSync(path.join(dir, `${code}_captions_en.srt`));
     out.push({
-      code, dir, source: file, sourceNote: note, script,
-      needSk: !existsSync(path.join(dir, `${code}_captions_sk.srt`)),
-      needEn: !existsSync(path.join(dir, `${code}_captions_en.srt`)),
-      needShorts: !hasShorts,
+      code, dir, source: file, sourceNote: note, script, needSk, needEn,
+      // An episode missing subtitles gets fresh shorts too, even beside an older LUSK folder
+      needShorts: !hasShorts || needSk || needEn,
     });
   }
   return out;
