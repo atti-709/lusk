@@ -23,12 +23,18 @@ setGlobalDispatcher(
   })
 );
 
-const MODEL = "gemini-3.1-flash-lite";
+/**
+ * Row-for-row correction and translation. Measured on a full scripted episode (E64):
+ * 3.5 Flash-Lite corrected more words than 3.1 and kept rows aligned best — the full
+ * 3.8 Flash rewrites more freely, merging and dropping rows so word timings drift.
+ */
+const MODEL = "gemini-3.5-flash-lite";
 /**
  * Clip selection and proofreading are judgement calls over the whole transcript rather
  * than a mechanical row-for-row rewrite, so they get the full Flash model with thinking.
+ * Pinned — the `gemini-flash-latest` alias doesn't say which release it serves.
  */
-const REASONING_MODEL = "gemini-flash-latest";
+const REASONING_MODEL = "gemini-3.8-flash";
 const CHUNK_SIZE = 250;   // lines per API call
 const OVERLAP = 30;       // lines of overlap from previous chunk
 const MAX_RETRIES = 3;    // retries per chunk on transient API error

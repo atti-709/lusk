@@ -45,7 +45,7 @@
 
 ### **3. Viral Clip Detection (Server Side)**
 
-* **Tool:** Gemini via `GeminiService.ts` (`/server/src/services/GeminiService.ts`), model `gemini-flash-latest` (`REASONING_MODEL`).
+* **Tool:** Gemini via `GeminiService.ts` (`/server/src/services/GeminiService.ts`), model `gemini-3.8-flash` (`REASONING_MODEL`).
 * **Flow:** After transcription/correction/proofreading, Gemini analyzes the transcript and suggests 12-16 viral clip candidates as **structured JSON** (`responseJsonSchema`, see `CLIP_SCHEMA`) — no text parsing. Timestamps are snapped onto real word starts by `geminiClipsToViralClips` (`routes/align.ts`).
 * **Scores:** each clip carries 1-100 `hook`/`flow`/`value`/`reach` sub-scores, a hook-weighted composite `viralityScore` (`shared/types.ts`, OpusClip-style) and a one-sentence `scoreReason`. The clip grid sorts best-first by default.
 * **Single-cut only:** every clip is one contiguous range (`startMs`/`endMs`). There is no multi-cut/concatenation — clips play straight through from the source. The clip's effective render range applies user trim deltas via `getClipRange` (`shared/types.ts`); `getClipRenderKey` derives the `${startMs}-${endMs}` output filename key from it.
@@ -56,7 +56,7 @@
 
 ### **4. Text Correction (Server Side)**
 
-* **Script correction:** with a reference script, `GeminiService.correctTranscript` rewrites the transcript row-for-row in 250-row TSV chunks (`gemini-3.1-flash-lite`, prompt `correction-api.md`).
+* **Script correction:** with a reference script, `GeminiService.correctTranscript` rewrites the transcript row-for-row in 250-row TSV chunks (`gemini-3.5-flash-lite`, prompt `correction-api.md`).
 * **Proofread pass:** always runs next (`GeminiService.proofreadTranscript` + `services/proofread.ts`, prompt `proofread-api.md`). Gemini reads numbered sentences and returns only **sparse edits** `{line, find, replace}`; an edit is applied only if `find` matches that line verbatim and isn't a rewrite, and new words are timed inside the span they replace. This catches what the row-for-row pass misses (mishearings, run-together words, dropped "sa", stray punctuation, capitals). Failures are non-fatal.
 * **Legacy:** `/server/src/services/AlignmentService.ts` (Needleman-Wunsch) no longer exists; alignment is Gemini-based.
 
