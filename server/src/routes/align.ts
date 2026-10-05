@@ -4,7 +4,7 @@ import { settingsService, type TranscriptionLanguage } from "../services/Setting
 import archiver from "archiver";
 import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord, TranslatedBlock } from "@lusk/shared";
 import { viralityScore } from "@lusk/shared";
-import { cutAfterClosingWord, SNAP_TOLERANCE_MS, snapToWordStart, startAtSentence } from "../services/clipBoundaries.js";
+import { cutAfterClosingWord, leadIn, SNAP_TOLERANCE_MS, snapToWordStart, startAtSentence } from "../services/clipBoundaries.js";
 import type { GeminiClip } from "../services/GeminiService.js";
 import { runGeminiAutomation, regenerateViralClips, activeGeminiOperations, GEMINI_CANCELLED } from "./transcribe.js";
 import { geminiService } from "../services/GeminiService.js";
@@ -172,6 +172,9 @@ export function parseViralClipText(text: string): ViralClip[] {
   return clips;
 }
 
+/** Gemini occasionally returns a clip far below the 20-30 s it is asked for. */
+const MIN_CLIP_MS = 15_000;
+
 /**
  * Turn Gemini's structured clips into ViralClips: timestamps parsed and snapped onto real
  * word starts (Gemini copies them from the TSV but sometimes reformats or rounds them),
@@ -188,7 +191,7 @@ export function geminiClipsToViralClips(
     let startMs: number;
     let endMs: number;
     try {
-      startMs = startAtSentence(snapToWordStart(timestampToMs(c.start), words), words);
+      startMs = leadIn(startAtSentence(snapToWordStart(timestampToMs(c.start), words), words), words);
       endMs = timestampToMs(c.end);
     } catch {
       continue;
@@ -197,6 +200,7 @@ export function geminiClipsToViralClips(
     if (endMs > lastEnd + SNAP_TOLERANCE_MS) continue;
     endMs = endMs >= lastEnd ? lastEnd : cutAfterClosingWord(snapToWordStart(endMs, words), words);
     if (startMs < 0 || endMs <= startMs || (transcriptEndMs > 0 && endMs > transcriptEndMs)) continue;
+    if (endMs - startMs < MIN_CLIP_MS) continue; // a fragment, not a short (the prompt asks for 20-30 s)
 
     const clamp = (n: unknown) => Math.max(1, Math.min(100, Math.round(Number(n) || 1)));
     const scores = {

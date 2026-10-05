@@ -4,10 +4,12 @@ import { framingCenterAt, getFramingMode, viralityScore } from "@lusk/shared";
 import { geminiClipsToViralClips } from "../routes/align.js";
 import { parseClipResponse, stripEmbeddedImages, type GeminiClip } from "../services/GeminiService.js";
 
+// Each word a whole sentence, ending where the next starts (like a corrected transcript),
+// so starts get no lead-in and boundaries stay put
 const words: TranscriptWord[] = Array.from({ length: 100 }, (_, i) => ({
-  word: `Veta${i}.`, // each word a whole sentence, so boundaries stay put
+  word: `Veta${i}.`,
   startMs: i * 1000,
-  endMs: i * 1000 + 800,
+  endMs: i * 1000 + 1000,
 }));
 
 function clip(overrides: Partial<GeminiClip>): GeminiClip {
@@ -45,38 +47,48 @@ describe("geminiClipsToViralClips", () => {
   it("cuts in the pause after the closing word, not on the next sentence", () => {
     const paused: TranscriptWord[] = [
       { word: "Prvá", startMs: 0, endMs: 400 },
-      { word: "veta.", startMs: 450, endMs: 900 },
-      { word: "Druhá", startMs: 2500, endMs: 2900 }, // the next sentence, 1.6 s later
-      { word: "veta.", startMs: 2950, endMs: 3400 },
+      { word: "veta.", startMs: 15_000, endMs: 15_900 },
+      { word: "Druhá", startMs: 17_500, endMs: 17_900 }, // the next sentence, 1.6 s later
+      { word: "veta.", startMs: 17_950, endMs: 18_400 },
     ];
-    const [c] = geminiClipsToViralClips([clip({ start: "00:00:00.000", end: "00:00:02.500" })], paused, 3_400);
-    expect(c.endMs).toBe(1_300); // 900 + the 400 ms breath
+    const [c] = geminiClipsToViralClips([clip({ start: "00:00:00.000", end: "00:00:17.500" })], paused, 18_400);
+    expect(c.endMs).toBe(16_300); // 15.9 s + the 400 ms breath
   });
 
-  const sentences: TranscriptWord[] = ["Prvá", "veta.", "Keď", "sa", "ho", "pýtali,", "ako", "to", "robí,", "povedal", "nič.", "Koniec", "je", "Pán."]
+  // 1 s per word (800 ms spoken + 200 ms pause), the test sentences at 10-23 s between filler
+  const filler = (n: number) => Array.from({ length: n }, () => "Výplň.");
+  const sentences: TranscriptWord[] = [...filler(10), "Prvá", "veta.", "Keď", "sa", "ho", "pýtali,", "ako", "to", "robí,", "povedal", "nič.", "Koniec", "je", "Pán.", ...filler(30)]
     .map((word, i) => ({ word, startMs: i * 1000, endMs: i * 1000 + 800 }));
+  const end = sentences.at(-1)!.endMs;
 
   it("moves a mid-sentence start back to the sentence's beginning", () => {
-    const [c] = geminiClipsToViralClips([clip({ start: "00:00:06.000", end: "00:00:11.000" })], sentences, 14_000);
-    expect(c.startMs).toBe(2_000); // "ako" → "Keď"
+    const [c] = geminiClipsToViralClips([clip({ start: "00:00:16.000", end: "00:00:40.000" })], sentences, end);
+    expect(c.startMs).toBe(11_900); // "ako" → "Keď" (12 s), less the lead-in
+  });
+
+  it("starts a little early, inside the pause before the first word", () => {
+    const [c] = geminiClipsToViralClips([clip({ start: "00:00:12.000", end: "00:00:40.000" })], sentences, end);
+    expect(c.startMs).toBe(11_900); // the previous word ends at 11.8 s; 100 ms of it stays silent
   });
 
   it("doesn't move a start back across a long silence", () => {
-    const gap = sentences.map((w, i) => (i >= 6 ? { ...w, startMs: w.startMs + 5_000, endMs: w.endMs + 5_000 } : w));
-    const [c] = geminiClipsToViralClips([clip({ start: "00:00:11.000", end: "00:00:16.000" })], gap, 19_000);
-    expect(c.startMs).toBe(11_000); // "ako" follows a 5 s hole
+    const gap = sentences.map((w, i) => (i >= 16 ? { ...w, startMs: w.startMs + 5_000, endMs: w.endMs + 5_000 } : w));
+    const [c] = geminiClipsToViralClips([clip({ start: "00:00:21.000", end: "00:00:45.000" })], gap, gap.at(-1)!.endMs);
+    expect(c.startMs).toBe(20_800); // "ako" follows a 5 s hole: it keeps its start, with the full lead-in
   });
 
-  it("leaves capitalized and sentence-initial starts alone", () => {
-    const [a] = geminiClipsToViralClips([clip({ start: "00:00:02.000", end: "00:00:11.000" })], sentences, 14_000);
-    expect(a.startMs).toBe(2_000);
-    const [b] = geminiClipsToViralClips([clip({ start: "00:00:11.000", end: "00:00:13.000" })], sentences, 14_000);
-    expect(b.startMs).toBe(11_000);
+  it("leaves a capitalized start after a full stop where it is", () => {
+    const [c] = geminiClipsToViralClips([clip({ start: "00:00:21.000", end: "00:00:40.000" })], sentences, end);
+    expect(c.startMs).toBe(20_900); // "Koniec"
   });
 
   it("keeps a sentence's last word when the end points at it", () => {
-    const [c] = geminiClipsToViralClips([clip({ start: "00:00:11.000", end: "00:00:13.000" })], sentences, 14_000);
-    expect(c.endMs).toBe(13_800); // through "Pán.", the transcript's last word
+    const [c] = geminiClipsToViralClips([clip({ start: "00:00:00.000", end: "00:00:23.000" })], sentences, end);
+    expect(c.endMs).toBe(23_940); // through "Pán." (23.8 s), stopping short of the next word
+  });
+
+  it("drops fragments far shorter than a short", () => {
+    expect(geminiClipsToViralClips([clip({ start: "00:00:10.000", end: "00:00:22.000" })], words, 100_000)).toHaveLength(0);
   });
 
   it("drops clips past the transcript end or with unreadable times", () => {

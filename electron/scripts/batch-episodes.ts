@@ -46,7 +46,7 @@
  */
 import { launchLusk, type Lusk } from "../e2e/harness";
 import { getClipRenderKey } from "@lusk/shared";
-import { cutAfterClosingWord, startAtSentence } from "../../server/src/services/clipBoundaries";
+import { cutAfterClosingWord, leadIn, startAtSentence } from "../../server/src/services/clipBoundaries";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync,
@@ -319,10 +319,10 @@ async function runEpisode(ep: Episode) {
     let clips: any[] = s.viralClips ?? [];
     if (ep.rerender) {
       // Clips made before the current boundary rules: cut after the closing word, start at
-      // the sentence's beginning. Clips trimmed in the Studio carry deltas and stay as they are.
+      // the sentence's beginning with a short lead-in. Clips trimmed in the Studio carry deltas and stay as they are.
       const words = s.transcript?.words ?? [];
       clips = clips.map((c) => c.trimStartDelta != null || c.trimEndDelta != null ? c
-        : { ...c, startMs: startAtSentence(c.startMs, words), endMs: cutAfterClosingWord(c.endMs, words) });
+        : { ...c, startMs: leadIn(startAtSentence(c.startMs, words), words), endMs: cutAfterClosingWord(c.endMs, words) });
       await lusk.api(`/api/projects/${projectId}/clips`, { method: "PUT", headers: json, body: JSON.stringify({ clips }) });
     }
     if (plan.needShorts) {

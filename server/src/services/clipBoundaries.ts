@@ -43,6 +43,23 @@ export function startAtSentence(startMs: number, words: TranscriptWord[]): numbe
   return startMs;
 }
 
+/** How early a clip may start before its first word: aligned word starts run ~0.1 s late. */
+const LEAD_IN_MS = 200;
+/** Silence kept between the previous word and the lead-in, so none of that word is heard. */
+const PREV_WORD_GUARD_MS = 100;
+
+/**
+ * Start slightly before the first word, inside the pause before it, so its first syllable
+ * isn't clipped. Only a start sitting exactly on a word moves, so applying it twice is safe.
+ * Corrected transcripts end each word where the next starts — no measurable pause, no lead.
+ */
+export function leadIn(startMs: number, words: TranscriptWord[]): number {
+  const i = words.findIndex((w) => w.startMs >= startMs);
+  if (i < 0 || words[i].startMs !== startMs) return startMs;
+  const pauseStart = i > 0 ? words[i - 1].endMs + PREV_WORD_GUARD_MS : 0;
+  return Math.max(0, Math.min(startMs, Math.max(startMs - LEAD_IN_MS, pauseStart)));
+}
+
 /** Breath kept after a clip's closing word, never reaching into the next word. */
 const END_BREATH_MS = 400;
 const NEXT_WORD_GUARD_MS = 60;
