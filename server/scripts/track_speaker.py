@@ -33,6 +33,8 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # Camera tunables (units: fraction of source width, seconds)
 SAMPLE_HZ = 10.0  # detection rate; the camera path is solved at SOLVE_HZ regardless
+TEXT_HZ = 2.0  # on-screen text is read this often — overlays stay up for seconds
+TEXT_MIN_H = 0.02  # of the frame height: smaller text is fine print, not a caption to keep
 SOLVE_HZ = 50.0  # fine enough that per-frame sampling of the path stays kink-free
 DETECT_WIDTH = 960  # frames are decoded at this width for detection
 LANDMARK_DETECT_WIDTH = 1440  # ...and this much when lip aperture has to be read off them
@@ -206,14 +208,16 @@ def lip_aperture(observation) -> float | None:
 
 def detect_samples(video: str, width: int, height: int, start: float, duration: float,
                    seed_x: float | None = None, landmarks: bool = False,
-                   ) -> tuple[list[Sample], list[list[Face]]]:
+                   ) -> tuple[list[Sample], list[list[Face]], list[list[tuple[float, float]]]]:
     """Decode frames at SAMPLE_HZ and find the main subject with the Vision framework.
 
     `seed_x` names the person to follow: the track starts there instead of on the biggest
     face, and keeps a short leash for the rest of the clip (`follow_pick` refines this
     across camera changes). Every face of every frame is returned too; `landmarks` swaps in
     the landmark detector so those faces carry their mouth aperture, which the speaker
-    timeline needs — it also decodes wider, since a mouth is a few pixels of lip."""
+    timeline needs — it also decodes wider, since a mouth is a few pixels of lip. The
+    horizontal extent of every line of on-screen text is returned per frame as well (read
+    at TEXT_HZ and carried between reads), for `fit_ranges`."""
     import Quartz
     import Vision
 
@@ -233,6 +237,9 @@ def detect_samples(video: str, width: int, height: int, start: float, duration: 
     color_space = Quartz.CGColorSpaceCreateDeviceRGB()
     samples: list[Sample] = []
     frames: list[list[Face]] = []
+    texts: list[list[tuple[float, float]]] = []
+    lines: list[tuple[float, float]] = []
+    text_every = max(1, round(SAMPLE_HZ / TEXT_HZ))
     # (t, cx) of the last confident subject fix — a hand-picked subject is one already
     last: tuple[float, float] | None = None if seed_x is None else (0.0, seed_x)
     gate_max = TRACK_GATE_MAX if seed_x is None else PICKED_GATE_MAX
@@ -264,7 +271,21 @@ def detect_samples(video: str, width: int, height: int, start: float, duration: 
         else:
             face_req = Vision.VNDetectFaceRectanglesRequest.alloc().init()
             face_req.setRevision_(Vision.VNDetectFaceRectanglesRequestRevision3)
-        handler.performRequests_error_([face_req], None)
+        requests = [face_req]
+        text_req = None
+        if (index - 1) % text_every == 0:
+            text_req = Vision.VNRecognizeTextRequest.alloc().init()
+            text_req.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelFast)
+            text_req.setUsesLanguageCorrection_(False)
+            requests.append(text_req)
+        handler.performRequests_error_(requests, None)
+        if text_req is not None:
+            lines = []
+            for r in text_req.results() or []:
+                bb = r.boundingBox()
+                if bb.size.height >= TEXT_MIN_H:
+                    lines.append((float(bb.origin.x), float(bb.origin.x + bb.size.width)))
+        texts.append(lines)
 
         seen: list[Face] = []
         candidates = []  # (score, cx, kind)
@@ -314,7 +335,7 @@ def detect_samples(video: str, width: int, height: int, start: float, duration: 
         frames.append(seen)
 
     proc.wait()
-    return samples, frames
+    return samples, frames, texts
 
 
 def follow_pick(frames: list[list[Face]], shot_cuts: list[float], seed_x: float,
@@ -867,12 +888,20 @@ def solve_camera(t_grid: np.ndarray, subject: np.ndarray, cuts: list[float],
 FIT_MIN_SEC = 1.0  # nobody on screen for this long is a graphic (title card, diagram, quote)...
 FIT_MERGE_SEC = 0.5  # ...two such stretches this close together are one graphic
 FIT_SNAP_SEC = 0.6  # a graphic's edge within this of a scene change starts/ends exactly on it
+FIT_TEXT_MIN_LINES = 3  # this many lines of text outside the crop make a frame a graphic
 FIT_FACE_MIN_H = 0.1  # smaller faces (of the frame height) are pictures, not people: the
 # faces in E60's icon painting measured 0.07, the host 0.19+ even in E67's wide shot
 
 
-def fit_ranges(samples: list[Sample], frames: list[list[Face]], cut_candidates: list[float],
-               span: float) -> list[list[float]]:
+def text_cut_off(lines: list[tuple[float, float]], center: float, crop_w: float) -> int:
+    """How many text lines the crop centered at `center` would cut: mostly outside it."""
+    lo, hi = center - crop_w / 2, center + crop_w / 2
+    return sum(1 for a, b in lines if max(0.0, min(b, hi) - max(a, lo)) < 0.5 * (b - a))
+
+
+def fit_ranges(samples: list[Sample], frames: list[list[Face]],
+               texts: list[list[tuple[float, float]]], centers: np.ndarray, crop_w: float,
+               cut_candidates: list[float], span: float) -> list[list[float]]:
     """Stretches with nobody on screen — burned-in graphics, which a 9:16 crop of a 16:9
     frame cuts to an unreadable strip (E60's diagrams and quote cards). The composition
     shows these whole, fitted to the frame width over a blurred fill, instead of cropped.
@@ -881,8 +910,15 @@ def fit_ranges(samples: list[Sample], frames: list[list[Face]], cut_candidates: 
     the body detector fires on the figures in an icon or a photo on a quote card. Every
     faceless stretch of a second or more measured on E60/E64/E67 was a graphic (verse
     and quote cards, diagrams, the logo bumper); the face detector does not lose a host
-    who looks down at their notes for that long."""
-    empty = [not any(f.h >= FIT_FACE_MIN_H for f in frames[i]) for i in range(len(samples))]
+    who looks down at their notes for that long.
+
+    Burned-in text beside the speaker counts too: E03's Bible verses run down the right
+    third while the host talks, and the crop kept him and cut the verse off. Several lines
+    the crop would cut make it a graphic; a single line (a chapter label held for minutes,
+    a name tag) doesn't."""
+    empty = [not any(f.h >= FIT_FACE_MIN_H for f in frames[i])
+             or text_cut_off(texts[i], float(centers[i]), crop_w) >= FIT_TEXT_MIN_LINES
+             for i in range(len(samples))]
     runs: list[list[float]] = []
     i = 0
     while i < len(empty):
@@ -996,7 +1032,7 @@ def main() -> None:
     progress(0)
     cut_candidates = scene_cut_candidates(args.video, args.start, args.duration)
     progress(5)
-    samples, frames = detect_samples(args.video, args.width, args.height, args.start, args.duration,
+    samples, frames, texts = detect_samples(args.video, args.width, args.height, args.start, args.duration,
                                      seed_x=subject_x, landmarks=follow_speaker)
     raw_samples = list(samples)
     detected = sum(1 for s in samples if s.kind != "none")
@@ -1030,7 +1066,8 @@ def main() -> None:
     log(f"emitted {len(keyframes)} keyframes, {len(cuts)} cuts")
 
     with open(args.out, "w", encoding="utf-8") as f:
-        fit = fit_ranges(raw_samples, frames, cut_candidates, span)
+        centers = np.interp(np.arange(len(raw_samples)) / SAMPLE_HZ, t_grid, camera)
+        fit = fit_ranges(raw_samples, frames, texts, centers, crop_w, cut_candidates, span)
         if fit:
             log(f"graphics shown whole: {', '.join(f'{a:.1f}-{b:.1f}s' for a, b in fit)}")
         json.dump({
