@@ -18,8 +18,8 @@ import type { Caption } from "@remotion/captions";
  * `sourceDurationMs` caps the range at the end of the source video. Remotion's
  * OffthreadVideo does not fail when asked for a timestamp past the end of a file — it
  * silently hands back the last decoded frame, so an over-long range renders as a frozen
- * tail. `getClipRange` adds CLIP_TRAILING_MARGIN_MS to every clip end and `Math.ceil`
- * adds up to a frame more, so clips near the end of a video overrun by default.
+ * tail. A trim past the end, or `Math.ceil` adding up to a frame, makes clips near the
+ * end of a video overrun.
  */
 export function computeClipLayout(
   startMs: number,

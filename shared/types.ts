@@ -167,8 +167,12 @@ export function framingCenterAt(keyframes: FramingKeyframe[], t: number): number
   return span > 0 ? a.cx + ((b.cx - a.cx) * (t - a.t)) / span : b.cx;
 }
 
-/** Whisper timestamps tend to be slightly early; default trailing margin so the last word's audio fully plays. */
-export const CLIP_TRAILING_MARGIN_MS = 900;
+/**
+ * Default tail added to a clip's end. Zero: clip ends already sit where the cut belongs —
+ * just after the closing word (Gemini clips) or on the next word's start (older clips).
+ * A 900 ms tail used to play the first words of the next sentence.
+ */
+export const CLIP_TRAILING_MARGIN_MS = 0;
 
 /** Returns the effective source range to render, applying user trim deltas. */
 export function getClipRange(clip: ViralClip): ClipRange {

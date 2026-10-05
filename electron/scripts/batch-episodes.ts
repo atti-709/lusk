@@ -41,6 +41,7 @@
  *   --dry-run          print the plan only
  */
 import { launchLusk, type Lusk } from "../e2e/harness";
+import { getClipRenderKey } from "@lusk/shared";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync,
@@ -305,8 +306,7 @@ async function runEpisode(ep: Episode) {
       for (const [i, clip] of clips.entries()) {
         const staged = path.join(stage, `${String(i).padStart(2, "0")} ${safeName(clip.title)}.mp4`);
         if (existsSync(staged)) continue;
-        // the server's render key: getClipRange (shared/types.ts) — trims, default 900 ms tail
-        const key = `${clip.startMs + (clip.trimStartDelta ?? 0)}-${clip.endMs + (clip.trimEndDelta ?? 900)}`;
+        const key = getClipRenderKey(clip); // names the server's output file
         await lusk.api("/api/render", { method: "POST", headers: json, body: JSON.stringify({ sessionId: projectId, clip, offsetX: clip.speakerOffsetX ?? 0 }) });
         for (;;) {
           const st = await lusk.api<any>(`/api/projects/${projectId}`);

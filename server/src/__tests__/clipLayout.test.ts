@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { computeClipLayout } from "../services/RenderService.js";
-import { CLIP_TRAILING_MARGIN_MS } from "@lusk/shared";
+
+/** A range running this far past the end of the source (e.g. a generous trim). */
+const OVERRUN_MS = 900;
 
 const FPS = 24;
 const SOURCE_MS = 2000; // 48 frames at 24fps → valid frame indices 0..47
@@ -11,14 +13,14 @@ const lastRequestedFrame = (l: { startFromInFrames: number; durationInFrames: nu
 
 describe("computeClipLayout", () => {
   it("never requests a frame past the end of the source", () => {
-    // A clip ending exactly at the video's end still carries the trailing margin
-    const layout = computeClipLayout(0, SOURCE_MS + CLIP_TRAILING_MARGIN_MS, FPS, SOURCE_MS);
+    // A range running past the video's end
+    const layout = computeClipLayout(0, SOURCE_MS + OVERRUN_MS, FPS, SOURCE_MS);
     expect(lastRequestedFrame(layout)).toBe(47);
   });
 
   it("would overrun without a source duration — the frozen-tail case", () => {
     // Remotion repeats the last decoded frame rather than failing, so the overrun is silent
-    const layout = computeClipLayout(0, SOURCE_MS + CLIP_TRAILING_MARGIN_MS, FPS);
+    const layout = computeClipLayout(0, SOURCE_MS + OVERRUN_MS, FPS);
     expect(lastRequestedFrame(layout)).toBeGreaterThan(47);
   });
 
