@@ -36,12 +36,17 @@
  *   --work <dir>       staging/log dir (default: ~/LuskBatch)
  *   --only E01,E07     restrict to these episodes     --from E10   start at this episode
  *   --overrides <json> {"E47": "E46.mp4"} — force a source file per episode
+ *   --rerender E00,E60=E60.lusk   render an episode's shorts again from its existing project
+ *                      (default `E##_auto.lusk`) into a new LUSK<n> folder, applying the
+ *                      current clip-boundary rules to clips nobody trimmed; remembered in
+ *                      state.json until done
  *   --min-free-gb <n>  stop when free space drops below source size + n GB (default 6)
  *   --no-evict         keep downloaded sources on disk
  *   --dry-run          print the plan only
  */
 import { launchLusk, type Lusk } from "../e2e/harness";
 import { getClipRenderKey } from "@lusk/shared";
+import { cutAfterClosingWord, startAtSentence } from "../../server/src/services/clipBoundaries";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync,
@@ -89,7 +94,13 @@ const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf-8")) : {};
 const state: Record<string, EpisodeState> = saved.episodes ?? {};
 /** Outputs written to Drive but not yet evicted (still uploading) — retried every episode and next run. */
 let pendingEvict: string[] = saved.pendingEvict ?? [];
-const saveState = () => writeFileSync(STATE, JSON.stringify({ episodes: state, pendingEvict }, null, 2));
+/** Episodes to render again → their project file name; an entry is removed once done. */
+const rerender: Record<string, string> = saved.rerender ?? {};
+for (const item of opt("rerender")?.split(",") ?? []) {
+  const [code, project] = item.trim().split("=");
+  if (code) rerender[code.toUpperCase()] = project?.trim() || `${code.toUpperCase()}_auto.lusk`;
+}
+const saveState = () => writeFileSync(STATE, JSON.stringify({ episodes: state, pendingEvict, rerender }, null, 2));
 
 // ── Episode discovery ───────────────────────────────────────────────────────
 
@@ -102,6 +113,8 @@ interface Episode {
   needSk: boolean;
   needEn: boolean;
   needShorts: boolean;
+  project: string;         // .lusk file name in PROJECT/LUSK
+  rerender: boolean;       // shorts again from an existing project
   resuming?: boolean;      // an earlier run stopped partway through this episode
 }
 
@@ -181,17 +194,19 @@ function discover(): Episode[] {
     const { file, note } = chooseSource(code, dir, videos);
     const needSk = !existsSync(path.join(dir, `${code}_captions_sk.srt`));
     const needEn = !existsSync(path.join(dir, `${code}_captions_en.srt`));
+    const project = rerender[code] ?? `${code}_auto.lusk`;
+    const again = code in rerender;
     const plan = readPlan(code);
     if (plan) {
       // Started earlier: finish that job — its own partial outputs would otherwise hide it
       const { source, needSk, needEn, needShorts } = plan;
-      out.push({ code, dir, source, sourceNote: "resuming", script, needSk, needEn, needShorts, resuming: true });
+      out.push({ code, dir, source, sourceNote: "resuming", script, needSk, needEn, needShorts, project, rerender: again, resuming: true });
       continue;
     }
     out.push({
-      code, dir, source: file, sourceNote: note, script, needSk, needEn,
+      code, dir, source: file, sourceNote: note, script, needSk, needEn, project, rerender: again,
       // An episode missing subtitles gets fresh shorts too, even beside an older LUSK folder
-      needShorts: !hasShorts || needSk || needEn,
+      needShorts: again || !hasShorts || needSk || needEn,
     });
   }
   return out;
@@ -264,7 +279,8 @@ async function runEpisode(ep: Episode) {
   try {
     const projectDir = path.join(ep.dir, "PROJECT", "LUSK");
     mkdirSync(projectDir, { recursive: true });
-    const projectPath = path.join(projectDir, `${ep.code}_auto.lusk`);
+    const projectPath = path.join(projectDir, ep.project);
+    if (ep.rerender && !existsSync(projectPath)) throw new Error(`no project to re-render: PROJECT/LUSK/${ep.project}`);
     if (existsSync(projectPath)) {
       ({ projectId } = await lusk.api<any>("/api/projects/open", { method: "POST", headers: json, body: JSON.stringify({ projectPath }) }));
       log(`  ${ep.code} reopened ${path.basename(projectPath)}`);
@@ -299,7 +315,15 @@ async function runEpisode(ep: Episode) {
     }
 
     // Shorts
-    const clips: any[] = s.viralClips ?? [];
+    let clips: any[] = s.viralClips ?? [];
+    if (ep.rerender) {
+      // Clips made before the current boundary rules: cut after the closing word, start at
+      // the sentence's beginning. Clips trimmed in the Studio carry deltas and stay as they are.
+      const words = s.transcript?.words ?? [];
+      clips = clips.map((c) => c.trimStartDelta != null || c.trimEndDelta != null ? c
+        : { ...c, startMs: startAtSentence(c.startMs, words), endMs: cutAfterClosingWord(c.endMs, words) });
+      await lusk.api(`/api/projects/${projectId}/clips`, { method: "PUT", headers: json, body: JSON.stringify({ clips }) });
+    }
     if (plan.needShorts) {
       const done = clips.filter((c, i) => existsSync(path.join(stage, `${String(i).padStart(2, "0")} ${safeName(c.title)}.mp4`))).length;
       log(`  ${ep.code} rendering ${clips.length} shorts${done ? ` (${done} already done)` : ""}`);
@@ -380,11 +404,12 @@ async function main() {
   const todo = episodes.filter((e) => e.needSk || e.needEn || e.needShorts);
   console.log(`${episodes.length} episodes, ${todo.length} with something missing:\n`);
   for (const e of todo) {
-    const what = [e.needShorts && "shorts", e.needSk && "sk.srt", e.needEn && "en.srt"].filter(Boolean).join(" + ");
+    const what = [e.needShorts && (e.rerender ? "shorts again" : "shorts"), e.needSk && "sk.srt", e.needEn && "en.srt"].filter(Boolean).join(" + ");
     console.log(`  ${e.code}  ${what.padEnd(26)} ${e.source ?? "—"}  (${e.sourceNote})${e.script ? `  script: ${e.script}` : ""}`);
   }
   console.log(`\nfree: ${freeGb().toFixed(1)} GB · work dir: ${WORK}\n`);
   if (DRY) return;
+  saveState(); // keeps a --rerender list for later runs
 
   const dist = path.join(REPO, "electron/dist/main.js");
   if (!existsSync(dist)) throw new Error("electron/dist/main.js missing — run `npm run build:electron` first");
@@ -398,6 +423,7 @@ async function main() {
     try {
       const { shorts } = await runEpisode(ep);
       state[ep.code] = { status: "done", at: new Date().toISOString(), detail: `${shorts} shorts, ${((Date.now() - t0) / 60000).toFixed(0)} min` };
+      delete rerender[ep.code];
       log(`${ep.code} done in ${((Date.now() - t0) / 60000).toFixed(0)} min`);
     } catch (err) {
       if (interrupted) return; // the app was closed under it; Playwright exits once it's down
