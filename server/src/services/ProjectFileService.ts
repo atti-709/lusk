@@ -12,6 +12,7 @@ import {
   lstat,
   rm,
 } from "node:fs/promises";
+import { renameSync, writeFileSync } from "node:fs";
 import { join, basename, dirname, relative, resolve, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { getFFmpegPath } from "../config/ffmpeg.js";
@@ -153,7 +154,10 @@ function writeLuskFile(filePath: string, data: ProjectData): void {
     persistedData.videoPath = relative(dirname(filePath), persistedData.videoPath);
   }
   zip.addFile("project.json", Buffer.from(JSON.stringify(persistedData, null, 2), "utf-8"));
-  zip.writeZip(filePath);
+  // Write beside it and swap in, so a crash or quit mid-save never leaves a corrupt project
+  const tmp = `${filePath}.saving`;
+  writeFileSync(tmp, zip.toBuffer());
+  renameSync(tmp, filePath);
 }
 
 function readLuskFile(filePath: string): ProjectData {
