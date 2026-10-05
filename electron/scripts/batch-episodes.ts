@@ -23,8 +23,13 @@
  * Google Drive cache (it stays in the cloud) along with uploaded outputs of earlier
  * episodes. Renders are staged in the work dir and deleted once copied.
  *
- * Resumable: re-running skips finished episodes (their outputs exist), reopens a
- * half-done `E##_auto.lusk`, and re-renders only shorts not yet staged.
+ * Resumable: stop it any time with Ctrl+C (Lusk closes cleanly) and run the same command
+ * again. Finished episodes are skipped (their outputs exist); the interrupted one picks up
+ * where it stopped — the half-done `E##_auto.lusk` is reopened (an interrupted transcription
+ * restarts, Gemini steps reuse their cache), shorts already rendered are kept in the work
+ * dir, and a half-finished upload continues into the same LUSK<n> folder. What an episode
+ * needs is fixed in `<work>/E##/plan.json` when it starts, so its own partial outputs never
+ * make it look done.
  *
  * Options:
  *   --episodes <dir>   EPISODES folder (default: the Svätonázor shared drive)
@@ -39,7 +44,7 @@ import { launchLusk, type Lusk } from "../e2e/harness";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync,
-  rmSync, statSync, statfsSync, writeFileSync,
+  renameSync, rmSync, statSync, statfsSync, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -96,6 +101,27 @@ interface Episode {
   needSk: boolean;
   needEn: boolean;
   needShorts: boolean;
+  resuming?: boolean;      // an earlier run stopped partway through this episode
+}
+
+/** What an episode needs, fixed when it starts so a resumed run finishes the same job. */
+interface Plan {
+  source: string;
+  needSk: boolean;
+  needEn: boolean;
+  needShorts: boolean;
+  folder?: string;         // the LUSK<n> folder chosen for its shorts, once publishing began
+}
+const stageDir = (code: string) => path.join(WORK, code);
+const planPath = (code: string) => path.join(stageDir(code), "plan.json");
+const readPlan = (code: string): Plan | null =>
+  existsSync(planPath(code)) ? JSON.parse(readFileSync(planPath(code), "utf-8")) : null;
+const writePlan = (code: string, plan: Plan) => writeFileSync(planPath(code), JSON.stringify(plan, null, 2));
+
+/** Copy via a temporary name, so an interrupted copy never looks like a finished file. */
+function copyAtomic(src: string, dst: string) {
+  copyFileSync(src, `${dst}.part`);
+  renameSync(`${dst}.part`, dst);
 }
 
 /** Cuts, intros and other partial files that are never the episode's master. */
@@ -154,6 +180,13 @@ function discover(): Episode[] {
     const { file, note } = chooseSource(code, dir, videos);
     const needSk = !existsSync(path.join(dir, `${code}_captions_sk.srt`));
     const needEn = !existsSync(path.join(dir, `${code}_captions_en.srt`));
+    const plan = readPlan(code);
+    if (plan) {
+      // Started earlier: finish that job — its own partial outputs would otherwise hide it
+      const { source, needSk, needEn, needShorts } = plan;
+      out.push({ code, dir, source, sourceNote: "resuming", script, needSk, needEn, needShorts, resuming: true });
+      continue;
+    }
     out.push({
       code, dir, source: file, sourceNote: note, script, needSk, needEn,
       // An episode missing subtitles gets fresh shorts too, even beside an older LUSK folder
@@ -202,6 +235,7 @@ async function waitReady(lusk: Lusk, id: string, ep: Episode) {
     const key = `${s.state} ${String(s.message).replace(/\d+%|\(.*?\)|\.\.\.$/g, "").trim()}`;
     if (key !== last) { log(`  ${ep.code} ${s.state} ${s.progress}% ${s.message}`); last = key; }
     if (s.state === "READY") return s;
+    if (s.state === "IDLE") throw new Error(`project has no video (${s.message})`);
     if (s.progress === -1) throw new Error(s.message);
     if (s.state === "ALIGNING" && s.progress === 100 && /fail|manual|cancel/i.test(s.message)) throw new Error(s.message);
     await sleep(2000);
@@ -209,8 +243,10 @@ async function waitReady(lusk: Lusk, id: string, ep: Episode) {
 }
 
 async function runEpisode(ep: Episode) {
-  const stage = path.join(WORK, ep.code);
+  const stage = stageDir(ep.code);
   mkdirSync(stage, { recursive: true });
+  const plan: Plan = readPlan(ep.code) ?? { source: ep.source!, needSk: ep.needSk, needEn: ep.needEn, needShorts: ep.needShorts };
+  writePlan(ep.code, plan);
   const profile = path.join(WORK, "profile");
   const sourcePath = path.join(ep.dir, ep.source!);
 
@@ -221,7 +257,9 @@ async function runEpisode(ep: Episode) {
   }
 
   const lusk = await launchLusk({ userDataDir: profile });
+  current = lusk;
   let projectId: string | null = null;
+  let finished = false;
   try {
     const projectDir = path.join(ep.dir, "PROJECT", "LUSK");
     mkdirSync(projectDir, { recursive: true });
@@ -231,15 +269,19 @@ async function runEpisode(ep: Episode) {
       log(`  ${ep.code} reopened ${path.basename(projectPath)}`);
     } else {
       ({ projectId } = await lusk.api<any>("/api/projects/create", { method: "POST", headers: json, body: JSON.stringify({ projectPath }) }));
-      await lusk.api(`/api/projects/${projectId}/select-video`, { method: "POST", headers: json, body: JSON.stringify({ videoPath: sourcePath }) });
-      if (ep.script) {
-        await lusk.api(`/api/projects/${projectId}/script`, {
-          method: "POST", headers: json,
-          body: JSON.stringify({ scriptText: readFileSync(path.join(ep.dir, ep.script), "utf-8") }),
-        });
-      }
     }
     let s = await lusk.api<any>(`/api/projects/${projectId}`);
+    // A new project — or one an interruption left before its video/script were set
+    if (s.state === "IDLE") {
+      await lusk.api(`/api/projects/${projectId}/select-video`, { method: "POST", headers: json, body: JSON.stringify({ videoPath: sourcePath }) });
+    }
+    if (ep.script && !s.scriptText && (s.state === "IDLE" || s.state === "UPLOADING")) {
+      await lusk.api(`/api/projects/${projectId}/script`, {
+        method: "POST", headers: json,
+        body: JSON.stringify({ scriptText: readFileSync(path.join(ep.dir, ep.script), "utf-8") }),
+      });
+    }
+    s = await lusk.api<any>(`/api/projects/${projectId}`);
     if (s.state === "UPLOADING") {
       await lusk.api("/api/transcribe", { method: "POST", headers: json, body: JSON.stringify({ sessionId: projectId }) });
     } else if (s.state === "ALIGNING") {
@@ -249,7 +291,7 @@ async function runEpisode(ep: Episode) {
 
     // Subtitles (full episode) — the English translation only exists right after a run
     for (const lang of ["sk", "en"] as const) {
-      if (lang === "sk" ? !ep.needSk : !ep.needEn) continue;
+      if (lang === "sk" ? !plan.needSk : !plan.needEn) continue;
       const res = await fetch(`${lusk.baseUrl}/api/projects/${projectId}/captions${lang === "en" ? "-en" : ""}.srt`);
       if (res.ok) writeFileSync(path.join(stage, `${ep.code}_captions_${lang}.srt`), await res.text());
       else log(`  ${ep.code} ${lang} subtitles unavailable (${res.status})`);
@@ -257,8 +299,9 @@ async function runEpisode(ep: Episode) {
 
     // Shorts
     const clips: any[] = s.viralClips ?? [];
-    if (ep.needShorts) {
-      log(`  ${ep.code} rendering ${clips.length} shorts`);
+    if (plan.needShorts) {
+      const done = clips.filter((c, i) => existsSync(path.join(stage, `${String(i).padStart(2, "0")} ${safeName(c.title)}.mp4`))).length;
+      log(`  ${ep.code} rendering ${clips.length} shorts${done ? ` (${done} already done)` : ""}`);
       for (const [i, clip] of clips.entries()) {
         const staged = path.join(stage, `${String(i).padStart(2, "0")} ${safeName(clip.title)}.mp4`);
         if (existsSync(staged)) continue;
@@ -272,33 +315,41 @@ async function runEpisode(ep: Episode) {
           if (r?.status === "error") throw new Error(`render "${clip.title}": ${r.message}`);
           await sleep(2000);
         }
-        copyFileSync(path.join(profile, "lusk_temp", projectId!, `output_${key}.mp4`), staged);
+        copyAtomic(path.join(profile, "lusk_temp", projectId!, `output_${key}.mp4`), staged);
         log(`  ${ep.code} short ${i + 1}/${clips.length} (${clip.viralityScore ?? "-"}) ${clip.title}`);
       }
     }
+    finished = true;
   } finally {
     await lusk.close();
-    // Session temp (renders, framing caches) — everything worth keeping is staged
-    if (projectId) rmSync(path.join(profile, "lusk_temp", projectId), { recursive: true, force: true });
+    current = null;
+    // Session temp (renders, framing and Gemini caches): dropped once everything is staged,
+    // kept after an interruption or failure so the next run resumes from it
+    if (projectId && finished) rmSync(path.join(profile, "lusk_temp", projectId), { recursive: true, force: true });
   }
 
-  // Publish: shorts into a new LUSK<n> folder, subtitles at the root — never overwriting
+  // Publish: shorts into a new LUSK<n> folder, subtitles at the root — never overwriting.
+  // The folder is recorded first, so an interrupted publish continues into the same one.
   const written: string[] = [];
   const stagedShorts = readdirSync(stage).filter((f) => f.endsWith(".mp4")).sort();
-  if (ep.needShorts && stagedShorts.length) {
-    const folder = nextLuskFolder(ep.dir);
-    mkdirSync(folder, { recursive: true });
+  if (plan.needShorts && stagedShorts.length) {
+    plan.folder ??= nextLuskFolder(ep.dir);
+    writePlan(ep.code, plan);
+    mkdirSync(plan.folder, { recursive: true });
+    const used = new Set<string>();
     for (const f of stagedShorts) {
-      let dst = path.join(folder, f.replace(/^\d{2} /, ""));
-      for (let n = 2; existsSync(dst); n++) dst = dst.replace(/( \(\d+\))?\.mp4$/, ` (${n}).mp4`);
-      copyFileSync(path.join(stage, f), dst);
+      let name = f.replace(/^\d{2} /, "");
+      for (let n = 2; used.has(name); n++) name = name.replace(/( \(\d+\))?\.mp4$/, ` (${n}).mp4`);
+      used.add(name);
+      const dst = path.join(plan.folder, name);
+      if (!existsSync(dst)) copyAtomic(path.join(stage, f), dst); // present = copied by the interrupted run
       written.push(dst);
     }
-    log(`  ${ep.code} ${stagedShorts.length} shorts → ${path.relative(ep.dir, folder)}/`);
+    log(`  ${ep.code} ${stagedShorts.length} shorts → ${path.relative(ep.dir, plan.folder)}/`);
   }
   for (const f of readdirSync(stage).filter((f) => f.endsWith(".srt"))) {
     const dst = path.join(ep.dir, f);
-    if (!existsSync(dst)) { copyFileSync(path.join(stage, f), dst); written.push(dst); log(`  ${ep.code} ${f}`); }
+    if (!existsSync(dst)) { copyAtomic(path.join(stage, f), dst); written.push(dst); log(`  ${ep.code} ${f}`); }
   }
   rmSync(stage, { recursive: true, force: true });
 
@@ -312,6 +363,17 @@ async function runEpisode(ep: Episode) {
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
+
+/** The running app, if any — Ctrl+C lets Playwright close it gracefully (server jobs stop too). */
+let current: Lusk | null = null;
+let interrupted = false;
+process.on("SIGINT", () => {
+  if (interrupted) return; // a second Ctrl+C: Playwright force-kills the app
+  interrupted = true;
+  log("interrupted — closing Lusk; run the same command again to resume");
+  saveState();
+  if (!current) process.exit(130);
+});
 
 async function main() {
   const episodes = discover();
@@ -329,14 +391,16 @@ async function main() {
   ensureEvictTool();
 
   for (const ep of todo) {
+    if (interrupted) break;
     if (!ep.source) { log(`${ep.code} skipped: no video`); state[ep.code] = { status: "skipped", at: new Date().toISOString(), detail: "no video" }; saveState(); continue; }
-    log(`${ep.code} start — ${ep.source}${ep.script ? ` + ${ep.script}` : ""}`);
+    log(`${ep.code} ${ep.resuming ? "resume" : "start"} — ${ep.source}${ep.script ? ` + ${ep.script}` : ""}`);
     const t0 = Date.now();
     try {
       const { shorts } = await runEpisode(ep);
       state[ep.code] = { status: "done", at: new Date().toISOString(), detail: `${shorts} shorts, ${((Date.now() - t0) / 60000).toFixed(0)} min` };
       log(`${ep.code} done in ${((Date.now() - t0) / 60000).toFixed(0)} min`);
     } catch (err) {
+      if (interrupted) return; // the app was closed under it; Playwright exits once it's down
       const msg = err instanceof Error ? err.message : String(err);
       state[ep.code] = { status: "failed", at: new Date().toISOString(), detail: msg };
       log(`${ep.code} FAILED: ${msg}`);
