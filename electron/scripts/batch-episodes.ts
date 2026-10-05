@@ -223,6 +223,7 @@ function ensureEvictTool() {
 }
 /** Evict local copies; returns the paths that could not be evicted yet (e.g. still uploading). */
 function evict(paths: string[]): string[] {
+  paths = paths.filter((p) => existsSync(p)); // deleted since — nothing left to evict
   if (!EVICT || paths.length === 0) return [];
   let out = "";
   try {
