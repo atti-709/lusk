@@ -25,6 +25,21 @@ describe("parseTsv", () => {
     ]);
   });
 
+  it("keeps a source word's own end, so a pause stays a pause", () => {
+    // "miesto" ends at 2100, then a pause until "a" at 2600
+    const source = [[1000, 1300], [1400, 1800], [1900, 2100], [2600, 2750], [2800, 3200]].map(
+      ([startMs, endMs], i) => ({ word: `w${i}`, startMs, endMs }),
+    );
+    const words = parseTsv(BASE.join("\n"), FALLBACK_END, source);
+    expect(words.map((w) => w.endMs)).toEqual([1300, 1800, 2100, 2750, 3200]);
+  });
+
+  it("caps a source word's end at an inserted word, which fills the rest of the slot", () => {
+    const source = [{ word: "Prišiel", startMs: 1000, endMs: 1900 }];
+    const words = parseTsv(["00:00:01.000\tPrišiel", "\tsa", "00:00:02.000\ttam"].join("\n"), FALLBACK_END, source);
+    expect(words.map((w) => [w.startMs, w.endMs])).toEqual([[1000, 1500], [1500, 2000], [2000, 3500]]);
+  });
+
   describe("inserted words", () => {
     // A correction may add a word that was never transcribed as its own token
     const EXPECTED = ["Prišiel", "na", "to", "miesto", "a", "odišiel"];

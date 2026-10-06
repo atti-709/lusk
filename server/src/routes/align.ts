@@ -51,8 +51,12 @@ const TIMESTAMP_ONLY = /^\d{1,2}:\d{2}(:\d{2})?([.,]\d+)?$/;
  * the tab entirely, or repeat the previous row's timestamp); it is then timed by
  * subdividing the slot of the word before it. Every timestamped row keeps exactly the
  * start it was given, so an insertion never shifts the words around it.
+ *
+ * The TSV carries starts only. A row whose start is a `source` word's keeps that word's
+ * end; without it every word ran on to the next one, so over a pause or a graphic the
+ * last word (and its caption) stayed up until speech resumed — 28 s in E08.
  */
-export function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
+export function parseTsv(tsv: string, fallbackEndMs: number, source: TranscriptWord[] = []): TranscriptWord[] {
   const lines = tsv.trim().split("\n").filter((l) => l.trim());
 
   // startMs === null marks an inserted word, timed below from its neighbours
@@ -107,10 +111,13 @@ export function parseTsv(tsv: string, fallbackEndMs: number): TranscriptWord[] {
     i = runEnd - 1;
   }
 
-  // Compute endMs: next word's startMs, last word uses fallbackEndMs
+  // endMs: the source word's own end, else the next word's start (an inserted word fills
+  // its slot); never past the next word — an insertion may have taken part of the slot
+  const sourceEnd = new Map(source.map((w) => [w.startMs, w.endMs]));
   for (let i = 0; i < words.length; i++) {
-    const end = i < words.length - 1 ? words[i + 1].startMs : fallbackEndMs;
-    words[i].endMs = Math.max(end, words[i].startMs + 1);
+    const next = i < words.length - 1 ? words[i + 1].startMs : fallbackEndMs;
+    const own = parsed[i].startMs !== null ? sourceEnd.get(words[i].startMs) : undefined;
+    words[i].endMs = Math.max(own !== undefined ? Math.min(own, next) : next, words[i].startMs + 1);
   }
   return words;
 }
@@ -537,7 +544,7 @@ export async function alignRoute(app: FastifyInstance) {
       try {
         const lastWord = session.transcript.words.at(-1);
         const fallbackEndMs = lastWord ? lastWord.endMs : 0;
-        const correctedWords = parseTsv(rawBody, fallbackEndMs);
+        const correctedWords = parseTsv(rawBody, fallbackEndMs, session.originalTranscript?.words ?? session.transcript.words);
 
         const correctedTranscript = {
           text: "", // TODO: Reconstruct if needed, but for alignment words are key

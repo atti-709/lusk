@@ -83,7 +83,7 @@ export async function runGeminiAutomation(
 
       const last = rawTranscript.words.at(-1);
       const fallbackEndMs = last ? last.endMs : 0;
-      words = parseTsv(correctedTsv, fallbackEndMs);
+      words = parseTsv(correctedTsv, fallbackEndMs, rawTranscript.words);
     } else {
       words = rawTranscript.words;
       orchestrator.updateProgress(sessionId, 5, "Starting Gemini proofreading...");
