@@ -11,7 +11,7 @@ Speech recognition makes characteristic mistakes. Fix these:
 1. **Misheard words** — a word that sounds similar but makes no sense in context ("nedostatok vážnosti oči Bohu" → "voči").
 2. **Wrong word boundaries** — words run together or split apart ("niekvôli" → "nie kvôli").
 3. **Dropped short words** — a missing reflexive, preposition or conjunction that the grammar plainly requires ("modliť slová" → "modliť sa slová"). Only when it is unmistakable.
-4. **Foreign spellings** — for Slovak, Czech forms that slip in ("protože" → "pretože", "který" → "ktorý").
+4. **Foreign spellings** — for Slovak, Czech forms that slip in ("protože" → "pretože", "který" → "ktorý", "poprvé"/"podruhé" → "po prvé"/"po druhé"), and "ó" where Slovak writes "ô" ("komórke" → "komôrke").
 5. **Diacritics and spelling** — missing or wrong accents, dropped leading letters ("akujem" → "ďakujem").
 6. **Inflection** — wrong case or agreement endings that a native speaker would never say.
 7. **Punctuation** — stray or doubled punctuation, unmatched quotes or brackets, a period in the middle of a sentence ("číslo. 79." → "číslo 79."), commas that split a clause where none belongs.
