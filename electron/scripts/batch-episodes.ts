@@ -12,7 +12,7 @@
  *   - shorts:    a `SHORTS/LUSK*` folder with at least one .mp4 — and an episode missing
  *                either subtitle file gets new shorts even if such a folder exists
  * and runs the real app (via the Playwright harness, isolated profile) on the episode's
- * source: transcribe → script correction (if a .md exists) → proofread → clips →
+ * source: transcribe → script correction (the episode's .md, else <work>/texts/E##.md) → proofread → clips →
  * translation → render every clip at 1080×1920 with speaker tracking. Outputs go to:
  *   - `SHORTS/LUSK<n>/<title>.mp4` (next free n; never into an existing folder)
  *   - `E##_captions_{sk,en}.srt` (only the missing ones; nothing is overwritten)
@@ -82,6 +82,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 mkdirSync(WORK, { recursive: true });
 const LOG = path.join(WORK, "batch.log");
 const STATE = path.join(WORK, "state.json");
+/** Episode texts (scripts) for episodes whose folder has no .md: `E##.md`, taken from TEXTS/BACKUP. */
+const TEXTS = path.join(WORK, "texts");
 function log(msg: string) {
   const now = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
@@ -109,7 +111,7 @@ interface Episode {
   dir: string;
   source: string | null;   // chosen video file name
   sourceNote: string;      // why / warnings
-  script: string | null;   // .md file name
+  script: string | null;   // .md path: the episode's own, else <work>/texts/E##.md
   needSk: boolean;
   needEn: boolean;
   needShorts: boolean;
@@ -185,7 +187,9 @@ function discover(): Episode[] {
     const files = readdirSync(dir);
     const videos = files.filter((f) => /\.(mp4|mov|mkv)$/i.test(f) && !f.startsWith("."));
     const mds = files.filter((f) => /\.md$/i.test(f));
-    const script = mds.find((f) => f.toUpperCase().startsWith(code)) ?? mds[0] ?? null;
+    const own = mds.find((f) => f.toUpperCase().startsWith(code)) ?? mds[0];
+    const text = path.join(TEXTS, `${code}.md`);
+    const script = own ? path.join(dir, own) : existsSync(text) ? text : null;
     const shortsDir = path.join(dir, "SHORTS");
     const hasShorts = existsSync(shortsDir) && readdirSync(shortsDir).some((s) => {
       const p = path.join(shortsDir, s);
@@ -314,7 +318,7 @@ async function runEpisode(ep: Episode) {
     if (ep.script && !s.scriptText && (s.state === "IDLE" || s.state === "UPLOADING")) {
       await lusk.api(`/api/projects/${projectId}/script`, {
         method: "POST", headers: json,
-        body: JSON.stringify({ scriptText: readFileSync(path.join(ep.dir, ep.script), "utf-8") }),
+        body: JSON.stringify({ scriptText: readFileSync(ep.script, "utf-8") }),
       });
     }
     s = await lusk.api<any>(`/api/projects/${projectId}`);
@@ -437,7 +441,7 @@ async function main() {
   console.log(`${episodes.length} episodes, ${todo.length} with something missing:\n`);
   for (const e of todo) {
     const what = [e.needShorts && (e.rerender ? "shorts again" : "shorts"), e.needSk && "sk.srt", e.needEn && "en.srt"].filter(Boolean).join(" + ");
-    console.log(`  ${e.code}  ${what.padEnd(26)} ${e.source ?? "—"}  (${e.sourceNote})${e.script ? `  script: ${e.script}` : ""}`);
+    console.log(`  ${e.code}  ${what.padEnd(26)} ${e.source ?? "—"}  (${e.sourceNote})${e.script ? `  script: ${path.basename(e.script)}` : ""}`);
   }
   console.log(`\nfree: ${freeGb().toFixed(1)} GB · work dir: ${WORK}\n`);
   if (DRY) return;
@@ -450,7 +454,7 @@ async function main() {
   for (const ep of todo) {
     if (interrupted) break;
     if (!ep.source) { log(`${ep.code} skipped: no video`); state[ep.code] = { status: "skipped", at: new Date().toISOString(), detail: "no video" }; saveState(); continue; }
-    log(`${ep.code} ${ep.resuming ? "resume" : "start"} — ${ep.source}${ep.script ? ` + ${ep.script}` : ""}`);
+    log(`${ep.code} ${ep.resuming ? "resume" : "start"} — ${ep.source}${ep.script ? ` + ${path.basename(ep.script)}` : ""}`);
     const t0 = Date.now();
     try {
       let shorts = 0;
