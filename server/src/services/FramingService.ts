@@ -31,8 +31,9 @@ class FramingService {
     const pick = req.mode === "pick" && req.subjectX != null
       ? `-x${req.subjectX.toFixed(3)}-t${(req.subjectT ?? 0).toFixed(1)}`
       : "";
-    // v2: solves carry `fit` (graphic stretches); v3: `fit` also covers text the crop would cut
-    return `v3-${req.mode}-${Math.round(req.startMs)}-${Math.round(req.endMs)}${pick}`;
+    // v2: solves carry `fit` (graphic stretches); v3: `fit` also covers text the crop would cut;
+    // v4: ... and two lines when it would cut one mid-word
+    return `v4-${req.mode}-${Math.round(req.startMs)}-${Math.round(req.endMs)}${pick}`;
   }
 
   async getFraming(

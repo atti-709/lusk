@@ -886,17 +886,33 @@ def solve_camera(t_grid: np.ndarray, subject: np.ndarray, cuts: list[float],
 
 
 FIT_MIN_SEC = 1.0  # nobody on screen for this long is a graphic (title card, diagram, quote)...
-FIT_MERGE_SEC = 0.5  # ...two such stretches this close together are one graphic
+FIT_MERGE_SEC = 2.0  # ...two such stretches this close together are one graphic: a crop
+# flashing up for a moment between them (a title Vision reads in pieces on some frames) is jumpy
 FIT_SNAP_SEC = 0.6  # a graphic's edge within this of a scene change starts/ends exactly on it
-FIT_TEXT_MIN_LINES = 3  # this many lines of text outside the crop make a frame a graphic
+FIT_TEXT_MIN_LINES = 3  # this many lines of text the crop cuts make a frame a graphic
+FIT_TEXT_THROUGH_LINES = 2  # ... or this many when one is cut mid-word (E04's two-line chapter title)
+TEXT_WHOLE = 0.97  # a line this much inside the crop counts as whole (Vision's boxes are loose)
+TEXT_EDGE = 0.03  # ... and this little inside as wholly outside, not truncated
 FIT_FACE_MIN_H = 0.1  # smaller faces (of the frame height) are pictures, not people: the
 # faces in E60's icon painting measured 0.07, the host 0.19+ even in E67's wide shot
 
 
-def text_cut_off(lines: list[tuple[float, float]], center: float, crop_w: float) -> int:
-    """How many text lines the crop centered at `center` would cut: mostly outside it."""
+def text_cut_off(lines: list[tuple[float, float]], center: float, crop_w: float) -> tuple[int, int]:
+    """Text lines the crop centered at `center` would cut: (all of them — mostly or wholly
+    outside it, or truncated; just the truncated ones — the crop edge runs through them)."""
     lo, hi = center - crop_w / 2, center + crop_w / 2
-    return sum(1 for a, b in lines if max(0.0, min(b, hi) - max(a, lo)) < 0.5 * (b - a))
+    cut = through = 0
+    for a, b in lines:
+        inside = max(0.0, min(b, hi) - max(a, lo)) / max(b - a, 1e-6)
+        if inside < TEXT_WHOLE:
+            cut += 1
+            through += inside > TEXT_EDGE
+    return cut, through
+
+
+def text_is_graphic(lines: list[tuple[float, float]], center: float, crop_w: float) -> bool:
+    cut, through = text_cut_off(lines, center, crop_w)
+    return cut >= (FIT_TEXT_MIN_LINES if through == 0 else FIT_TEXT_THROUGH_LINES)
 
 
 def fit_ranges(samples: list[Sample], frames: list[list[Face]],
@@ -914,10 +930,11 @@ def fit_ranges(samples: list[Sample], frames: list[list[Face]],
 
     Burned-in text beside the speaker counts too: E03's Bible verses run down the right
     third while the host talks, and the crop kept him and cut the verse off. Several lines
-    the crop would cut make it a graphic; a single line (a chapter label held for minutes,
-    a name tag) doesn't."""
+    the crop would cut make it a graphic, and so do two when the crop truncates one mid-word
+    (E04's big two-line chapter title, cut off at the crop edge under the captions); a single
+    line (a chapter label held for minutes, a name tag) doesn't."""
     empty = [not any(f.h >= FIT_FACE_MIN_H for f in frames[i])
-             or text_cut_off(texts[i], float(centers[i]), crop_w) >= FIT_TEXT_MIN_LINES
+             or text_is_graphic(texts[i], float(centers[i]), crop_w)
              for i in range(len(samples))]
     runs: list[list[float]] = []
     i = 0
