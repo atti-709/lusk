@@ -315,6 +315,9 @@ async function runEpisode(ep: Episode) {
     if (s.state === "IDLE") {
       await lusk.api(`/api/projects/${projectId}/select-video`, { method: "POST", headers: json, body: JSON.stringify({ videoPath: sourcePath }) });
     }
+    // A text exported after the run started still counts
+    const text = path.join(TEXTS, `${ep.code}.md`);
+    if (!ep.script && existsSync(text)) { ep.script = text; log(`  ${ep.code} script: ${ep.code}.md`); }
     if (ep.script && !s.scriptText && (s.state === "IDLE" || s.state === "UPLOADING")) {
       await lusk.api(`/api/projects/${projectId}/script`, {
         method: "POST", headers: json,
