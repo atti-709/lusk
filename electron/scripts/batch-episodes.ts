@@ -267,25 +267,39 @@ const STALLED = "stalled";
 /** Times an episode is reopened after a stalled render before it counts as failed. */
 const EPISODE_ATTEMPTS = 3;
 
-const SRT_CUE = /(\d\d):(\d\d):(\d\d),(\d{3}) --> (\d\d):(\d\d):(\d\d),(\d{3})/g;
+const SRT_TIME = /(\d\d):(\d\d):(\d\d),(\d{3})/g;
 const MIN_CUE_MS = 700;
+const CUE_PAUSE_MS = 2000;
 
 /**
- * End each subtitle cue when its last word does. English cues are timed from the Slovak
+ * Time each subtitle cue by the speech under it. English cues are timed from the Slovak
  * caption blocks they translate, and blocks translated before the word-end fix ran on
- * over pauses; the Slovak words (fixed by then) say where the speech stops.
+ * over pauses — even across a 25 s graphic (E08's memes). A cue now ends with its last
+ * word, and one that spans such a pause is shown twice, before and after it, instead of
+ * hanging over the silence.
  */
 function endCuesAtSpeech(srt: string, words: { startMs: number; endMs: number }[]): string {
-  const ms = (h: string, m: string, s: string, f: string) => ((+h * 60 + +m) * 60 + +s) * 1000 + +f;
   const fmt = (t: number) => new Date(t).toISOString().slice(11, 23).replace(".", ",");
-  return srt.replace(SRT_CUE, (line, ...g: string[]) => {
-    const start = ms(g[0], g[1], g[2], g[3]);
-    const end = ms(g[4], g[5], g[6], g[7]);
+  const out: string[] = [];
+  for (const block of srt.trim().split(/\n\s*\n/)) {
+    const lines = block.split("\n");
+    const t = lines.findIndex((l) => l.includes("-->"));
+    const times = [...(lines[t] ?? "").matchAll(SRT_TIME)].map((m) => ((+m[1] * 60 + +m[2]) * 60 + +m[3]) * 1000 + +m[4]);
+    if (times.length !== 2) continue;
+    const [start, end] = times;
+    const text = lines.slice(t + 1).join("\n");
     const spoken = words.filter((w) => w.startMs >= start && w.startMs < end);
-    if (!spoken.length) return line;
-    const last = Math.max(...spoken.map((w) => w.endMs));
-    return last >= end ? line : `${fmt(start)} --> ${fmt(Math.max(last, start + MIN_CUE_MS))}`;
-  });
+    if (!spoken.length) { out.push(`${fmt(start)} --> ${fmt(end)}\n${text}`); continue; }
+    let from = start;
+    for (let i = 0; i < spoken.length; i++) {
+      const last = i + 1 === spoken.length;
+      if (!last && spoken[i + 1].startMs - spoken[i].endMs < CUE_PAUSE_MS) continue;
+      const until = Math.min(end, Math.max(spoken[i].endMs, from + MIN_CUE_MS));
+      out.push(`${fmt(from)} --> ${fmt(until)}\n${text}`);
+      if (!last) from = spoken[i + 1].startMs;
+    }
+  }
+  return out.map((cue, i) => `${i + 1}\n${cue}`).join("\n\n") + "\n";
 }
 
 async function waitReady(lusk: Lusk, id: string, ep: Episode) {
