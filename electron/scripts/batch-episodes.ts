@@ -256,6 +256,12 @@ async function warmSource(file: string) {
 
 /** Render attempts per short — a Drive stall on the source fails one, not the episode. */
 const RENDER_ATTEMPTS = 3;
+/** A render whose progress hasn't moved this long is dead (its headless Chrome killed under
+ * memory pressure left E05's at "50%" with nothing running); Lusk is restarted for it. */
+const RENDER_STALL_MS = 15 * 60_000;
+const STALLED = "stalled";
+/** Times an episode is reopened after a stalled render before it counts as failed. */
+const EPISODE_ATTEMPTS = 3;
 
 async function waitReady(lusk: Lusk, id: string, ep: Episode) {
   let last = "";
@@ -348,11 +354,16 @@ async function runEpisode(ep: Episode) {
         for (let attempt = 1; ; attempt++) {
           await lusk.api("/api/render", { method: "POST", headers: json, body: JSON.stringify({ sessionId: projectId, clip, offsetX: clip.speakerOffsetX ?? 0 }) });
           let error = "";
+          let seen = "";
+          let movedAt = Date.now();
           for (;;) {
             const st = await lusk.api<any>(`/api/projects/${projectId}`);
             const r = st.renders?.[key];
             if (r?.status === "exported") break;
             if (r?.status === "error") { error = r.message; break; }
+            const now = `${r?.progress} ${r?.message}`;
+            if (now !== seen) { seen = now; movedAt = Date.now(); }
+            if (Date.now() - movedAt > RENDER_STALL_MS) throw new Error(`render "${clip.title}" ${STALLED} at ${seen}`);
             await sleep(2000);
           }
           if (!error) break;
@@ -442,7 +453,16 @@ async function main() {
     log(`${ep.code} ${ep.resuming ? "resume" : "start"} — ${ep.source}${ep.script ? ` + ${ep.script}` : ""}`);
     const t0 = Date.now();
     try {
-      const { shorts } = await runEpisode(ep);
+      let shorts = 0;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          ({ shorts } = await runEpisode(ep));
+          break;
+        } catch (err) {
+          if (interrupted || attempt === EPISODE_ATTEMPTS || !String(err).includes(STALLED)) throw err;
+          log(`  ${ep.code} ${err instanceof Error ? err.message : err} — restarting Lusk`);
+        }
+      }
       state[ep.code] = { status: "done", at: new Date().toISOString(), detail: `${shorts} shorts, ${((Date.now() - t0) / 60000).toFixed(0)} min` };
       delete rerender[ep.code];
       log(`${ep.code} done in ${((Date.now() - t0) / 60000).toFixed(0)} min`);
