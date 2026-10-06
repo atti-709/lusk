@@ -50,7 +50,7 @@ import { cutAfterClosingWord, leadIn, startAtSentence } from "../../server/src/s
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync,
-  renameSync, rmSync, statSync, statfsSync, writeFileSync,
+  createReadStream, renameSync, rmSync, statSync, statfsSync, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -245,6 +245,18 @@ function nextLuskFolder(dir: string): string {
   }
 }
 
+/**
+ * Read the whole source once so Drive has it on disk again. Drive drops parts of a big
+ * file from its cache after transcription has read it, and a render reading a dropped
+ * range streams it back — slowly enough that a stall timed out a whole episode (E04).
+ */
+async function warmSource(file: string) {
+  for await (const _ of createReadStream(file, { highWaterMark: 8 << 20 }));
+}
+
+/** Render attempts per short — a Drive stall on the source fails one, not the episode. */
+const RENDER_ATTEMPTS = 3;
+
 async function waitReady(lusk: Lusk, id: string, ep: Episode) {
   let last = "";
   for (;;) {
@@ -328,17 +340,25 @@ async function runEpisode(ep: Episode) {
     if (plan.needShorts) {
       const done = clips.filter((c, i) => existsSync(path.join(stage, `${String(i).padStart(2, "0")} ${safeName(c.title)}.mp4`))).length;
       log(`  ${ep.code} rendering ${clips.length} shorts${done ? ` (${done} already done)` : ""}`);
+      if (done < clips.length) await warmSource(sourcePath);
       for (const [i, clip] of clips.entries()) {
         const staged = path.join(stage, `${String(i).padStart(2, "0")} ${safeName(clip.title)}.mp4`);
         if (existsSync(staged)) continue;
         const key = getClipRenderKey(clip); // names the server's output file
-        await lusk.api("/api/render", { method: "POST", headers: json, body: JSON.stringify({ sessionId: projectId, clip, offsetX: clip.speakerOffsetX ?? 0 }) });
-        for (;;) {
-          const st = await lusk.api<any>(`/api/projects/${projectId}`);
-          const r = st.renders?.[key];
-          if (r?.status === "exported") break;
-          if (r?.status === "error") throw new Error(`render "${clip.title}": ${r.message}`);
-          await sleep(2000);
+        for (let attempt = 1; ; attempt++) {
+          await lusk.api("/api/render", { method: "POST", headers: json, body: JSON.stringify({ sessionId: projectId, clip, offsetX: clip.speakerOffsetX ?? 0 }) });
+          let error = "";
+          for (;;) {
+            const st = await lusk.api<any>(`/api/projects/${projectId}`);
+            const r = st.renders?.[key];
+            if (r?.status === "exported") break;
+            if (r?.status === "error") { error = r.message; break; }
+            await sleep(2000);
+          }
+          if (!error) break;
+          if (attempt === RENDER_ATTEMPTS || !/Timed out reading/.test(error)) throw new Error(`render "${clip.title}": ${error}`);
+          log(`  ${ep.code} ${error} — reading the source again, then retrying`);
+          await warmSource(sourcePath);
         }
         copyAtomic(path.join(profile, "lusk_temp", projectId!, `output_${key}.mp4`), staged);
         log(`  ${ep.code} short ${i + 1}/${clips.length} (${clip.viralityScore ?? "-"}) ${clip.title}`);
