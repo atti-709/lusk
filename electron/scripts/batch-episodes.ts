@@ -267,6 +267,27 @@ const STALLED = "stalled";
 /** Times an episode is reopened after a stalled render before it counts as failed. */
 const EPISODE_ATTEMPTS = 3;
 
+const SRT_CUE = /(\d\d):(\d\d):(\d\d),(\d{3}) --> (\d\d):(\d\d):(\d\d),(\d{3})/g;
+const MIN_CUE_MS = 700;
+
+/**
+ * End each subtitle cue when its last word does. English cues are timed from the Slovak
+ * caption blocks they translate, and blocks translated before the word-end fix ran on
+ * over pauses; the Slovak words (fixed by then) say where the speech stops.
+ */
+function endCuesAtSpeech(srt: string, words: { startMs: number; endMs: number }[]): string {
+  const ms = (h: string, m: string, s: string, f: string) => ((+h * 60 + +m) * 60 + +s) * 1000 + +f;
+  const fmt = (t: number) => new Date(t).toISOString().slice(11, 23).replace(".", ",");
+  return srt.replace(SRT_CUE, (line, ...g: string[]) => {
+    const start = ms(g[0], g[1], g[2], g[3]);
+    const end = ms(g[4], g[5], g[6], g[7]);
+    const spoken = words.filter((w) => w.startMs >= start && w.startMs < end);
+    if (!spoken.length) return line;
+    const last = Math.max(...spoken.map((w) => w.endMs));
+    return last >= end ? line : `${fmt(start)} --> ${fmt(Math.max(last, start + MIN_CUE_MS))}`;
+  });
+}
+
 async function waitReady(lusk: Lusk, id: string, ep: Episode) {
   let last = "";
   for (;;) {
@@ -332,12 +353,26 @@ async function runEpisode(ep: Episode) {
     }
     s = await waitReady(lusk, projectId!, ep);
 
+    // Script-corrected before the word-end fix: every word ran on to the next one, holding
+    // a caption over each pause. Re-parsing the stored corrected TSV restores the ends
+    // from the original transcript; clips and text stay as they are.
+    const ws: { startMs: number; endMs: number }[] = s.transcript?.words ?? [];
+    const runOn = ws.filter((w, i) => i + 1 < ws.length && w.endMs >= ws[i + 1].startMs).length;
+    if (s.scriptText && s.correctedTranscriptRaw && ws.length > 20 && runOn > 0.9 * ws.length) {
+      await lusk.api(`/api/projects/${projectId}/corrected-transcript`, {
+        method: "POST", headers: json, body: JSON.stringify({ text: s.correctedTranscriptRaw }),
+      });
+      s = await lusk.api<any>(`/api/projects/${projectId}`);
+      log(`  ${ep.code} restored word end times (script correction had run every word on)`);
+    }
+
     // Subtitles (full episode) — the English translation only exists right after a run
     for (const lang of ["sk", "en"] as const) {
       if (lang === "sk" ? !plan.needSk : !plan.needEn) continue;
       const res = await fetch(`${lusk.baseUrl}/api/projects/${projectId}/captions${lang === "en" ? "-en" : ""}.srt`);
-      if (res.ok) writeFileSync(path.join(stage, `${ep.code}_captions_${lang}.srt`), await res.text());
-      else log(`  ${ep.code} ${lang} subtitles unavailable (${res.status})`);
+      if (!res.ok) { log(`  ${ep.code} ${lang} subtitles unavailable (${res.status})`); continue; }
+      const srt = await res.text();
+      writeFileSync(path.join(stage, `${ep.code}_captions_${lang}.srt`), lang === "en" ? endCuesAtSpeech(srt, s.transcript?.words ?? []) : srt);
     }
 
     // Shorts
