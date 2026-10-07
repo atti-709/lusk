@@ -5,6 +5,7 @@ import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
 import { tempManager } from "./TempManager.js";
+import { alignCorrectedRows } from "./alignCorrection.js";
 import {
   applyProofreadEdits,
   buildProofreadLines,
@@ -213,154 +214,6 @@ function isRowMismatchError(err: unknown): boolean {
   return err instanceof Error && err.message.includes("row mismatch");
 }
 
-/**
- * Normalize a word for fuzzy comparison: strip diacritics, lowercase,
- * remove non-alphanumeric characters.
- */
-function normalizeWord(s: string): string {
-  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
-}
-
-/**
- * Levenshtein edit distance between two strings.
- */
-function editDistance(a: string, b: string): number {
-  if (a.length === 0) return b.length;
-  if (b.length === 0) return a.length;
-  const matrix: number[][] = [];
-  for (let i = 0; i <= a.length; i++) matrix[i] = [i];
-  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost,
-      );
-    }
-  }
-  return matrix[a.length][b.length];
-}
-
-/**
- * Check if two normalized words are similar enough to be a correction
- * (not a completely different word from a dropped row).
- */
-function isSimilar(normA: string, normB: string): boolean {
-  if (normA === normB) return true;
-  if (normA.length === 0 || normB.length === 0) return false;
-  // Short words (≤3 chars): require exact match after normalization.
-  // Slovak has many 1-2 char words (a, i, v, k, s, o, z, u, je, na, sa, to, do...)
-  // that are completely different words despite low edit distance.
-  if (normA.length <= 3 || normB.length <= 3) return false;
-  const maxLen = Math.max(normA.length, normB.length);
-  // Allow up to ~40% edit distance (generous for Slovak diacritics/spelling)
-  const threshold = Math.ceil(maxLen * 0.4);
-  return editDistance(normA, normB) <= threshold;
-}
-
-/**
- * When Gemini returns the correct row count, replace its (possibly mangled)
- * timestamps with the original input timestamps. Takes words positionally.
- */
-function restoreTimestamps(inputLines: string[], outputLines: string[]): string[] {
-  const inputs = inputLines.filter((l) => l.trim());
-  const result: string[] = [];
-  for (let i = 0; i < inputs.length; i++) {
-    const ts = inputs[i].split("\t")[0].trim();
-    const outputWord = i < outputLines.length
-      ? (() => { const tab = outputLines[i].indexOf("\t"); return tab >= 0 ? outputLines[i].substring(tab + 1) : outputLines[i]; })()
-      : inputs[i].split("\t").slice(1).join("\t");
-    result.push(`${ts}\t${outputWord}`);
-  }
-  return result;
-}
-
-/**
- * Repair a Gemini response that has the wrong number of rows.
- * Ignores Gemini's timestamps entirely (they may be mangled) and aligns
- * output words to input words using normalized text matching.
- * Uses greedy lookahead to handle dropped/extra rows without drifting.
- */
-function repairChunkOutput(inputLines: string[], outputLines: string[]): string[] {
-  const WINDOW = 5;
-
-  // Parse input: keep original timestamps, extract words
-  const inputs = inputLines.filter((l) => l.trim()).map((l) => {
-    const [ts, ...rest] = l.split("\t");
-    return { ts: ts.trim(), word: rest.join("\t"), norm: normalizeWord(rest.join("\t")) };
-  });
-
-  // Parse output: ignore timestamps, extract corrected words only
-  const outputs = outputLines.map((l) => {
-    const tab = l.indexOf("\t");
-    const word = tab >= 0 ? l.substring(tab + 1) : l;
-    return { word, norm: normalizeWord(word) };
-  });
-
-  const repaired: string[] = [];
-  let outIdx = 0;
-  let matched = 0;
-
-  for (let inIdx = 0; inIdx < inputs.length; inIdx++) {
-    const inp = inputs[inIdx];
-
-    if (outIdx >= outputs.length) {
-      // No more output rows — keep original
-      repaired.push(`${inp.ts}\t${inp.word}`);
-      continue;
-    }
-
-    // Fast path: normalized words match at current position
-    if (outputs[outIdx].norm === inp.norm) {
-      repaired.push(`${inp.ts}\t${outputs[outIdx].word}`);
-      outIdx++;
-      matched++;
-      continue;
-    }
-
-    // Look ahead in output for this input word (output has extra rows)
-    let outLook = -1;
-    for (let j = 1; j < WINDOW && outIdx + j < outputs.length; j++) {
-      if (outputs[outIdx + j].norm === inp.norm) { outLook = j; break; }
-    }
-
-    // Look ahead in input for this output word (input row was dropped)
-    let inLook = -1;
-    for (let j = 1; j < WINDOW && inIdx + j < inputs.length; j++) {
-      if (inputs[inIdx + j].norm === outputs[outIdx].norm) { inLook = j; break; }
-    }
-
-    if (inLook >= 0 && (outLook < 0 || inLook <= outLook)) {
-      // Current output word matches a later input word → this input row was dropped
-      repaired.push(`${inp.ts}\t${inp.word}`);
-      // Don't advance outIdx
-    } else if (outLook >= 0) {
-      // Current input word matches a later output word → skip extra output rows
-      repaired.push(`${inp.ts}\t${outputs[outIdx + outLook].word}`);
-      outIdx += outLook + 1;
-      matched++;
-    } else if (isSimilar(inp.norm, outputs[outIdx].norm)) {
-      // Words are similar enough — this is a genuine correction
-      repaired.push(`${inp.ts}\t${outputs[outIdx].word}`);
-      outIdx++;
-      matched++;
-    } else {
-      // Words are completely different — this input row was likely dropped
-      // and the output word belongs to a later input row
-      repaired.push(`${inp.ts}\t${inp.word}`);
-      // Don't advance outIdx
-    }
-  }
-
-  const total = inputs.length;
-  console.log(`[GeminiService] Auto-repair: aligned ${matched}/${total} rows by word matching, kept ${total - matched} original`);
-
-  return repaired;
-}
-
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -477,11 +330,13 @@ class GeminiService {
       const cached = await this.getCachedChunk(sessionId, chunkHash);
       if (cached) {
         console.log(`[GeminiService] Chunk ${i} cache hit, skipping API call`);
+        // Caches written before content alignment hold rows mapped by index
+        const aligned = alignCorrectedRows(chunkLines, cached);
         if (chunk.isFirst) {
-          correctedLines.push(...cached);
+          correctedLines.push(...aligned);
         } else {
           const overlapCount = chunks[i - 1].endIndex - chunk.startIndex;
-          correctedLines.push(...cached.slice(overlapCount));
+          correctedLines.push(...aligned.slice(overlapCount));
         }
         continue;
       }
@@ -539,12 +394,12 @@ class GeminiService {
             const shouldRetry = ratio < ROW_MISMATCH_RETRY_THRESHOLD && rowMismatchAttempts <= 1;
 
             if (!shouldRetry) {
-              console.warn(`[GeminiService] ${detail} Auto-repairing via word alignment.`);
+              console.warn(`[GeminiService] ${detail} Aligning rows by content.`);
               onProgress(
                 Math.round((i / chunks.length) * 80),
                 `Chunk ${i + 1}/${chunks.length}: row mismatch (${resultLines.length}/${expectedLines}), auto-repairing...`,
               );
-              resultLines = repairChunkOutput(chunkLines, resultLines);
+              resultLines = alignCorrectedRows(chunkLines, resultLines);
               await this.setCachedChunk(sessionId, chunkHash, resultLines);
               break;
             }
@@ -560,9 +415,9 @@ class GeminiService {
             throw new Error(detail);
           }
 
-          // Validation passed — restore original timestamps (Gemini may reformat them)
-          // and cache to disk
-          resultLines = restoreTimestamps(chunkLines, resultLines);
+          // Right row count — still aligned by content, not index: a script word inserted
+          // and another dropped would shift every row between them (see alignCorrection.ts)
+          resultLines = alignCorrectedRows(chunkLines, resultLines);
           await this.setCachedChunk(sessionId, chunkHash, resultLines);
           break;
         } catch (err: unknown) {

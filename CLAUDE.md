@@ -57,6 +57,7 @@
 ### **4. Text Correction (Server Side)**
 
 * **Script correction:** with a reference script, `GeminiService.correctTranscript` rewrites the transcript row-for-row in 250-row TSV chunks (`gemini-3.5-flash-lite`, prompt `correction-api.md`).
+* **Mapping rows back:** Gemini's rows are aligned to the heard words by content, never by index (`services/alignCorrection.ts`): with the script in view it inserts unspoken script words and drops others, which taken by index shifted every row between them onto a neighbour's time. A row similar to its heard word takes the correction; one that swaps in an unrelated word keeps the spoken word (the proofread pass, which also sees the script, fixes real mishearings); script insertions are dropped and a row Gemini split in two is joined back.
 * **Proofread pass:** always runs next (`GeminiService.proofreadTranscript` + `services/proofread.ts`, prompt `proofread-api.md`). Gemini reads numbered sentences and returns only **sparse edits** `{line, find, replace}`; an edit is applied only if `find` matches that line verbatim and isn't a rewrite, and new words are timed inside the span they replace. This catches what the row-for-row pass misses (mishearings, run-together words, dropped "sa", stray punctuation, capitals). Failures are non-fatal.
 * **Legacy:** `/server/src/services/AlignmentService.ts` (Needleman-Wunsch) no longer exists; alignment is Gemini-based.
 
