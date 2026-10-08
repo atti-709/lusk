@@ -8,10 +8,11 @@ import { settingsService, getConfigDir } from "./SettingsService.js";
 import { bundle } from "@remotion/bundler";
 import type { CancelSignal } from "@remotion/renderer";
 import { renderMedia, selectComposition } from "@remotion/renderer";
-import type { CaptionWord, FramingKeyframe } from "@lusk/shared";
+import type { CaptionWord, FitRange, FramingKeyframe } from "@lusk/shared";
 import { getClipRange, resolveFps } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
 import { sourceStripFor, type SourceStrip } from "./sourceStrip.js";
+import { normalizeLoudness } from "./loudness.js";
 
 /**
  * Computes the frame layout for a single clip range using the render's rounding rule.
@@ -291,7 +292,7 @@ class RenderService {
     sourceAspectRatio?: number | null,
     cancelSignal?: CancelSignal,
     framing?: FramingKeyframe[] | null,
-    fitRanges?: [number, number][] | null,
+    fitRanges?: FitRange[] | null,
     source?: { width: number | null; height: number | null; fps: number | null } | null
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress, outroConfig != null);
@@ -302,6 +303,7 @@ class RenderService {
     // Render beside the target and move it into place only when complete: a cancelled or
     // failed render must not leave a truncated file — or clobber an earlier good export
     const partialPath = `${outputPath}.partial.mp4`;
+    const normalizedPath = `${outputPath}.normalized.partial.mp4`;
 
     const fps = resolveFps(await settingsService.getFps(), source?.fps);
     const outroOverlapFrames = await settingsService.getOutroOverlapFrames();
@@ -393,12 +395,17 @@ class RenderService {
           : renderOptions
       );
 
-      fs.renameSync(partialPath, outputPath);
+      onProgress?.(95, "Normalizing loudness...");
+      const controller = new AbortController();
+      cancelSignal?.(() => controller.abort());
+      await normalizeLoudness(partialPath, normalizedPath, controller.signal);
+      fs.renameSync(normalizedPath, outputPath);
       onProgress?.(95, "Render complete");
       return outputPath;
     } finally {
       fs.rmSync(segmentPath, { force: true });
       fs.rmSync(partialPath, { force: true });
+      fs.rmSync(normalizedPath, { force: true });
     }
   }
 }

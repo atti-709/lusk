@@ -893,6 +893,8 @@ FIT_TEXT_MIN_LINES = 3  # this many lines of text the crop cuts make a frame a g
 FIT_TEXT_THROUGH_LINES = 2  # ... or this many when one is cut mid-word (E04's two-line chapter title)
 TEXT_WHOLE = 0.97  # a line this much inside the crop counts as whole (Vision's boxes are loose)
 TEXT_EDGE = 0.03  # ... and this little inside as wholly outside, not truncated
+FIT_WINDOW_PAD = 0.03  # room left around the text and faces a fitted window has to show
+FIT_WINDOW_FULL = 0.85  # a window this wide (of the frame width) is shown as the whole frame
 FIT_FACE_MIN_H = 0.1  # smaller faces (of the frame height) are pictures, not people: the
 # faces in E60's icon painting measured 0.07, the host 0.19+ even in E67's wide shot
 
@@ -932,7 +934,13 @@ def fit_ranges(samples: list[Sample], frames: list[list[Face]],
     third while the host talks, and the crop kept him and cut the verse off. Several lines
     the crop would cut make it a graphic, and so do two when the crop truncates one mid-word
     (E04's big two-line chapter title, cut off at the crop edge under the captions); a single
-    line (a chapter label held for minutes, a name tag) doesn't."""
+    line (a chapter label held for minutes, a name tag) doesn't.
+
+    A stretch where the speaker stays on screen beside the text is fitted only as wide as
+    the two need: `[start, end, x0, x1]`, the part of the frame width shown. Fitted to the
+    whole width, E04's and E14's numbered tips in the corner left a 1080x608 strip for an
+    entire short; the window around tip and host is nearly square. `[start, end]` shows
+    the whole width."""
     empty = [not any(f.h >= FIT_FACE_MIN_H for f in frames[i])
              or text_is_graphic(texts[i], float(centers[i]), crop_w)
              for i in range(len(samples))]
@@ -963,8 +971,33 @@ def fit_ranges(samples: list[Sample], frames: list[list[Face]],
         a = 0.0 if start < 1.0 / SAMPLE_HZ else snap(start)
         b = span if end >= span - 1.0 / SAMPLE_HZ else snap(end)
         if b - a >= FIT_MIN_SEC:
-            out.append([round(a, 3), round(b, 3)])
+            window = fit_window(frames, texts, round(start * SAMPLE_HZ), min(len(frames), round(end * SAMPLE_HZ)), crop_w)
+            out.append([round(a, 3), round(b, 3), *(round(x, 3) for x in window or [])])
     return out
+
+
+def fit_window(frames: list[list[Face]], texts: list[list[tuple[float, float]]],
+               i0: int, i1: int, crop_w: float) -> tuple[float, float] | None:
+    """The part of the frame width (x0, x1) a fitted stretch needs: its text and the
+    people beside it. None for the whole width: someone is missing for part of it (a
+    graphic on its own), or text and people span most of the frame anyway."""
+    face_w = crop_w / OUT_ASPECT  # a face box is about as wide as tall: height/width of the frame
+    lo, hi = 1.0, 0.0
+    for i in range(i0, i1):
+        faces = [f for f in frames[i] if f.h >= FIT_FACE_MIN_H]
+        if not faces:
+            return None
+        for f in faces:
+            lo, hi = min(lo, f.cx - f.h * face_w), max(hi, f.cx + f.h * face_w)
+        for a, b in texts[i]:
+            lo, hi = min(lo, a), max(hi, b)
+    if hi <= lo:
+        return None
+    lo, hi = max(0.0, lo - FIT_WINDOW_PAD), min(1.0, hi + FIT_WINDOW_PAD)
+    if hi - lo < crop_w:  # never narrower than the crop itself
+        mid = min(1 - crop_w / 2, max(crop_w / 2, (lo + hi) / 2))
+        lo, hi = mid - crop_w / 2, mid + crop_w / 2
+    return None if hi - lo >= FIT_WINDOW_FULL else (lo, hi)
 
 
 CUT_LEAD_SEC = 0.02  # a step lands this far before the cut — half a frame at 25 fps. The
@@ -1086,7 +1119,7 @@ def main() -> None:
         centers = np.interp(np.arange(len(raw_samples)) / SAMPLE_HZ, t_grid, camera)
         fit = fit_ranges(raw_samples, frames, texts, centers, crop_w, cut_candidates, span)
         if fit:
-            log(f"graphics shown whole: {', '.join(f'{a:.1f}-{b:.1f}s' for a, b in fit)}")
+            log(f"graphics shown whole: {', '.join(f'{r[0]:.1f}-{r[1]:.1f}s' + (f' (x {r[2]:.2f}-{r[3]:.2f})' if len(r) > 2 else '') for r in fit)}")
         json.dump({
             "fit": fit,
             "cropWidthFraction": round(crop_w, 6),

@@ -1,4 +1,4 @@
-import type { FramingKeyframe } from "@lusk/shared";
+import type { FitRange, FramingKeyframe } from "@lusk/shared";
 
 /** Output frame of the composition (9:16). */
 const COMP_WIDTH = 1080;
@@ -34,7 +34,7 @@ export function sourceStripFor(
   height: number,
   framing: FramingKeyframe[] | null | undefined,
   offsetX: number,
-  fitRanges: [number, number][] | null | undefined,
+  fitRanges: FitRange[] | null | undefined,
 ): SourceStrip | null {
   if (width <= 0 || height <= 0 || width / height <= 9 / 16 + 0.01) return null;
   if (fitRanges && fitRanges.length > 0) return null;

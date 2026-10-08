@@ -8,7 +8,7 @@ import {
 } from "remotion";
 import type { Caption } from "@remotion/captions";
 import { CaptionOverlay } from "./CaptionOverlay";
-import type { CaptionStyles, FramingKeyframe } from "@lusk/shared";
+import type { CaptionStyles, FitRange, FramingKeyframe } from "@lusk/shared";
 import { framingCenterAt } from "@lusk/shared";
 
 export const COMP_WIDTH = 1080;
@@ -30,8 +30,11 @@ function ClipVideo({
   startFromInFrames: number;
   offsetX: number;
   sourceAspectRatio?: number | null;
-  /** Show the whole landscape frame, fitted to the width, instead of the 9:16 crop. */
-  fit?: boolean;
+  /**
+   * Show the landscape frame fitted to the width instead of the 9:16 crop: the whole of it
+   * (true), or the part [x0, x1] of its width.
+   */
+  fit?: boolean | [number, number];
   sourceStrip?: SourceStrip | null;
 }) {
   const isPortrait = sourceAspectRatio != null && sourceAspectRatio < 1;
@@ -40,7 +43,9 @@ function ClipVideo({
       ? (COMP_HEIGHT * sourceAspectRatio / COMP_WIDTH) * 100
       : (COMP_HEIGHT * (16 / 9) / COMP_WIDTH) * 100;
 
-  const fitHeight = COMP_WIDTH / (sourceAspectRatio ?? 16 / 9);
+  const [fitX0, fitX1] = Array.isArray(fit) ? fit : [0, 1];
+  const fitWidth = COMP_WIDTH / (fitX1 - fitX0);
+  const fitHeight = fitWidth / (sourceAspectRatio ?? 16 / 9);
   const videoStyle = isPortrait
     ? {
         width: "100%",
@@ -52,10 +57,10 @@ function ClipVideo({
       }
     : fit
     ? {
-        width: COMP_WIDTH,
+        width: fitWidth,
         height: fitHeight,
         position: "absolute" as const,
-        left: 0,
+        left: -fitX0 * fitWidth,
         top: (COMP_HEIGHT - fitHeight) / 2,
       }
     : {
@@ -166,7 +171,7 @@ export type VideoCompositionProps = {
   /** Tracked camera path for the clip (t = seconds from the clip start); overrides offsetX. */
   framing?: FramingKeyframe[] | null;
   /** Graphic stretches (seconds from the clip start) to show whole instead of cropped. */
-  fitRanges?: [number, number][] | null;
+  fitRanges?: FitRange[] | null;
   /**
    * The video holds only this horizontal strip of the source (renders cut it to what the
    * crop can show — far fewer pixels to extract per frame). Never set with `fitRanges`.
@@ -198,7 +203,8 @@ export function VideoComposition({
     : offsetX;
   const isLandscape = sourceAspectRatio == null || sourceAspectRatio > 9 / 16 + 0.01;
   const fits = isLandscape ? (fitRanges ?? []) : [];
-  const inFit = fits.some(([a, b]) => frame >= a * fps && frame < b * fps);
+  const fitNow = fits.find(([a, b]) => frame >= a * fps && frame < b * fps);
+  const inFit: boolean | [number, number] = !fitNow ? false : fitNow.length === 4 ? [fitNow[2], fitNow[3]] : true;
 
   const hasOutro = !!outroSrc && outroDurationInFrames > 0;
   const overlap = hasOutro ? outroOverlapFrames : 0;

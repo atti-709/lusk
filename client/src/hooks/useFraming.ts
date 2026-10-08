@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Framing, FramingKeyframe, FramingMode } from "@lusk/shared";
+import type { FitRange, Framing, FramingKeyframe, FramingMode } from "@lusk/shared";
 
 export type FramingStatus = "idle" | "tracking" | "ready" | "error";
 
@@ -23,12 +23,12 @@ export function useFraming(
   enabled: boolean,
 ): {
   keyframes: FramingKeyframe[] | null;
-  fit: [number, number][] | null;
+  fit: FitRange[] | null;
   status: FramingStatus;
   error: string | null;
 } {
   const [keyframes, setKeyframes] = useState<FramingKeyframe[] | null>(null);
-  const [fit, setFit] = useState<[number, number][] | null>(null);
+  const [fit, setFit] = useState<FitRange[] | null>(null);
   const [status, setStatus] = useState<FramingStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 

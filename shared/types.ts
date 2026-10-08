@@ -127,11 +127,19 @@ export interface Framing {
   keyframes: FramingKeyframe[];
   /**
    * Stretches (seconds from the clip start) with nobody on screen — burned-in graphics
-   * such as quote cards and diagrams. They are shown whole, fitted to the frame width,
-   * since a 9:16 crop would cut them to an unreadable strip. Absent on older caches.
+   * such as quote cards and diagrams — or with text beside the speaker the crop would cut.
+   * They are shown whole instead, since a 9:16 crop would cut them to an unreadable strip.
+   * Absent on older caches.
    */
-  fit?: [number, number][];
+  fit?: FitRange[];
 }
+
+/**
+ * A stretch shown whole: `[start, end]` (seconds from the clip start) fits the frame's
+ * whole width; `[start, end, x0, x1]` only that part of it (fractions of the width) — the
+ * text and the speaker beside it, which shows them larger than the whole frame would.
+ */
+export type FitRange = [number, number] | [number, number, number, number];
 
 /** A clip's framing mode; clips positioned by hand before tracking existed stay manual. */
 export function getFramingMode(clip: ViralClip): FramingMode {
