@@ -260,18 +260,40 @@ function nextLuskFolder(dir: string): string {
  * a second time — 8-10 min a 4K episode. Sources Lusk makes a playable copy of (ProRes...)
  * are read from Drive once by that copy instead.
  */
-async function stageSource(sourcePath: string, sessionDir: string): Promise<"staged" | "kept" | "skipped"> {
+async function stageSource(sourcePath: string, sessionDir: string, code: string): Promise<"staged" | "kept" | "skipped"> {
   const target = path.join(sessionDir, "input.mp4");
   if (await isCopyOf(sourcePath, target)) return "kept";
   if (!planPlayable(await probeCodecs(sourcePath)).direct) return "skipped";
   mkdirSync(sessionDir, { recursive: true });
   const part = `${target}.part`;
-  await pipeline(createReadStream(sourcePath, { highWaterMark: 8 << 20 }), createWriteStream(part));
+  const size = statSync(sourcePath).size;
+  // A read from Drive can time out mid-file (E21, E23: ETIMEDOUT) — carry on from what
+  // already arrived, a previous run's partial copy included
+  for (let attempt = 1; ; attempt++) {
+    const have = existsSync(part) ? Math.min(statSync(part).size, size) : 0;
+    if (have === size) break;
+    try {
+      await pipeline(
+        createReadStream(sourcePath, { start: have, highWaterMark: 8 << 20 }),
+        createWriteStream(part, { flags: have ? "r+" : "w", start: have }),
+      );
+      break;
+    } catch (e) {
+      if (attempt === DOWNLOAD_ATTEMPTS) throw e;
+      log(`  ${code} reading the source failed (${(e as Error).message}) at ${(have / 1e9).toFixed(1)} GB — resuming`);
+      await sleep(DOWNLOAD_RETRY_MS);
+    }
+  }
+  if (statSync(part).size !== size) throw new Error(`source copy is ${statSync(part).size} bytes, expected ${size}`);
   rmSync(target, { force: true }); // the link to Drive a reopened project made
   renameSync(part, target);
   await stampCopy(sourcePath, target);
   return "staged";
 }
+
+/** Tries at reading a source from Drive, resuming each time, before the episode fails. */
+const DOWNLOAD_ATTEMPTS = 5;
+const DOWNLOAD_RETRY_MS = 30_000;
 
 /** Render attempts per short — a Drive stall on the source fails one, not the episode. */
 const RENDER_ATTEMPTS = 3;
@@ -364,7 +386,7 @@ async function runEpisode(ep: Episode) {
     let s = await lusk.api<any>(`/api/projects/${projectId}`);
     // Transcription and renders read the source; subtitles for a ready project don't
     const downloadStart = Date.now();
-    if ((s.state !== "READY" || plan.needShorts) && await stageSource(sourcePath, path.join(profile, "lusk_temp", projectId!)) === "staged") {
+    if ((s.state !== "READY" || plan.needShorts) && await stageSource(sourcePath, path.join(profile, "lusk_temp", projectId!), ep.code) === "staged") {
       log(`  ${ep.code} downloaded the source (${(statSync(sourcePath).size / 1e9).toFixed(1)} GB) in ${Math.round((Date.now() - downloadStart) / 60_000)} min`);
     }
     // A new project — or one an interruption left before its video/script were set
