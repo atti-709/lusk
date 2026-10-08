@@ -280,11 +280,13 @@ def detect_samples(video: str, width: int, height: int, start: float, duration: 
             requests.append(text_req)
         handler.performRequests_error_(requests, None)
         if text_req is not None:
-            lines = []
+            boxes = []
             for r in text_req.results() or []:
                 bb = r.boundingBox()
                 if bb.size.height >= TEXT_MIN_H:
-                    lines.append((float(bb.origin.x), float(bb.origin.x + bb.size.width)))
+                    boxes.append((float(bb.origin.x), float(bb.origin.x + bb.size.width),
+                                  float(bb.origin.y), float(bb.origin.y + bb.size.height)))
+            lines = join_row_pieces(boxes, w / h)
         texts.append(lines)
 
         seen: list[Face] = []
@@ -897,6 +899,29 @@ FIT_WINDOW_PAD = 0.03  # room left around the text and faces a fitted window has
 FIT_WINDOW_FULL = 0.85  # a window this wide (of the frame width) is shown as the whole frame
 FIT_FACE_MIN_H = 0.1  # smaller faces (of the frame height) are pictures, not people: the
 # faces in E60's icon painting measured 0.07, the host 0.19+ even in E67's wide shot
+
+
+TEXT_ROW_OVERLAP = 0.5  # boxes sharing this much of the smaller one's height are one row...
+TEXT_ROW_GAP = 3.0  # ...and, this many line heights apart or closer, pieces of one line
+
+
+def join_row_pieces(boxes: list[tuple[float, float, float, float]], aspect: float) -> list[tuple[float, float]]:
+    """Text lines (x0, x1) from Vision's boxes (x0, x1, y0, y1; normalized, `aspect` the
+    frame's width/height). Vision reads one line in several pieces now and then: E28's
+    label "2. Nemožnosť prinútiť sa veriť" came back as "2. Nemož" and "nosť prinútiť sa
+    veri", and two lines, one cut mid-word, made it a graphic — a whole short fitted to
+    a 1080x608 strip for a single label."""
+    rows: list[list[float]] = []
+    for x0, x1, y0, y1 in sorted(boxes):
+        for row in rows:
+            overlap = min(y1, row[3]) - max(y0, row[2])
+            height = min(y1 - y0, row[3] - row[2])
+            if overlap >= TEXT_ROW_OVERLAP * height and x0 - row[1] <= TEXT_ROW_GAP * height / aspect:
+                row[1], row[2], row[3] = max(row[1], x1), min(row[2], y0), max(row[3], y1)
+                break
+        else:
+            rows.append([x0, x1, y0, y1])
+    return [(row[0], row[1]) for row in rows]
 
 
 def text_cut_off(lines: list[tuple[float, float]], center: float, crop_w: float) -> tuple[int, int]:
