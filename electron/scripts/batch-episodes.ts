@@ -13,7 +13,7 @@
  *                either subtitle file gets new shorts even if such a folder exists
  * and runs the real app (via the Playwright harness, isolated profile) on the episode's
  * source: transcribe → script correction (the episode's .md, else <work>/texts/E##.md) → proofread → clips →
- * translation → render every clip at 1080×1920 with speaker tracking. Outputs go to:
+ * translation → render the best-scored clips (6 by default) at 1080×1920 with speaker tracking. Outputs go to:
  *   - `SHORTS/LUSK<n>/<title>.mp4` (next free n; never into an existing folder)
  *   - `E##_captions_{sk,en}.srt` (only the missing ones; nothing is overwritten)
  *   - `PROJECT/LUSK/E##_auto.lusk` (the project, to open and tweak in the Studio)
@@ -40,6 +40,7 @@
  *                      (default `E##_auto.lusk`) into a new LUSK<n> folder, applying the
  *                      current clip-boundary rules to clips nobody trimmed; remembered in
  *                      state.json until done
+ *   --shorts <n>       shorts per episode: the n clips with the highest virality score (default 6)
  *   --min-free-gb <n>  stop when free space drops below source size + n GB (default 6)
  *   --no-evict         keep downloaded sources on disk
  *   --dry-run          print the plan only
@@ -71,6 +72,7 @@ const ONLY = opt("only")?.split(",").map((s) => s.trim().toUpperCase());
 const FROM = opt("from")?.toUpperCase();
 const OVERRIDES: Record<string, string> = opt("overrides") ? JSON.parse(readFileSync(opt("overrides")!, "utf-8")) : {};
 const MIN_FREE_GB = Number(opt("min-free-gb") ?? 6);
+const SHORTS_PER_EPISODE = Number(opt("shorts") ?? 6);
 const EVICT = !flag("no-evict");
 const DRY = flag("dry-run");
 
@@ -400,11 +402,21 @@ async function runEpisode(ep: Episode) {
       await lusk.api(`/api/projects/${projectId}/clips`, { method: "PUT", headers: json, body: JSON.stringify({ clips }) });
     }
     if (plan.needShorts) {
-      const done = clips.filter((c, i) => existsSync(path.join(stage, `${String(i).padStart(2, "0")} ${safeName(c.title)}.mp4`))).length;
-      log(`  ${ep.code} rendering ${clips.length} shorts${done ? ` (${done} already done)` : ""}`);
-      if (done < clips.length) await warmSource(sourcePath);
-      for (const [i, clip] of clips.entries()) {
-        const staged = path.join(stage, `${String(i).padStart(2, "0")} ${safeName(clip.title)}.mp4`);
+      // Only the best-scored clips, rendered in episode order; a short staged by an earlier
+      // run that didn't make the cut (or a larger --shorts) is left out of the upload
+      const stagedName = (i: number) => `${String(i).padStart(2, "0")} ${safeName(clips[i].title)}.mp4`;
+      const picked = clips.map((_, i) => i)
+        .sort((a, b) => (clips[b].viralityScore ?? -1) - (clips[a].viralityScore ?? -1))
+        .slice(0, SHORTS_PER_EPISODE)
+        .sort((a, b) => a - b);
+      const keep = new Set(picked.map(stagedName));
+      for (const f of readdirSync(stage).filter((f) => f.endsWith(".mp4") && !keep.has(f))) rmSync(path.join(stage, f));
+      const done = picked.filter((i) => existsSync(path.join(stage, stagedName(i)))).length;
+      log(`  ${ep.code} rendering the best ${picked.length} of ${clips.length} clips${done ? ` (${done} already done)` : ""}`);
+      if (done < picked.length) await warmSource(sourcePath);
+      for (const [n, i] of picked.entries()) {
+        const clip = clips[i];
+        const staged = path.join(stage, stagedName(i));
         if (existsSync(staged)) continue;
         const key = getClipRenderKey(clip); // names the server's output file
         for (let attempt = 1; ; attempt++) {
@@ -428,7 +440,7 @@ async function runEpisode(ep: Episode) {
           await warmSource(sourcePath);
         }
         copyAtomic(path.join(profile, "lusk_temp", projectId!, `output_${key}.mp4`), staged);
-        log(`  ${ep.code} short ${i + 1}/${clips.length} (${clip.viralityScore ?? "-"}) ${clip.title}`);
+        log(`  ${ep.code} short ${n + 1}/${picked.length} (${clip.viralityScore ?? "-"}) ${clip.title}`);
       }
     }
     finished = true;
