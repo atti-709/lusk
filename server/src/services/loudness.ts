@@ -14,8 +14,12 @@ const execFileAsync = promisify(execFile);
 export const TARGET_LUFS = -14;
 /** True-peak ceiling, so the AAC encode and the platforms' own processing don't clip. */
 export const TARGET_TRUE_PEAK = -1.5;
-/** The ceiling as a linear sample limit for the final limiter, a little under it for the encode. */
-const PEAK_LIMIT = (10 ** ((TARGET_TRUE_PEAK - 0.5) / 20)).toFixed(3);
+/**
+ * The final limiter's linear ceiling: under the target, since the AAC encode overshoots
+ * the limited signal by up to a dB (E10's quiet mix came out at -0.7 dBTP limited at -2).
+ * The show's own shorts peak at -3 dBFS too.
+ */
+const PEAK_LIMIT = (10 ** ((TARGET_TRUE_PEAK - 1.5) / 20)).toFixed(3);
 /** Within this of the target (and under the ceiling) a short is left as it is. */
 const TOLERANCE_LU = 0.5;
 
@@ -69,8 +73,10 @@ export async function normalizeLoudness(input: string, output: string, signal?: 
   await execFileAsync(ffmpeg, [
     "-hide_banner", "-nostats", "-y", "-i", input,
     "-map", "0", "-c:v", "copy",
-    // loudnorm's dynamic fallback (a quiet mix with loud peaks) can still overshoot by a dB
-    "-af", `${filter(measured)},aresample=48000,alimiter=limit=${PEAK_LIMIT}:level=disabled`,
+    // loudnorm's dynamic fallback (a quiet mix with loud peaks) can still overshoot by a dB;
+    // the limiter runs at loudnorm's 4x-oversampled rate, so it catches the peaks between samples
+    // (ffmpeg 6, which the app bundles, needs the layout spelled out for the limiter)
+    "-af", `${filter(measured)},aformat=channel_layouts=stereo,alimiter=limit=${PEAK_LIMIT}:level=disabled,aresample=48000`,
     "-c:a", "aac", "-b:a", "256k",
     "-movflags", "+faststart",
     output,
