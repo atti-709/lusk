@@ -113,7 +113,10 @@ async function runRender(
       sourceAspectRatio,
       cancelSignal,
       framing?.keyframes ?? null,
-      framing?.fit ?? null
+      framing?.fit ?? null,
+      session.videoWidth != null && session.videoHeight != null
+        ? { width: session.videoWidth, height: session.videoHeight }
+        : null
     );
 
     const outputUrl = `/static/${sessionId}/${outputFileName}?t=${Date.now()}`;

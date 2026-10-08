@@ -73,6 +73,7 @@
 * **Bundling:** `@remotion/bundler` bundles `client/src/remotion/index.ts` once (cached in memory after first render). The `publicDir` is set to `client/public/` so static assets (outro, etc.) are included.
 * **Rendering:** `renderMedia()` with `selectComposition()` to set per-clip duration and inputProps. Output goes to `output_{key}.mp4.partial.mp4` and is renamed on success, so a cancelled render never leaves a truncated file.
 * **Frame source:** `OffthreadVideo`. `@remotion/media`'s `<Video>` (WebCodecs) was measured on a 25 s E67 clip and rendered no faster (~19 s either way): the source is already cut into a short local H.264 segment first (`cutSourceSegment`), which removes the per-frame extraction cost `<Video>` would save.
+* **Source strip:** frame extraction from the source dominates render time (a 4K master: ~50 s per 25 s clip whatever the `concurrency` — 4 to 12 measured the same). A landscape segment is cut down to the strip the crop can show over the clip (`services/sourceStrip.ts`: the clamped crop centers ± half the window) and the composition places it back inside the full-frame box (`sourceStrip` prop) — identical picture, 2-2.7× faster. Not applied with `fit` ranges (the whole frame is shown) or when the strip would be ≥90% of the width.
 * **Hardware Acceleration:** `hardwareAcceleration: 'if-possible'`, `videoBitrate: '6000k'`, codec `h264`. On Apple Silicon this uses VideoToolbox automatically.
 * **Delivery:** Server renders to `.lusk_temp/{sessionId}/output_{startMs}-{endMs}.mp4` and sets the download URL via orchestrator.
 

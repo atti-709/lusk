@@ -24,6 +24,7 @@ function ClipVideo({
   offsetX,
   sourceAspectRatio,
   fit,
+  sourceStrip,
 }: {
   src: string;
   startFromInFrames: number;
@@ -31,6 +32,7 @@ function ClipVideo({
   sourceAspectRatio?: number | null;
   /** Show the whole landscape frame, fitted to the width, instead of the 9:16 crop. */
   fit?: boolean;
+  sourceStrip?: SourceStrip | null;
 }) {
   const isPortrait = sourceAspectRatio != null && sourceAspectRatio < 1;
   const landscapeWidthPct =
@@ -67,6 +69,28 @@ function ClipVideo({
 
   // Negative-from trick: shifts the video so playback begins at startFromInFrames.
   // muted=true: audio is rendered separately via <Audio> so we can fade it out at the clip end.
+  if (sourceStrip && !isPortrait && !fit) {
+    // The video holds only a strip of the source: the full-frame box is laid out as
+    // before and the strip sits at its own place inside it
+    return (
+      <Sequence from={-startFromInFrames}>
+        <div style={videoStyle}>
+          <OffthreadVideo
+            src={src}
+            muted
+            style={{
+              position: "absolute",
+              top: 0,
+              height: "100%",
+              left: `${sourceStrip.x * 100}%`,
+              width: `${sourceStrip.w * 100}%`,
+              objectFit: "fill",
+            }}
+          />
+        </div>
+      </Sequence>
+    );
+  }
   return (
     <Sequence from={-startFromInFrames}>
       <OffthreadVideo src={src} muted style={videoStyle} />
@@ -143,7 +167,15 @@ export type VideoCompositionProps = {
   framing?: FramingKeyframe[] | null;
   /** Graphic stretches (seconds from the clip start) to show whole instead of cropped. */
   fitRanges?: [number, number][] | null;
+  /**
+   * The video holds only this horizontal strip of the source (renders cut it to what the
+   * crop can show — far fewer pixels to extract per frame). Never set with `fitRanges`.
+   */
+  sourceStrip?: SourceStrip | null;
 };
+
+/** A horizontal strip of the source, as fractions of its width. */
+export type SourceStrip = { x: number; w: number };
 
 export function VideoComposition({
   videoUrl,
@@ -157,6 +189,7 @@ export function VideoComposition({
   captionStyles,
   framing,
   fitRanges,
+  sourceStrip,
 }: VideoCompositionProps) {
   const { durationInFrames, fps } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -207,6 +240,7 @@ export function VideoComposition({
               startFromInFrames={startFrom}
               offsetX={cropOffsetX}
               sourceAspectRatio={sourceAspectRatio}
+              sourceStrip={sourceStrip}
             />
           )}
         </AbsoluteFill>

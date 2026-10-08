@@ -11,6 +11,7 @@ import { renderMedia, selectComposition } from "@remotion/renderer";
 import type { CaptionWord, FramingKeyframe } from "@lusk/shared";
 import { getClipRange } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
+import { sourceStripFor, type SourceStrip } from "./sourceStrip.js";
 
 /**
  * Computes the frame layout for a single clip range using the render's rounding rule.
@@ -91,13 +92,15 @@ const SEGMENT_CUT_TIMEOUT_MS = 10 * 60_000;
  * ffmpeg seeks with range reads, so only the clip's bytes are fetched.
  *
  * Input-side `-ss` with a re-encode is frame-accurate: segment time t matches source time startSec + t.
+ * With a `strip`, only the part of the width the crop can show is kept (`sourceStrip.ts`).
  */
 async function cutSourceSegment(
   inputPath: string,
   outputPath: string,
   startSec: number,
   durationSec: number,
-  cancelSignal?: CancelSignal
+  cancelSignal?: CancelSignal,
+  strip?: SourceStrip | null
 ): Promise<void> {
   const controller = new AbortController();
   cancelSignal?.(() => controller.abort());
@@ -113,6 +116,7 @@ async function cutSourceSegment(
         "-t", durationSec.toFixed(6),
         "-map", "0:v:0",
         "-map", "0:a:0?",
+        ...(strip ? ["-vf", `crop=${strip.px.w}:ih:${strip.px.x}:0`] : []),
         "-c:v", "libx264",
         "-preset", "ultrafast",
         "-crf", "14",
@@ -288,7 +292,8 @@ class RenderService {
     sourceAspectRatio?: number | null,
     cancelSignal?: CancelSignal,
     framing?: FramingKeyframe[] | null,
-    fitRanges?: [number, number][] | null
+    fitRanges?: [number, number][] | null,
+    sourceSize?: { width: number; height: number } | null
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress, outroConfig != null);
     const segmentFileName = `source_${outputFileName}`;
@@ -321,13 +326,18 @@ class RenderService {
       : 0;
     const overlap = hasOutro ? outroOverlapFrames : 0;
 
+    const strip = sourceSize
+      ? sourceStripFor(sourceSize.width, sourceSize.height, framing, offsetX, fitRanges)
+      : null;
+
     onProgress?.(20, "Reading source video...");
     await cutSourceSegment(
       path.join(sessionDir, "input.mp4"),
       segmentPath,
       snappedStartMs / 1000,
       clipDurationInFrames / fps + SEGMENT_TAIL_PAD_SEC,
-      cancelSignal
+      cancelSignal,
+      strip
     );
 
     try {
@@ -344,6 +354,7 @@ class RenderService {
         captionStyles: captionStyles ?? undefined,
         framing: framing ?? null,
         fitRanges: fitRanges ?? null,
+        sourceStrip: strip ? { x: strip.x, w: strip.w } : null,
       };
 
       const totalDurationInFrames =
