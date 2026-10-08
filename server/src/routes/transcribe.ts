@@ -5,7 +5,7 @@ import { tempManager } from "../services/TempManager.js";
 import { geminiService, wordsToTsv, msToTimestamp } from "../services/GeminiService.js";
 import { settingsService } from "../services/SettingsService.js";
 import { parseTsv, wordsToCaptions, groupCaptionBlocks, geminiClipsToViralClips } from "./align.js";
-import type { TranscribeRequest, ErrorResponse, ViralClip, TranscriptWord } from "@lusk/shared";
+import type { TranscribeRequest, ErrorResponse, ViralClip, TranscriptWord, TranslatedBlock } from "@lusk/shared";
 
 type Logger = Pick<FastifyInstance["log"], "error">;
 
@@ -104,37 +104,11 @@ export async function runGeminiAutomation(
     orchestrator.setViralClips(sessionId, clips);
 
     // 4. Translate captions to English (if source language is not English)
-    const lang = await settingsService.getTranscriptionLanguage();
-    if (lang !== "en") {
-      const currentSession = orchestrator.getSession(sessionId);
-      const captions = currentSession?.captions;
-      if (captions && captions.length > 0) {
-        try {
-          const blocks = groupCaptionBlocks(captions, lang);
-          const blockTexts = blocks.map(group => ({
-            text: group.map(w => w.text.trim()).join(" "),
-            startMs: group[0].startMs,
-            endMs: group[group.length - 1].endMs,
-          }));
-
-          const translated = await geminiService.translateCaptions(
-            blockTexts,
-            lang,
-            sessionId,
-            (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
-            signal,
-          );
-
-          const translatedBlocks = blockTexts.map((b, i) => ({
-            text: translated[i],
-            startMs: b.startMs,
-            endMs: b.endMs,
-          }));
-          orchestrator.setTranslatedCaptions(sessionId, translatedBlocks);
-        } catch (err: any) {
-          console.warn("[runGeminiAutomation] Translation failed, continuing without:", err?.message);
-        }
-      }
+    try {
+      await translateCaptions(sessionId, signal);
+    } catch (err: any) {
+      if (signal?.aborted) throw err;
+      console.warn("[runGeminiAutomation] Translation failed, continuing without:", err?.message);
     }
 
     // Transition to READY
@@ -150,6 +124,37 @@ export async function runGeminiAutomation(
         : "Gemini failed — use manual workflow below";
     orchestrator.updateProgress(sessionId, 100, reason);
   }
+}
+
+/**
+ * Translate the session's captions to English, caption block by caption block, into
+ * `translatedCaptions` (the English SRT). Nothing to do for an English transcript.
+ */
+async function translateCaptions(sessionId: string, signal?: AbortSignal): Promise<void> {
+  const lang = await settingsService.getTranscriptionLanguage();
+  const captions = orchestrator.getSession(sessionId)?.captions;
+  if (lang === "en" || !captions || captions.length === 0) return;
+
+  const blockTexts = groupCaptionBlocks(captions, lang).map((group) => ({
+    text: group.map((w) => w.text.trim()).join(" "),
+    startMs: group[0].startMs,
+    endMs: group[group.length - 1].endMs,
+  }));
+  const translated = await geminiService.translateCaptions(
+    blockTexts,
+    lang,
+    sessionId,
+    (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
+    signal,
+  );
+  // A line Gemini merged into the one before is covered by that line's text
+  const blocks: TranslatedBlock[] = [];
+  blockTexts.forEach((b, i) => {
+    const prev = blocks.at(-1);
+    if (translated[i]) blocks.push({ text: translated[i], startMs: b.startMs, endMs: b.endMs });
+    else if (prev) prev.endMs = b.endMs;
+  });
+  orchestrator.setTranslatedCaptions(sessionId, blocks);
 }
 
 /**
@@ -318,6 +323,30 @@ export async function transcribeRoute(app: FastifyInstance) {
       // Fire-and-forget — errors are reported to the user via progress events
       runTranscription(sessionId, app.log).catch(() => {});
 
+      return { success: true as const };
+    }
+  );
+
+  // Translate a ready project's captions to English again — a run whose translation
+  // failed (the rest of it is kept) gets its English SRT without redoing anything else
+  app.post<{ Params: { projectId: string }; Reply: { success: true } | ErrorResponse }>(
+    "/api/projects/:projectId/translate",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+      if (session.state !== "READY") {
+        return reply.status(409).send({ success: false, error: `Cannot translate in state: ${session.state}` });
+      }
+      try {
+        await translateCaptions(projectId);
+      } catch (err: any) {
+        return reply.status(502).send({ success: false, error: err?.message ?? "Translation failed" });
+      } finally {
+        orchestrator.updateProgress(projectId, 100, "Ready to review");
+      }
       return { success: true as const };
     }
   );

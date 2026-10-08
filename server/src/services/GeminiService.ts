@@ -210,6 +210,60 @@ function isRetryableError(err: unknown): boolean {
   return false;
 }
 
+/** Caption blocks per translation request. */
+const TRANSLATION_CHUNK = 200;
+const SENTENCE_END = /[.?!…]["'“”»]?$/;
+
+/**
+ * Split caption blocks into translation requests of at most `size`, each ending with a
+ * sentence when one ends in its second half. A request cut mid-sentence came back short:
+ * Gemini finished the sentence by merging its last lines, on every retry (E09).
+ */
+export function translationChunks(texts: string[], size: number): { start: number; end: number }[] {
+  const chunks: { start: number; end: number }[] = [];
+  for (let start = 0; start < texts.length; ) {
+    let end = Math.min(start + size, texts.length);
+    if (end < texts.length) {
+      for (let e = end; e > start + size / 2; e--) {
+        if (SENTENCE_END.test(texts[e - 1].trim())) { end = e; break; }
+      }
+    }
+    chunks.push({ start, end });
+    start = end;
+  }
+  return chunks;
+}
+
+/**
+ * Lines a translation may leave out once every retry did. English word order often pulls
+ * a short Slovak line into its neighbour ("…on God's existence / are counted as atheists"
+ * came back as one line on every try, E09); that neighbour then covers both lines' time.
+ */
+export function maxMergedLines(count: number): number {
+  return Math.max(2, Math.floor(count / 50));
+}
+
+/**
+ * Gemini's numbered lines ("N. text", numbered from `first`) by their number; a line
+ * without a number continues the one before. Lines it left out are empty strings.
+ */
+export function parseNumberedLines(text: string, first: number, count: number): string[] {
+  const out: string[] = new Array(count).fill("");
+  let at = -1;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = /^(\d+)\.\s*(.*)$/.exec(line);
+    if (m) {
+      at = Number(m[1]) - first;
+      if (at >= 0 && at < count) out[at] = m[2].trim();
+    } else if (at >= 0 && at < count) {
+      out[at] = `${out[at]} ${line}`.trim();
+    }
+  }
+  return out;
+}
+
 function isRowMismatchError(err: unknown): boolean {
   return err instanceof Error && err.message.includes("row mismatch");
 }
@@ -626,11 +680,7 @@ class GeminiService {
 
     // Format as numbered lines for easy parsing
     const numberedLines = blocks.map((b, i) => `${i + 1}. ${b.text}`);
-    const TRANSLATION_CHUNK = 200;
-    const chunks: { start: number; end: number }[] = [];
-    for (let i = 0; i < numberedLines.length; i += TRANSLATION_CHUNK) {
-      chunks.push({ start: i, end: Math.min(i + TRANSLATION_CHUNK, numberedLines.length) });
-    }
+    const chunks = translationChunks(blocks.map((b) => b.text), TRANSLATION_CHUNK);
 
     const translated: string[] = new Array(blocks.length).fill("");
 
@@ -668,6 +718,9 @@ class GeminiService {
         `REMINDER: You MUST return exactly ${expectedCount} numbered lines.`,
       ].join("\n");
 
+      // The answer missing the fewest lines; a few missing ones are accepted after the last retry
+      let best: string[] | null = null;
+      const missingIn = (lines: string[]) => lines.filter((l) => !l).length;
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         if (signal?.aborted) throw new Error("Cancelled");
 
@@ -681,16 +734,17 @@ class GeminiService {
             },
           });
 
-          const text = response.text ?? "";
-          // Parse numbered lines: "1. text" → "text"
-          const resultLines = text.trim().split("\n")
-            .map(l => l.replace(/^\d+\.\s*/, "").trim())
-            .filter(l => l.length > 0);
-
-          if (resultLines.length !== expectedCount) {
-            throw new Error(
-              `Translation row mismatch: expected ${expectedCount}, got ${resultLines.length}`,
-            );
+          let resultLines = parseNumberedLines(response.text ?? "", chunk.start + 1, expectedCount);
+          if (!best || missingIn(resultLines) < missingIn(best)) best = resultLines;
+          const missing = missingIn(resultLines);
+          if (missing > 0) {
+            if (attempt < MAX_RETRIES || missingIn(best) > maxMergedLines(expectedCount)) {
+              throw new Error(
+                `Translation row mismatch: expected ${expectedCount}, ${missing} missing`,
+              );
+            }
+            console.warn(`[GeminiService] Translation chunk ${ci}: ${missingIn(best)} line(s) merged into their neighbours, kept`);
+            resultLines = best;
           }
 
           // Cache and store

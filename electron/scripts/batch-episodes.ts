@@ -361,11 +361,12 @@ async function runEpisode(ep: Episode) {
     } else {
       ({ projectId } = await lusk.api<any>("/api/projects/create", { method: "POST", headers: json, body: JSON.stringify({ projectPath }) }));
     }
+    let s = await lusk.api<any>(`/api/projects/${projectId}`);
+    // Transcription and renders read the source; subtitles for a ready project don't
     const downloadStart = Date.now();
-    if (await stageSource(sourcePath, path.join(profile, "lusk_temp", projectId!)) === "staged") {
+    if ((s.state !== "READY" || plan.needShorts) && await stageSource(sourcePath, path.join(profile, "lusk_temp", projectId!)) === "staged") {
       log(`  ${ep.code} downloaded the source (${(statSync(sourcePath).size / 1e9).toFixed(1)} GB) in ${Math.round((Date.now() - downloadStart) / 60_000)} min`);
     }
-    let s = await lusk.api<any>(`/api/projects/${projectId}`);
     // A new project — or one an interruption left before its video/script were set
     if (s.state === "IDLE") {
       await lusk.api(`/api/projects/${projectId}/select-video`, { method: "POST", headers: json, body: JSON.stringify({ videoPath: sourcePath }) });
@@ -406,8 +407,18 @@ async function runEpisode(ep: Episode) {
     // Subtitles (full episode) — the English translation only exists right after a run
     for (const lang of ["sk", "en"] as const) {
       if (lang === "sk" ? !plan.needSk : !plan.needEn) continue;
-      const res = await fetch(`${lusk.baseUrl}/api/projects/${projectId}/captions${lang === "en" ? "-en" : ""}.srt`);
-      if (!res.ok) { log(`  ${ep.code} ${lang} subtitles unavailable (${res.status})`); continue; }
+      const url = `${lusk.baseUrl}/api/projects/${projectId}/captions${lang === "en" ? "-en" : ""}.srt`;
+      let res = await fetch(url);
+      if (!res.ok && lang === "en") {
+        // The run's translation failed (it carries on without one) — translate again
+        log(`  ${ep.code} en subtitles unavailable (${res.status}) — translating again`);
+        const tr = await fetch(`${lusk.baseUrl}/api/projects/${projectId}/translate`, { method: "POST" });
+        if (!tr.ok) throw new Error(`english translation failed: ${(await tr.json().catch(() => ({}))).error ?? tr.status}`);
+        res = await fetch(url);
+      }
+      // Failing the episode keeps its plan, so the next run resumes it; finished without the
+      // file, the next run would see an episode missing subtitles and render it again
+      if (!res.ok) throw new Error(`${lang} subtitles unavailable (${res.status})`);
       const srt = await res.text();
       writeFileSync(path.join(stage, `${ep.code}_captions_${lang}.srt`), lang === "en" ? endCuesAtSpeech(srt, s.transcript?.words ?? []) : srt);
     }
