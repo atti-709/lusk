@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { getClientPublicDir } from "../config/paths.js";
+import { MATCH_SOURCE_FPS } from "@lusk/shared";
 
 export type TranscriptionLanguage = "sk" | "cs" | "en";
 
@@ -106,9 +107,10 @@ class SettingsService {
     return readFile(promptPath, "utf-8");
   }
 
+  /** The FPS setting: a fixed rate, or MATCH_SOURCE_FPS (the default) — see resolveFps. */
   async getFps(): Promise<number> {
     const settings = await this.load();
-    return settings.fps ?? 23.976;
+    return settings.fps ?? MATCH_SOURCE_FPS;
   }
 
   async getOutroOverlapFrames(): Promise<number> {

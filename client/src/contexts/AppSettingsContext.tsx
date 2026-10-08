@@ -1,9 +1,12 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import type { CaptionStyles } from "@lusk/shared";
-import { DEFAULT_CAPTION_STYLES } from "@lusk/shared";
+import { DEFAULT_CAPTION_STYLES, MATCH_SOURCE_FPS, resolveFps } from "@lusk/shared";
 
 interface AppSettingsCtx {
+  /** Frame rate for preview and render: the FPS setting resolved against the open project's source. */
   fps: number;
+  /** The open project's source frame rate (null: none open, or not probed). */
+  setSourceFps: (fps: number | null) => void;
   outroOverlapFrames: number;
   outroSet: boolean;
   outroEnabled: boolean;
@@ -15,7 +18,8 @@ interface AppSettingsCtx {
 }
 
 const AppSettingsContext = createContext<AppSettingsCtx>({
-  fps: 23.976,
+  fps: resolveFps(MATCH_SOURCE_FPS, null),
+  setSourceFps: () => {},
   outroOverlapFrames: 4,
   outroSet: false,
   outroEnabled: true,
@@ -27,7 +31,9 @@ const AppSettingsContext = createContext<AppSettingsCtx>({
 });
 
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
-  const [fps, setFps] = useState(23.976);
+  const [fpsSetting, setFpsSetting] = useState(MATCH_SOURCE_FPS);
+  const [sourceFps, setSourceFps] = useState<number | null>(null);
+  const fps = resolveFps(fpsSetting, sourceFps);
   const [outroOverlapFrames, setOutroOverlapFrames] = useState(4);
   const [outroSet, setOutroSet] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -38,7 +44,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     fetch("/api/settings")
       .then((r) => r.json())
       .then((data) => {
-        setFps(data.fps ?? 23.976);
+        setFpsSetting(data.fps ?? MATCH_SOURCE_FPS);
         setOutroOverlapFrames(data.outroOverlapFrames ?? 4);
         setOutroSet(data.outroSet ?? false);
         setOutroEnabledState(data.outroEnabled ?? true);
@@ -72,7 +78,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AppSettingsContext.Provider value={{ fps, outroOverlapFrames, outroSet, outroEnabled, loading, captionStyles, reload: load, updateCaptionStyles, setOutroEnabled }}>
+    <AppSettingsContext.Provider value={{ fps, setSourceFps, outroOverlapFrames, outroSet, outroEnabled, loading, captionStyles, reload: load, updateCaptionStyles, setOutroEnabled }}>
       {children}
     </AppSettingsContext.Provider>
   );

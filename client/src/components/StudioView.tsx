@@ -232,7 +232,7 @@ export function StudioView({
   }, [renderState?.status, outputUrl, pendingSaveDestination, suggestedFilename]);
 
   const outroActive = outroEnabled && outroConfig != null;
-  const outroDurationInFrames = outroActive ? outroConfig.outroDurationInFrames : 0;
+  const outroDurationInFrames = outroActive ? Math.ceil(outroConfig.outroDurationSec * fps) : 0;
   const outroOverlap = outroActive ? outroConfig.outroOverlapFrames : 4;
   const overlap = outroDurationInFrames > 0 ? outroOverlap : 0;
   const durationInFrames = clipDurationInFrames + outroDurationInFrames - overlap;

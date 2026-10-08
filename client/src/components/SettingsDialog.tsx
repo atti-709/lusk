@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAppSettings } from "../contexts/AppSettingsContext";
+import { MATCH_SOURCE_FPS } from "@lusk/shared";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -14,6 +15,7 @@ const LANGUAGES = [
 ] as const;
 
 const FPS_OPTIONS = [
+  { value: MATCH_SOURCE_FPS, label: "Match source" },
   { value: 23.976, label: "23.976 (Film)" },
   { value: 24, label: "24" },
   { value: 25, label: "25 (PAL)" },
@@ -37,7 +39,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
   const [apiKey, setApiKey] = useState("");
   const [isSet, setIsSet] = useState(false);
   const [language, setLanguage] = useState("sk");
-  const [fpsValue, setFpsValue] = useState(23.976);
+  const [fpsValue, setFpsValue] = useState(MATCH_SOURCE_FPS);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -64,7 +66,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
         setIsSet(settings.geminiApiKeySet);
         if (settings.geminiApiKeySet) setApiKey("");
         if (settings.transcriptionLanguage) setLanguage(settings.transcriptionLanguage);
-        setFpsValue(settings.fps ?? 23.976);
+        setFpsValue(settings.fps ?? MATCH_SOURCE_FPS);
         setPrompts({
           correctionPrompt: settings.correctionPrompt ?? null,
           viralClipsPrompt: settings.viralClipsPrompt ?? null,
@@ -160,7 +162,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
             ))}
           </select>
           <p className="settings-hint">
-            Frame rate used for rendering and preview
+            Frame rate used for rendering and preview — "Match source" keeps the video's own, so no frame is dropped
           </p>
         </div>
 

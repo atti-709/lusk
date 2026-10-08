@@ -9,7 +9,7 @@ import { bundle } from "@remotion/bundler";
 import type { CancelSignal } from "@remotion/renderer";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import type { CaptionWord, FramingKeyframe } from "@lusk/shared";
-import { getClipRange } from "@lusk/shared";
+import { getClipRange, resolveFps } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
 import { sourceStripFor, type SourceStrip } from "./sourceStrip.js";
 
@@ -150,7 +150,8 @@ type ProgressCallback = (percent: number, message: string) => void;
 
 export interface OutroConfig {
   outroSrc: string;
-  outroDurationInFrames: number;
+  /** Seconds — in frames it depends on the clip's frame rate. */
+  outroDurationSec: number;
 }
 
 class RenderService {
@@ -225,11 +226,9 @@ class RenderService {
     const outroDuration = await this.probeDuration(outroPath);
     if (outroDuration <= 0) return null;
 
-    const fps = await settingsService.getFps();
-
     return {
       outroSrc: `${LUSK_SERVER_ORIGIN}${urlPrefix}outro.mp4`,
-      outroDurationInFrames: Math.ceil(outroDuration * fps),
+      outroDurationSec: outroDuration,
     };
   }
 
@@ -293,7 +292,7 @@ class RenderService {
     cancelSignal?: CancelSignal,
     framing?: FramingKeyframe[] | null,
     fitRanges?: [number, number][] | null,
-    sourceSize?: { width: number; height: number } | null
+    source?: { width: number | null; height: number | null; fps: number | null } | null
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress, outroConfig != null);
     const segmentFileName = `source_${outputFileName}`;
@@ -304,7 +303,7 @@ class RenderService {
     // failed render must not leave a truncated file — or clobber an earlier good export
     const partialPath = `${outputPath}.partial.mp4`;
 
-    const fps = await settingsService.getFps();
+    const fps = resolveFps(await settingsService.getFps(), source?.fps);
     const outroOverlapFrames = await settingsService.getOutroOverlapFrames();
     const captionStyles = await settingsService.getCaptionStyles();
 
@@ -322,12 +321,12 @@ class RenderService {
 
     const hasOutro = outroConfig != null && outroConfig.outroSrc.length > 0;
     const outroDurationInFrames = hasOutro
-      ? outroConfig.outroDurationInFrames
+      ? Math.ceil(outroConfig.outroDurationSec * fps)
       : 0;
     const overlap = hasOutro ? outroOverlapFrames : 0;
 
-    const strip = sourceSize
-      ? sourceStripFor(sourceSize.width, sourceSize.height, framing, offsetX, fitRanges)
+    const strip = source?.width && source.height
+      ? sourceStripFor(source.width, source.height, framing, offsetX, fitRanges)
       : null;
 
     onProgress?.(20, "Reading source video...");
@@ -369,6 +368,8 @@ class RenderService {
       });
 
       composition.durationInFrames = totalDurationInFrames;
+      // The composition is registered at a nominal rate; renders run at the clip's own
+      composition.fps = fps;
 
       onProgress?.(25, "Rendering video...");
 

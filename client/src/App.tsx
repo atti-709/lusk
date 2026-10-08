@@ -28,8 +28,11 @@ type AppView = "loading" | "dashboard" | "session";
 function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("loading");
-  const { fps } = useAppSettings();
+  const { fps, setSourceFps } = useAppSettings();
   const { state } = useSSE(sessionId);
+  // Preview at the open project's source rate (when the FPS setting is "Match source")
+  const sourceFps = sessionId ? state?.videoFps ?? null : null;
+  useEffect(() => setSourceFps(sourceFps), [sourceFps, setSourceFps]);
   const [captions, setCaptions] = useState<CaptionWord[]>([]);
   const [viralClips, setViralClips] = useState<ViralClip[]>([]);
   const [selectedClip, setSelectedClip] = useState<ViralClip | null>(null);

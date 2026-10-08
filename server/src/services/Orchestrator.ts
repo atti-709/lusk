@@ -46,6 +46,7 @@ class Orchestrator extends EventEmitter {
       videoDurationMs,
       videoWidth: null,
       videoHeight: null,
+      videoFps: null,
 
       transcript: null,
       originalTranscript: null,

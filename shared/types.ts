@@ -240,6 +240,7 @@ export interface ProjectData {
   videoDurationMs: number | null;
   videoWidth: number | null;   // source pixel width
   videoHeight: number | null;  // source pixel height
+  videoFps?: number | null;    // source frame rate (absent in projects saved before it was probed)
   state: PipelineState;
   transcript: TranscriptData | null;
   originalTranscript?: TranscriptData | null;
@@ -309,3 +310,17 @@ export interface CreateProjectResponse {
   projectId: string;
 }
 
+
+/** The FPS setting that means "render at the source's own frame rate" (the default). */
+export const MATCH_SOURCE_FPS = 0;
+/** Used when the source's rate couldn't be read. */
+const FALLBACK_FPS = 23.976;
+
+/**
+ * Frame rate for the preview and render. Matching the source matters: a 25 fps master
+ * rendered at 23.976 drops a frame every second, a visible stutter on any movement.
+ */
+export function resolveFps(setting: number | null | undefined, videoFps: number | null | undefined): number {
+  if (setting != null && setting > 0) return setting;
+  return videoFps != null && videoFps > 0 ? videoFps : FALLBACK_FPS;
+}

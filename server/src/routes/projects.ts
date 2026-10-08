@@ -10,7 +10,7 @@ import type {
   ErrorResponse,
 } from "@lusk/shared";
 import { orchestrator } from "../services/Orchestrator.js";
-import { projectFileService } from "../services/ProjectFileService.js";
+import { projectFileService, probeVideoMeta } from "../services/ProjectFileService.js";
 import { tempManager } from "../services/TempManager.js";
 
 // ---------------------------------------------------------------------------
@@ -46,43 +46,6 @@ function probeVideoDurationMs(filePath: string): number | null {
   } catch { /* ignore */ }
 
   return null;
-}
-
-/** Probe video width and height (first video stream). Returns null values on failure. */
-function probeVideoMeta(filePath: string): { width: number | null; height: number | null } {
-  // Try ffprobe first
-  try {
-    const ffprobe = process.env.FFPROBE_PATH ?? "ffprobe";
-    const stdout = execSync(
-      `${JSON.stringify(ffprobe)} -v quiet -print_format json -show_streams -select_streams v:0 ${JSON.stringify(filePath)}`,
-      { encoding: "utf-8", timeout: 15_000 },
-    );
-    const info = JSON.parse(stdout);
-    const stream = info.streams?.[0];
-    const w = stream?.width;
-    const h = stream?.height;
-    if (typeof w === "number" && w > 0 && typeof h === "number" && h > 0) {
-      return { width: w, height: h };
-    }
-  } catch { /* ffprobe not available */ }
-
-  // Fallback: parse dimensions from ffmpeg -i stderr (works with bundled ffmpeg-static)
-  try {
-    const ffmpeg = getFFmpegPath();
-    const stderr = (() => {
-      try { execSync(`${JSON.stringify(ffmpeg)} -i ${JSON.stringify(filePath)}`, { encoding: "utf-8", timeout: 15_000 }); }
-      catch (e: any) { return e.stderr ?? ""; }
-      return "";
-    })();
-    const m = stderr.match(/Stream\s+#.*Video:.*\s(\d{2,5})x(\d{2,5})/);
-    if (m) {
-      const w = parseInt(m[1]);
-      const h = parseInt(m[2]);
-      if (w > 0 && h > 0) return { width: w, height: h };
-    }
-  } catch { /* ignore */ }
-
-  return { width: null, height: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +195,7 @@ export const projectsRoute: FastifyPluginAsync = async (server) => {
       const meta = probeVideoMeta(videoPath);
       session.videoWidth = meta.width;
       session.videoHeight = meta.height;
+      session.videoFps = meta.fps;
       session.state = "UPLOADING";
       session.progress = 100;
       session.message = "Video selected";

@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 
 export interface OutroConfig {
   outroSrc: string;
-  outroDurationInFrames: number;
+  /** Seconds — in frames it depends on the clip's frame rate. */
+  outroDurationSec: number;
   outroOverlapFrames: number;
 }
 

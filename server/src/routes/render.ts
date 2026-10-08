@@ -114,9 +114,7 @@ async function runRender(
       cancelSignal,
       framing?.keyframes ?? null,
       framing?.fit ?? null,
-      session.videoWidth != null && session.videoHeight != null
-        ? { width: session.videoWidth, height: session.videoHeight }
-        : null
+      { width: session.videoWidth, height: session.videoHeight, fps: session.videoFps ?? null }
     );
 
     const outputUrl = `/static/${sessionId}/${outputFileName}?t=${Date.now()}`;
@@ -165,7 +163,7 @@ export async function renderRoute(app: FastifyInstance) {
     const outroOverlapFrames = await settingsService.getOutroOverlapFrames();
     return {
       outroSrc: config?.outroSrc ?? "",
-      outroDurationInFrames: config?.outroDurationInFrames ?? 0,
+      outroDurationSec: config?.outroDurationSec ?? 0,
       outroOverlapFrames,
     };
   });

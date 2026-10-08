@@ -6,9 +6,10 @@ import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import { settingsService, getConfigDir } from "../services/SettingsService.js";
 import { getClientPublicDir } from "../config/paths.js";
+import { MATCH_SOURCE_FPS } from "@lusk/shared";
 import { renderService } from "../services/RenderService.js";
 
-const VALID_FPS = [23.976, 24, 25, 29.97, 30, 50, 59.94, 60];
+const VALID_FPS = [MATCH_SOURCE_FPS, 23.976, 24, 25, 29.97, 30, 50, 59.94, 60];
 
 export const settingsRoute: FastifyPluginAsync = async (server) => {
   await server.register(multipart, {
@@ -31,7 +32,7 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
       correctionPrompt: settings.correctionPrompt ?? null,
       viralClipsPrompt: settings.viralClipsPrompt ?? null,
       viralClipsManualPrompt: settings.viralClipsManualPrompt ?? null,
-      fps: settings.fps ?? 23.976,
+      fps: settings.fps ?? MATCH_SOURCE_FPS,
       outroOverlapFrames: settings.outroOverlapFrames ?? 4,
       outroSet,
       outroEnabled: settings.outroEnabled ?? true,

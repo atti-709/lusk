@@ -81,7 +81,23 @@ function probeVideoDurationMs(filePath: string): number | null {
 }
 
 /** Probe video width and height (first video stream). Returns null values on failure. */
-function probeVideoMeta(filePath: string): { width: number | null; height: number | null } {
+/** Frame rate from an ffprobe rational ("25/1", "30000/1001"); null when absent or implausible. */
+function parseFrameRate(rate: unknown): number | null {
+  if (typeof rate !== "string") return null;
+  const [num, den = "1"] = rate.split("/");
+  const fps = Number(num) / Number(den);
+  // Variable-rate phone footage can report a timebase (90000) as its rate
+  return Number.isFinite(fps) && fps >= 10 && fps <= 120 ? fps : null;
+}
+
+export interface VideoMeta {
+  width: number | null;
+  height: number | null;
+  /** Frames per second — renders match it so no frame is dropped or doubled. */
+  fps: number | null;
+}
+
+export function probeVideoMeta(filePath: string): VideoMeta {
   // Try ffprobe first
   try {
     const ffprobe = process.env.FFPROBE_PATH ?? "ffprobe";
@@ -94,7 +110,7 @@ function probeVideoMeta(filePath: string): { width: number | null; height: numbe
     const w = stream?.width;
     const h = stream?.height;
     if (typeof w === "number" && w > 0 && typeof h === "number" && h > 0) {
-      return { width: w, height: h };
+      return { width: w, height: h, fps: parseFrameRate(stream.avg_frame_rate) ?? parseFrameRate(stream.r_frame_rate) };
     }
   } catch { /* ffprobe not available */ }
 
@@ -111,11 +127,15 @@ function probeVideoMeta(filePath: string): { width: number | null; height: numbe
     if (m) {
       const w = parseInt(m[1]);
       const h = parseInt(m[2]);
-      if (w > 0 && h > 0) return { width: w, height: h };
+      // ", 25 fps," / ", 29.97 fps," — ffmpeg prints the rate rounded, so 29.97 stands for 30000/1001
+      const r = stderr.match(/Stream\s+#.*Video:.*?,\s([\d.]+)\s+fps/);
+      const printed = r ? parseFloat(r[1]) : NaN;
+      const fps = [23.976, 29.97, 59.94].includes(printed) ? (Math.round(printed * 1.001) * 1000) / 1001 : printed;
+      if (w > 0 && h > 0) return { width: w, height: h, fps: parseFrameRate(String(fps)) };
     }
   } catch { /* ignore */ }
 
-  return { width: null, height: null };
+  return { width: null, height: null, fps: null };
 }
 
 /** Generate a small JPEG thumbnail from a video, returned as a base64 data URL. */
@@ -320,7 +340,7 @@ class ProjectFileService {
     const hasVideo = !!videoPath;
     const videoName = hasVideo ? sanitizeVideoName(basename(videoPath)) : "";
     const videoDurationMs = hasVideo ? probeVideoDurationMs(videoPath) : null;
-    const videoMeta = hasVideo ? probeVideoMeta(videoPath) : { width: null, height: null };
+    const videoMeta: VideoMeta = hasVideo ? probeVideoMeta(videoPath) : { width: null, height: null, fps: null };
 
     const data: ProjectData = {
       version: 1,
@@ -332,6 +352,7 @@ class ProjectFileService {
       videoDurationMs,
       videoWidth: videoMeta.width,
       videoHeight: videoMeta.height,
+      videoFps: videoMeta.fps,
       state: hasVideo ? "UPLOADING" : "IDLE",
       transcript: null,
       originalTranscript: null,
@@ -390,6 +411,7 @@ class ProjectFileService {
       const meta = probeVideoMeta(data.videoPath);
       data.videoWidth = data.videoWidth ?? meta.width;
       data.videoHeight = data.videoHeight ?? meta.height;
+      data.videoFps = data.videoFps ?? meta.fps;
     } else {
       // Video is missing – fall back to IDLE so the UI can prompt re-link
       stateOverride = "IDLE";
@@ -445,6 +467,7 @@ class ProjectFileService {
       videoDurationMs: session.videoDurationMs,
       videoWidth: session.videoWidth ?? null,
       videoHeight: session.videoHeight ?? null,
+      videoFps: session.videoFps ?? null,
       state: session.state,
       transcript: session.transcript,
       originalTranscript: session.originalTranscript ?? null,
