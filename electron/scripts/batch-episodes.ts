@@ -19,9 +19,9 @@
  *   - `PROJECT/LUSK/E##_auto.lusk` (the project, to open and tweak in the Studio)
  *
  * Disk: the SSD can't hold every source at once. Episodes run one at a time; a run checks
- * free space first, and after each episode the source's local copy is evicted from the
- * Google Drive cache (it stays in the cloud) along with uploaded outputs of earlier
- * episodes. Renders are staged in the work dir and deleted once copied.
+ * free space first. The source is downloaded once into the session (`stageSource`) and
+ * Drive's own local copy evicted (it stays in the cloud), as are uploaded outputs of
+ * earlier episodes. Renders are staged in the work dir and deleted once copied.
  *
  * Resumable: stop it any time with Ctrl+C (Lusk closes cleanly) and run the same command
  * again. Finished episodes are skipped (their outputs exist); the interrupted one picks up
@@ -48,11 +48,13 @@
 import { launchLusk, type Lusk } from "../e2e/harness";
 import { getClipRenderKey } from "@lusk/shared";
 import { cutAfterClosingWord, leadIn, startAtSentence } from "../../server/src/services/clipBoundaries";
+import { isCopyOf, planPlayable, probeCodecs, stampCopy } from "../../server/src/services/PlayableVideo";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync,
-  createReadStream, renameSync, rmSync, statSync, statfsSync, writeFileSync,
+  createReadStream, createWriteStream, renameSync, rmSync, statSync, statfsSync, writeFileSync,
 } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -252,12 +254,23 @@ function nextLuskFolder(dir: string): string {
 }
 
 /**
- * Read the whole source once so Drive has it on disk again. Drive drops parts of a big
- * file from its cache after transcription has read it, and a render reading a dropped
- * range streams it back — slowly enough that a stall timed out a whole episode (E04).
+ * Download the source once, into the session as its `input.mp4` (stamped as a copy of
+ * the Drive file, which Lusk then keeps instead of linking to Drive). Read through Drive,
+ * a source was dropped from its cache between transcription and rendering and came down
+ * a second time — 8-10 min a 4K episode. Sources Lusk makes a playable copy of (ProRes...)
+ * are read from Drive once by that copy instead.
  */
-async function warmSource(file: string) {
-  for await (const _ of createReadStream(file, { highWaterMark: 8 << 20 }));
+async function stageSource(sourcePath: string, sessionDir: string): Promise<"staged" | "kept" | "skipped"> {
+  const target = path.join(sessionDir, "input.mp4");
+  if (await isCopyOf(sourcePath, target)) return "kept";
+  if (!planPlayable(await probeCodecs(sourcePath)).direct) return "skipped";
+  mkdirSync(sessionDir, { recursive: true });
+  const part = `${target}.part`;
+  await pipeline(createReadStream(sourcePath, { highWaterMark: 8 << 20 }), createWriteStream(part));
+  rmSync(target, { force: true }); // the link to Drive a reopened project made
+  renameSync(part, target);
+  await stampCopy(sourcePath, target);
+  return "staged";
 }
 
 /** Render attempts per short — a Drive stall on the source fails one, not the episode. */
@@ -326,7 +339,8 @@ async function runEpisode(ep: Episode) {
   const profile = path.join(WORK, "profile");
   const sourcePath = path.join(ep.dir, ep.source!);
 
-  const need = statSync(sourcePath).size / 1e9 + MIN_FREE_GB;
+  // Room for the session's copy and, until it is evicted, Drive's
+  const need = 2 * statSync(sourcePath).size / 1e9 + MIN_FREE_GB;
   if (freeGb() < need) {
     pendingEvict = evict(pendingEvict);
     if (freeGb() < need) throw new Error(`only ${freeGb().toFixed(1)} GB free, need ${need.toFixed(1)} GB — free some space and re-run`);
@@ -347,11 +361,18 @@ async function runEpisode(ep: Episode) {
     } else {
       ({ projectId } = await lusk.api<any>("/api/projects/create", { method: "POST", headers: json, body: JSON.stringify({ projectPath }) }));
     }
+    const downloadStart = Date.now();
+    if (await stageSource(sourcePath, path.join(profile, "lusk_temp", projectId!)) === "staged") {
+      log(`  ${ep.code} downloaded the source (${(statSync(sourcePath).size / 1e9).toFixed(1)} GB) in ${Math.round((Date.now() - downloadStart) / 60_000)} min`);
+    }
     let s = await lusk.api<any>(`/api/projects/${projectId}`);
     // A new project — or one an interruption left before its video/script were set
     if (s.state === "IDLE") {
       await lusk.api(`/api/projects/${projectId}/select-video`, { method: "POST", headers: json, body: JSON.stringify({ videoPath: sourcePath }) });
     }
+    // Lusk reads the session's copy from here on
+    pendingEvict = evict([...pendingEvict, sourcePath]);
+    saveState();
     // A text exported after the run started still counts
     const text = path.join(TEXTS, `${ep.code}.md`);
     if (!ep.script && existsSync(text)) { ep.script = text; log(`  ${ep.code} script: ${ep.code}.md`); }
@@ -413,7 +434,6 @@ async function runEpisode(ep: Episode) {
       for (const f of readdirSync(stage).filter((f) => f.endsWith(".mp4") && !keep.has(f))) rmSync(path.join(stage, f));
       const done = picked.filter((i) => existsSync(path.join(stage, stagedName(i)))).length;
       log(`  ${ep.code} rendering the best ${picked.length} of ${clips.length} clips${done ? ` (${done} already done)` : ""}`);
-      if (done < picked.length) await warmSource(sourcePath);
       for (const [n, i] of picked.entries()) {
         const clip = clips[i];
         const staged = path.join(stage, stagedName(i));
@@ -436,8 +456,7 @@ async function runEpisode(ep: Episode) {
           }
           if (!error) break;
           if (attempt === RENDER_ATTEMPTS || !/Timed out reading/.test(error)) throw new Error(`render "${clip.title}": ${error}`);
-          log(`  ${ep.code} ${error} — reading the source again, then retrying`);
-          await warmSource(sourcePath);
+          log(`  ${ep.code} ${error} — retrying`);
         }
         copyAtomic(path.join(profile, "lusk_temp", projectId!, `output_${key}.mp4`), staged);
         log(`  ${ep.code} short ${n + 1}/${picked.length} (${clip.viralityScore ?? "-"}) ${clip.title}`);

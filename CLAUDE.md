@@ -89,6 +89,7 @@
 ### **6c. Source Playability**
 
 * Electron's Chromium plays delivery codecs in any common container (H.264 in `.mkv`, PCM in `.mov`). Editing codecs (ProRes, DNxHD) are not decodable — `PlayableVideo.ts` makes `input.mp4` an H.264 copy (VideoToolbox) for those instead of a symlink, stamped by source size/mtime so it's made once.
+* A plain local copy of the source with a matching stamp (`isCopyOf`) is kept as `input.mp4` too. The episode batch downloads each Drive source once that way: read through the Drive symlink, Drive dropped the file from its cache between transcription and rendering and it was downloaded a second time (8-10 min per 4K episode).
 
 ### **7. Outro (Client + Server)**
 

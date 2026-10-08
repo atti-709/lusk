@@ -24,7 +24,7 @@ import type {
   PipelineState,
 } from "@lusk/shared";
 import { tempManager } from "./TempManager.js";
-import { makePlayableCopy, planPlayable, probeCodecs } from "./PlayableVideo.js";
+import { isCopyOf, makePlayableCopy, planPlayable, probeCodecs } from "./PlayableVideo.js";
 
 const MAX_RECENT = 20;
 
@@ -265,6 +265,10 @@ async function setupCache(
     await makePlayableCopy(videoPath, linkPath, plan, codecs!.durationSec, onProgress);
     return cacheDir;
   }
+
+  // A local copy of this source placed here (the episode batch downloads a Drive source
+  // once, so Drive dropping it from its cache can't make the renders stream it again)
+  if (await isCopyOf(videoPath, linkPath)) return cacheDir;
 
   // Check if symlink already exists and points to the right target
   try {

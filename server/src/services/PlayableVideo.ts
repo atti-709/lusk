@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { getFFmpegPath } from "../config/ffmpeg.js";
 
 const execFileAsync = promisify(execFile);
@@ -76,6 +76,24 @@ interface CopyStamp {
   mtimeMs: number;
 }
 
+/** Whether `target` is a file made from this exact `source` (its `.source.json` stamp matches). */
+export async function isCopyOf(source: string, target: string): Promise<boolean> {
+  try {
+    const [{ size, mtimeMs }, file, stamp] = await Promise.all([
+      stat(source), lstat(target), readFile(`${target}.source.json`, "utf-8").then((t) => JSON.parse(t) as CopyStamp),
+    ]);
+    return file.isFile() && stamp.source === source && stamp.size === size && stamp.mtimeMs === mtimeMs;
+  } catch {
+    return false;
+  }
+}
+
+/** Record that `target` was made from `source` as it is now. */
+export async function stampCopy(source: string, target: string): Promise<void> {
+  const { size, mtimeMs } = await stat(source);
+  await writeFile(`${target}.source.json`, JSON.stringify({ source, size, mtimeMs } satisfies CopyStamp));
+}
+
 /**
  * Write a browser-playable copy of `source` to `target`, unless one made from this exact
  * source file is already there. Progress is 0-100 over the source duration.
@@ -87,13 +105,7 @@ export async function makePlayableCopy(
   durationSec: number | null,
   onProgress?: (percent: number) => void,
 ): Promise<void> {
-  const stampPath = `${target}.source.json`;
-  const { size, mtimeMs } = await stat(source);
-  try {
-    const stamp = JSON.parse(await readFile(stampPath, "utf-8")) as CopyStamp;
-    await stat(target);
-    if (stamp.source === source && stamp.size === size && stamp.mtimeMs === mtimeMs) return;
-  } catch { /* no usable copy yet */ }
+  if (await isCopyOf(source, target)) return;
 
   const partial = `${target}.partial.mp4`;
   await rm(target, { force: true });
@@ -119,5 +131,5 @@ export async function makePlayableCopy(
     throw err;
   });
   await rename(partial, target);
-  await writeFile(stampPath, JSON.stringify({ source, size, mtimeMs } satisfies CopyStamp));
+  await stampCopy(source, target);
 }
