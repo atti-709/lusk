@@ -22,6 +22,11 @@
  * language are backed up and deleted. Auto-generated (`asr`) and `forced` tracks are left
  * alone. With nothing to replace, a new track is inserted, published (not draft).
  *
+ * Final SRTs only: an episode is uploaded only when `<work>/final.json` lists it with the
+ * sha256 of each SRT (`{"E01": {"sk": "<sha256>", "en": "<sha256>", "at": "…"}}`), written
+ * by whoever signs the subtitles off. A file regenerated after that no longer matches and
+ * is held back until its entry is updated. The dry run marks such episodes.
+ *
  * Resumable: `<work>/state.json` records every finished track (video, caption id, file
  * hash), so a rerun skips it without spending quota. Each video's tracks are listed live
  * right before acting, so a run cut off between the upload and the state write replaces
@@ -76,6 +81,7 @@ const TOKEN_FILE = path.join(WORK, "token.json");
 const MATCHES_FILE = path.join(WORK, "matches.json");
 const OVERRIDES_FILE = path.join(WORK, "overrides.json");
 const STATE_FILE = path.join(WORK, "state.json");
+const FINAL_FILE = path.join(WORK, "final.json");
 const LOG_FILE = path.join(WORK, "upload.log");
 const BACKUP_DIR = path.join(WORK, "backups");
 
@@ -702,6 +708,14 @@ function printVideoPlan(entry: MatchEntry, tracks: TrackPlan[], others: Caption[
   for (const c of others) console.log(`    ${c.snippet.language.padEnd(3)} keep      ${describe(c)}`);
 }
 
+/** Why an episode's SRTs aren't signed off for upload, or undefined when they are. */
+function notFinal(ep: Episode): string | undefined {
+  const final = readJson<Record<string, Partial<Record<Lang, string>>>>(FINAL_FILE, {})[ep.code];
+  if (!final) return "not in final.json";
+  const stale = LANGS.filter((l) => ep.srt[l] && final[l] !== sha256(readFileSync(ep.srt[l]!)));
+  return stale.length ? `${stale.join(", ")} SRT differs from the one in final.json` : undefined;
+}
+
 async function plan() {
   const matches = loadConfirmedMatches();
   const episodes = new Map(scanEpisodes(false).map((e) => [e.code, e]));
@@ -716,6 +730,8 @@ async function plan() {
       if (!ep) { console.log(`\n${entry.code}: folder or SRTs missing now — skipped`); continue; }
       const { tracks, others } = await planVideo(ep, entry.videoId!);
       printVideoPlan(entry, tracks, others);
+      const held = notFinal(ep);
+      if (held) console.log(`    HELD BACK — ${held}`);
       for (const t of tracks) {
         if (t.action === "add") totals.add++;
         else if (t.action === "replace") { totals.replace++; totals.delete += t.extras.length; }
@@ -791,6 +807,8 @@ async function upload() {
     const ep = episodes.get(entry.code);
     try {
       if (!ep) { log(`${entry.code}: folder or SRTs missing — skipped`); i++; continue; }
+      const held = notFinal(ep);
+      if (held) { log(`${entry.code}: held back — ${held}`); i++; continue; }
       const { tracks } = await planVideo(ep, entry.videoId!);
       for (const t of tracks) {
         if (t.action === "done") continue;
