@@ -179,9 +179,16 @@ def join_sentences(segments: list[dict]) -> list[dict]:
     (E00, a conversation: "prvý rozhovor. z ...", "okolo seba. politikov"). That stop is dropped."""
     for seg, nxt in zip(segments, segments[1:]):
         text, following = seg["text"].rstrip(), nxt["text"].lstrip()
+        last = text.split()[-1].lower() if text.split() else ""
+        # an ordinal ("v 20." storočí) or an abbreviation ("napr.") needs its dot
+        if last[:-1].isdigit() or last[:-1] in ABBREVIATIONS:
+            continue
         if text.endswith(".") and not text.endswith("..") and following[:1].islower():
             seg["text"] = text[:-1]
     return segments
+
+
+ABBREVIATIONS = {"napr", "tzv", "atď", "resp", "tj", "sv", "str", "č", "kap", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"}
 
 
 def plain_words(text: str) -> list[str]:
