@@ -5,7 +5,7 @@ import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
 import { tempManager } from "./TempManager.js";
-import { alignCorrectedRows } from "./alignCorrection.js";
+import { alignCorrectedRows, keepHeardScript, misplacedBreaks } from "./alignCorrection.js";
 import {
   applyProofreadEdits,
   buildProofreadLines,
@@ -237,6 +237,9 @@ export function translationChunks(texts: string[], size: number): { start: numbe
 /** A translation range this short that still loses lines is translated line by line. */
 const SMALL_TRANSLATION_RANGE = 8;
 
+/** Sentence breaks before a lower-case word a correction chunk may add (a real fix, a quote). */
+const MAX_ADDED_BREAKS = 2;
+
 /**
  * Letters of a script Slovak and English subtitles never use. Gemini now and then writes a
  * Cyrillic look-alike into a Latin word ("svetло", E42).
@@ -456,24 +459,36 @@ export class GeminiService {
                 `Chunk ${i + 1}/${chunks.length}: row mismatch (${resultLines.length}/${expectedLines}), auto-repairing...`,
               );
               resultLines = alignCorrectedRows(chunkLines, resultLines);
-              await this.setCachedChunk(sessionId, chunkHash, resultLines);
-              break;
+            } else {
+              console.error(`[GeminiService] ${detail} Retrying (output severely truncated).`);
+
+              retryFeedback = [
+                `## CORRECTION REQUIRED (your previous output had ${resultLines.length} rows instead of ${expectedLines}):`,
+                "You MUST output EXACTLY one row per input row. Do NOT merge or drop any rows.",
+                "IMPORTANT: Preserve timestamps EXACTLY as given (HH:MM:SS.mmm format). Do NOT reformat them.",
+              ].join("\n\n");
+
+              throw new Error(detail);
             }
-
-            console.error(`[GeminiService] ${detail} Retrying (output severely truncated).`);
-
-            retryFeedback = [
-              `## CORRECTION REQUIRED (your previous output had ${resultLines.length} rows instead of ${expectedLines}):`,
-              "You MUST output EXACTLY one row per input row. Do NOT merge or drop any rows.",
-              "IMPORTANT: Preserve timestamps EXACTLY as given (HH:MM:SS.mmm format). Do NOT reformat them.",
-            ].join("\n\n");
-
-            throw new Error(detail);
+          } else {
+            // Right row count — still aligned by content, not index: a script word inserted
+            // and another dropped would shift every row between them (see alignCorrection.ts)
+            resultLines = alignCorrectedRows(chunkLines, resultLines);
           }
 
-          // Right row count — still aligned by content, not index: a script word inserted
-          // and another dropped would shift every row between them (see alignCorrection.ts)
-          resultLines = alignCorrectedRows(chunkLines, resultLines);
+          resultLines = keepHeardScript(chunkLines, resultLines, hasForeignScript);
+          // Full stops moved onto the word before ("malo byť. že každý…", E06): ask again,
+          // and keep the heard rows if every answer does it
+          const moved = misplacedBreaks(resultLines) - misplacedBreaks(chunkLines);
+          if (moved > MAX_ADDED_BREAKS) {
+            const detail = `Chunk ${i + 1}/${chunks.length} row mismatch: ${moved} sentence breaks before a lower-case word`;
+            if (attempt < MAX_RETRIES) {
+              retryFeedback = "## CORRECTION REQUIRED: your previous output put full stops before words that continue the sentence. Keep each punctuation mark on the word it follows in the transcription.";
+              throw new Error(detail);
+            }
+            console.warn(`[GeminiService] ${detail}; keeping the uncorrected rows`);
+            resultLines = chunkLines.filter((l) => l.trim());
+          }
           await this.setCachedChunk(sessionId, chunkHash, resultLines);
           break;
         } catch (err: unknown) {

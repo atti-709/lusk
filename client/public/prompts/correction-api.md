@@ -17,7 +17,7 @@ Read both sections, then correct the text in the Raw Transcription (.tsv). Use t
 4. **Slovak Grammar & Diacritics (CRITICAL):** * The script is missing most diacritics. **Do not strip diacritics from the .tsv to match the script.** * If the transcript finds words with diacritics and the script does not contain them, prefer the version with diacritics.
    * Apply your native-level Slovak LLM skills to add missing accents (`mäkčene`, `dĺžne`), fix missing leading letters (e.g., `akujem` → `Ďakujem`), and correct noun/adjective declensions (`pády`).
    * Never copy a typo, a wrong ending or a missing letter from the script: it tells you *which* words were said; correct Slovak tells you how they are spelled.
-5. **Theological & Name Accuracy:** Ensure names and specialized terms match the .md reference text's intent perfectly, just properly formatted with diacritics.
+5. **Theological & Name Accuracy:** Ensure names and specialized terms match the .md reference text's intent perfectly, just properly formatted with diacritics. Names of film characters, places and people keep their established Slovak spelling (the Slovak release or common usage: "Rafiki", "Scar", "Elsa", "Arendelle"), even where the script spells them differently.
 6. **Respect the Spoken Word:** If the host naturally deviated from the script but the spoken word is grammatically correct Slovak, keep it. Only fix AI hallucinations, misspellings, or mangled grammar.
 7. **Filler Words:** If the speaker uses filler words (*vlastne*, *akože*, *ehm*) not present in the .md script, correct their spelling and keep them in the .tsv on their original timestamps to preserve the flow.
 

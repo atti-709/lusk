@@ -162,3 +162,28 @@ export function alignCorrectedRows(inputLines: string[], outputLines: string[]):
 
   return inputs.map((inp, i) => `${inp.ts}\t${words[i]}`);
 }
+
+const ABBREVIATIONS = new Set(["napr", "tzv", "atď", "resp", "tj", "sv", "str", "č", "kap", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"]);
+
+/**
+ * Sentence ends followed by a lower-case word: a correction that moved full stops onto the
+ * word before ("malo byť. že každý…", E06 7:09–11:26) shows up as a jump in this count.
+ * Ordinals ("v 20. storočí") and abbreviations don't count.
+ */
+export function misplacedBreaks(lines: string[]): number {
+  const words = lines.filter((l) => l.trim()).map((l) => rowText(l).trim());
+  let count = 0;
+  for (let i = 0; i + 1 < words.length; i++) {
+    const m = /^(.*?)[.!?]["'“”»]?$/.exec(words[i]);
+    if (!m || /^\d+$/.test(m[1]) || ABBREVIATIONS.has(m[1].toLowerCase())) continue;
+    const next = words[i + 1].replace(/^["'„“»(]+/, "");
+    if (next && next[0] !== next[0].toUpperCase()) count++;
+  }
+  return count;
+}
+
+/** A corrected row whose word is in a script Slovak never uses keeps the heard word ("svetло"). */
+export function keepHeardScript(inputLines: string[], alignedLines: string[], foreign: (text: string) => boolean): string[] {
+  const inputs = inputLines.filter((l) => l.trim());
+  return alignedLines.map((line, i) => (foreign(rowText(line)) && inputs[i] ? inputs[i] : line));
+}

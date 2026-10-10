@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { alignCorrectedRows } from "../services/alignCorrection.js";
+import { alignCorrectedRows, keepHeardScript, misplacedBreaks } from "../services/alignCorrection.js";
 
 const tsv = (words: string[]) => words.map((w, i) => `00:00:${String(i).padStart(2, "0")}.000\t${w}`);
 const texts = (lines: string[]) => lines.map((l) => l.split("\t")[1]);
@@ -38,5 +38,27 @@ describe("alignCorrectedRows", () => {
   it("keeps heard words Gemini dropped and handles a short output", () => {
     const out = alignCorrectedRows(tsv(["a", "potom", "prišiel", "domov"]), tsv(["potom", "prišiel"]));
     expect(texts(out)).toEqual(["a", "potom", "prišiel", "domov"]);
+  });
+});
+
+describe("misplacedBreaks", () => {
+  const rows = (words: string) => words.split(" ").map((w, i) => `00:00:${String(i).padStart(2, "0")}.000\t${w}`);
+
+  it("counts full stops moved onto the word before (E06 7:10)", () => {
+    expect(misplacedBreaks(rows("by to malo byť, že každý je zodpovedný."))).toBe(0);
+    expect(misplacedBreaks(rows("by to malo byť. že každý je zodpovedný."))).toBe(1);
+    expect(misplacedBreaks(rows("Existuje. prvá príčina. alebo nie"))).toBe(2);
+  });
+
+  it("ignores ordinals, abbreviations and real sentence ends", () => {
+    expect(misplacedBreaks(rows("v 20. storočí napr. keď Koniec. Ďalší"))).toBe(0);
+  });
+});
+
+describe("keepHeardScript", () => {
+  it("keeps the heard word where the correction wrote a foreign script", () => {
+    const heard = ["00:00:01.000\tsvetlo.", "00:00:02.000\tAkoby"];
+    const corrected = ["00:00:01.000\tsvetло.", "00:00:02.000\tAkoby"];
+    expect(keepHeardScript(heard, corrected, (t) => /[Ѐ-ӿ]/.test(t))).toEqual(heard);
   });
 });
