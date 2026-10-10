@@ -39,6 +39,7 @@
 * **Tool:** `server/scripts/transcribe.py`, run in the managed Python env by `WhisperService.ts`.
 * **Model:** `large-v3-turbo`, language from settings (default `sk`).
 * **Flow:** Server extracts audio to `audio.wav` (16kHz mono via ffmpeg). The script transcribes with **mlx-whisper on the Apple GPU** (Metal; ~6× faster than WhisperX's CPU-only faster-whisper), then runs **WhisperX's wav2vec2 forced alignment** for per-word timings. Without MLX it falls back to WhisperX's own transcriber. Output is WhisperX's JSON shape.
+* **Speech only:** MLX decodes only what WhisperX's pyannote VAD marks as speech (`clip_timestamps`, turns joined up to 30 s across ≤2 s pauses). Fed whole windows, Whisper invented "Ďakujem za pozornosť." over music, silence and the outro sting, and skipped the speech after a music bed (15-27 s lost in E08, E42, E47, E66, E67). Segments mostly outside the decoded audio (Whisper "hears" words in its silence padding) and stock sign-offs are dropped; speech no segment covers (≥1 s) is decoded again on its own.
 * **Output:** Per-word `start`/`end` timestamps in seconds. Words with missing alignment are interpolated linearly between their neighbours.
 * **First-run model download:** the MLX model (`mlx-community/whisper-large-v3-turbo`, ~1.6 GB) and the Slovak wav2vec2 alignment model download on first use into `~/.cache/huggingface`.
 * **Note:** `server/whisper.cpp/` is a legacy artifact — it is not used.
