@@ -110,7 +110,7 @@ def uncovered(turns: list[tuple[float, float]], segments: list[dict]) -> list[tu
     return holes
 
 
-def transcribe_mlx(audio_path: str, audio, model: str, language: str) -> list[dict] | None:
+def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
     """Only the speech is decoded. Fed whole 30 s windows, Whisper read music, silence and
     the outro sting as speech: a window that began in a music bed came back as one
     invented "Ďakujem za pozornosť." and the speech after the music was skipped with it
@@ -127,30 +127,38 @@ def transcribe_mlx(audio_path: str, audio, model: str, language: str) -> list[di
     total = len(audio) / SAMPLE_RATE
 
     def decode(regions):
-        if not regions:
-            return []
+        """Each chunk is decoded from its own slice of the audio. mlx-whisper's own
+        `clip_timestamps` never seeks to a clip's start — every clip is decoded from where
+        the previous one ended, the music between them included (E47, E67: sentences after
+        a music bed were lost again)."""
+        import tqdm
+
         clips = as_clips(regions, total)
         spans = list(zip(clips[::2], clips[1::2]))
-        result = mlx_whisper.transcribe(
-            audio_path,
-            path_or_hf_repo=MLX_MODELS.get(model, model),
-            language=language,
-            # Feeding each window the previous one's text is what lets Whisper fall into a
-            # repetition loop on long recordings; podcasts gain little from it in return.
-            condition_on_previous_text=False,
-            clip_timestamps=clips,
-            verbose=False,  # tqdm progress bar on stderr
-        )
-
-        def inside(seg) -> float:
-            """How much of the segment lies in the audio Whisper was given: past a chunk's
-            end its window is padded with silence, and what it "hears" there is invented
-            (E42: "Zdravíte!" stretched over the 30 s after a chunk that ended in music)."""
-            length = max(seg["end"] - seg["start"], 1e-3)
-            return sum(max(0.0, min(seg["end"], b) - max(seg["start"], a)) for a, b in spans) / length
-
-        return [{"start": s["start"], "end": s["end"], "text": s["text"]}
-                for s in result["segments"] if inside(s) >= 0.5 and not is_stock_phrase(s["text"])]
+        segments = []
+        # one bar over all chunks, counted in frames like mlx-whisper's own (the host parses it)
+        with tqdm.tqdm(total=round(sum(b - a for a, b in spans) * 100), unit="frames") as bar:
+            for start, end in spans:
+                clip = audio[round(start * SAMPLE_RATE):round(end * SAMPLE_RATE)]
+                result = mlx_whisper.transcribe(
+                    clip,
+                    path_or_hf_repo=MLX_MODELS.get(model, model),
+                    language=language,
+                    # Feeding each window the previous one's text is what lets Whisper fall into
+                    # a repetition loop on long recordings; podcasts gain little from it in return.
+                    condition_on_previous_text=False,
+                    verbose=None,  # no per-chunk bar
+                )
+                length = end - start
+                for s in result["segments"]:
+                    # Past the clip's end Whisper's window is padded with silence, and what it
+                    # "hears" there is invented (E42: "Zdravíte!" stretched over the 30 s after a
+                    # chunk that ended in music): keep a segment only if most of it is real audio.
+                    inside = max(0.0, min(s["end"], length) - max(s["start"], 0.0)) / max(s["end"] - s["start"], 1e-3)
+                    if inside >= 0.5 and not is_stock_phrase(s["text"]):
+                        segments.append({"start": start + s["start"], "end": min(start + s["end"], end), "text": s["text"]})
+                bar.update(round(length * 100))
+        return segments
 
     phase("transcribe:mlx")
     segments = decode(join_turns(turns))
@@ -199,7 +207,7 @@ def main() -> None:
 
     segments = None
     if args.engine in ("auto", "mlx"):
-        segments = transcribe_mlx(args.audio, audio, args.model, args.language)
+        segments = transcribe_mlx(audio, args.model, args.language)
         if segments is None:
             if args.engine == "mlx":
                 sys.exit("mlx-whisper is not installed")
