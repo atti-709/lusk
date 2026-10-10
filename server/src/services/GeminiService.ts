@@ -234,13 +234,15 @@ export function translationChunks(texts: string[], size: number): { start: numbe
   return chunks;
 }
 
+/** A translation range this short that still loses lines is translated line by line. */
+const SMALL_TRANSLATION_RANGE = 8;
+
 /**
- * Lines a translation may leave out once every retry did. English word order often pulls
- * a short Slovak line into its neighbour ("…on God's existence / are counted as atheists"
- * came back as one line on every try, E09); that neighbour then covers both lines' time.
+ * Letters of a script Slovak and English subtitles never use. Gemini now and then writes a
+ * Cyrillic look-alike into a Latin word ("svetло", E42).
  */
-export function maxMergedLines(count: number): number {
-  return Math.max(2, Math.floor(count / 50));
+export function hasForeignScript(text: string): boolean {
+  return /[\u0400-\u04FF\u0590-\u06FF\u3040-\u30FF\u4E00-\u9FFF]/.test(text);
 }
 
 /**
@@ -304,7 +306,7 @@ function extractCodeBlock(response: string): string {
 
 // ── Service ──
 
-class GeminiService {
+export class GeminiService {
   private chunkCacheDir(sessionId: string): string {
     return join(tempManager.getSessionDir(sessionId), "chunk_cache");
   }
@@ -663,8 +665,8 @@ class GeminiService {
   }
 
   /**
-   * Translate subtitle blocks to English.
-   * Returns an array of translated text strings (same order & count as input).
+   * Translate subtitle blocks to English: exactly one English line per block, so every English
+   * cue keeps its Slovak cue's time. Returns the lines in input order.
    */
   async translateCaptions(
     blocks: { text: string; startMs: number; endMs: number }[],
@@ -677,97 +679,134 @@ class GeminiService {
 
     const ai = await this.getClient();
     const langName = sourceLang === "sk" ? "Slovak" : sourceLang === "cs" ? "Czech" : "English";
-
-    // Format as numbered lines for easy parsing
-    const numberedLines = blocks.map((b, i) => `${i + 1}. ${b.text}`);
-    const chunks = translationChunks(blocks.map((b) => b.text), TRANSLATION_CHUNK);
-
+    const texts = blocks.map((b) => b.text);
+    const chunks = translationChunks(texts, TRANSLATION_CHUNK);
     const translated: string[] = new Array(blocks.length).fill("");
 
     for (let ci = 0; ci < chunks.length; ci++) {
       if (signal?.aborted) throw new Error("Cancelled");
-
       const chunk = chunks[ci];
       const chunkLabel = chunks.length > 1 ? ` (chunk ${ci + 1}/${chunks.length})` : "";
-      onProgress(
-        90 + Math.round((ci / chunks.length) * 8),
-        `Translating captions to English${chunkLabel}...`,
-      );
-
-      const chunkLines = numberedLines.slice(chunk.start, chunk.end);
-      const chunkHash = createHash("md5").update("translate_en:" + chunkLines.join("\n")).digest("hex");
-
-      // Check cache
-      const cached = await this.getCachedChunk(sessionId, chunkHash);
-      if (cached) {
-        for (let i = 0; i < cached.length && chunk.start + i < blocks.length; i++) {
-          translated[chunk.start + i] = cached[i];
-        }
-        continue;
-      }
-
-      const expectedCount = chunkLines.length;
-      const userMessage = [
-        `Translate the following ${expectedCount} numbered subtitle lines from ${langName} to English.`,
-        `Return EXACTLY ${expectedCount} numbered lines in the same format: "N. translated text".`,
-        "Keep the translation natural and concise (subtitles should be short).",
-        "Do NOT add, merge, split, or drop any lines. Every input line must have exactly one output line.",
-        "",
-        chunkLines.join("\n"),
-        "",
-        `REMINDER: You MUST return exactly ${expectedCount} numbered lines.`,
-      ].join("\n");
-
-      // The answer missing the fewest lines; a few missing ones are accepted after the last retry
-      let best: string[] | null = null;
-      const missingIn = (lines: string[]) => lines.filter((l) => !l).length;
-      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        if (signal?.aborted) throw new Error("Cancelled");
-
-        try {
-          const response = await ai.models.generateContent({
-            model: MODEL,
-            contents: userMessage,
-            config: {
-              abortSignal: signal,
-              thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
-            },
-          });
-
-          let resultLines = parseNumberedLines(response.text ?? "", chunk.start + 1, expectedCount);
-          if (!best || missingIn(resultLines) < missingIn(best)) best = resultLines;
-          const missing = missingIn(resultLines);
-          if (missing > 0) {
-            if (attempt < MAX_RETRIES || missingIn(best) > maxMergedLines(expectedCount)) {
-              throw new Error(
-                `Translation row mismatch: expected ${expectedCount}, ${missing} missing`,
-              );
-            }
-            console.warn(`[GeminiService] Translation chunk ${ci}: ${missingIn(best)} line(s) merged into their neighbours, kept`);
-            resultLines = best;
-          }
-
-          // Cache and store
-          await this.setCachedChunk(sessionId, chunkHash, resultLines);
-          for (let i = 0; i < resultLines.length; i++) {
-            translated[chunk.start + i] = resultLines[i];
-          }
-          break;
-        } catch (err: unknown) {
-          if (signal?.aborted) throw new Error("Cancelled");
-          const errObj = err instanceof Error ? err : new Error(String(err));
-          if (attempt < MAX_RETRIES && (isRetryableError(errObj) || isRowMismatchError(errObj))) {
-            const delay = RETRY_DELAY_MS * (attempt + 1);
-            console.warn(`[GeminiService] Translation chunk ${ci} attempt ${attempt + 1} failed: ${errObj.message}. Retrying in ${delay / 1000}s...`);
-            await sleep(delay);
-            continue;
-          }
-          throw errObj;
-        }
-      }
+      onProgress(90 + Math.round((ci / chunks.length) * 8), `Translating captions to English${chunkLabel}...`);
+      const lines = await this.translateRange(ai, texts, chunk.start, chunk.end, langName, sessionId, signal);
+      lines.forEach((line, i) => (translated[chunk.start + i] = line));
     }
 
     return translated;
+  }
+
+  /**
+   * One English line for each of texts[start, end). A long range Gemini answers with lines
+   * missing is translated again in halves: a missing line means it merged that line into a
+   * neighbour, and the lines around it had often slid by one (E00: the English ran a line
+   * ahead of the Slovak for a minute). A short range that still loses lines is translated
+   * line by line.
+   */
+  private async translateRange(
+    ai: GoogleGenAI,
+    texts: string[],
+    start: number,
+    end: number,
+    langName: string,
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    const count = end - start;
+    const numbered = texts.slice(start, end).map((t, i) => `${start + i + 1}. ${t}`);
+    const hash = createHash("md5").update("translate_en:" + numbered.join("\n")).digest("hex");
+    const cached = await this.getCachedChunk(sessionId, hash);
+    if (cached && cached.length === count && cached.every(Boolean)) return cached;
+
+    const userMessage = [
+      `Translate the following ${count} numbered subtitle lines from ${langName} to English.`,
+      `Return EXACTLY ${count} numbered lines in the same format: "N. translated text".`,
+      "Keep the translation natural and concise (subtitles should be short).",
+      "Do NOT add, merge, split, or drop any lines. Every input line must have exactly one output line.",
+      "",
+      numbered.join("\n"),
+      "",
+      `REMINDER: You MUST return exactly ${count} numbered lines.`,
+    ].join("\n");
+
+    const missingIn = (lines: string[]) => lines.filter((l) => !l).length;
+    let best: string[] = new Array(count).fill("");
+    // a long range gets two tries before it is split: its halves are likelier to come back whole
+    const tries = count > SMALL_TRANSLATION_RANGE ? 2 : MAX_RETRIES + 1;
+    for (let attempt = 0; attempt < tries && missingIn(best) > 0; attempt++) {
+      if (signal?.aborted) throw new Error("Cancelled");
+      try {
+        const response = await ai.models.generateContent({
+          model: MODEL,
+          contents: userMessage,
+          config: { abortSignal: signal, thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } },
+        });
+        // a line in a foreign script (a Cyrillic "л" in "svetло") counts as missing
+        const lines = parseNumberedLines(response.text ?? "", start + 1, count).map((l) => (hasForeignScript(l) ? "" : l));
+        if (missingIn(lines) < missingIn(best)) best = lines;
+      } catch (err: unknown) {
+        if (signal?.aborted) throw new Error("Cancelled");
+        const errObj = err instanceof Error ? err : new Error(String(err));
+        if (attempt + 1 < tries && isRetryableError(errObj)) {
+          await sleep(RETRY_DELAY_MS * (attempt + 1));
+          continue;
+        }
+        throw errObj;
+      }
+    }
+
+    if (missingIn(best) > 0 && count > SMALL_TRANSLATION_RANGE) {
+      console.warn(`[GeminiService] Translation of lines ${start + 1}-${end}: ${missingIn(best)} missing, translating it in halves`);
+      const mid = start + translationChunks(texts.slice(start, end), Math.ceil(count / 2))[0].end;
+      best = [
+        ...(await this.translateRange(ai, texts, start, mid, langName, sessionId, signal)),
+        ...(await this.translateRange(ai, texts, mid, end, langName, sessionId, signal)),
+      ];
+    } else if (missingIn(best) > 0) {
+      console.warn(`[GeminiService] Translation of lines ${start + 1}-${end}: ${missingIn(best)} missing, translating line by line`);
+      best = [];
+      for (let i = start; i < end; i++) best.push(await this.translateLine(ai, texts, i, langName, signal));
+    }
+
+    if (best.every(Boolean)) await this.setCachedChunk(sessionId, hash, best);
+    return best;
+  }
+
+  /** One subtitle line on its own, its neighbours given as context only. */
+  private async translateLine(
+    ai: GoogleGenAI,
+    texts: string[],
+    index: number,
+    langName: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const userMessage = [
+      `Translate ONE subtitle line from ${langName} to English. Return only the English translation of that line, nothing else.`,
+      "",
+      `Previous lines (context only): ${texts.slice(Math.max(0, index - 2), index).join(" / ") || "-"}`,
+      `Line to translate: ${texts[index]}`,
+      `Next lines (context only): ${texts.slice(index + 1, index + 3).join(" / ") || "-"}`,
+    ].join("\n");
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (signal?.aborted) throw new Error("Cancelled");
+      try {
+        const response = await ai.models.generateContent({
+          model: MODEL,
+          contents: userMessage,
+          config: { abortSignal: signal, thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } },
+        });
+        const line = (response.text ?? "").trim().split("\n")[0].replace(/^\d+\.\s*/, "").trim();
+        if (line && !hasForeignScript(line)) return line;
+      } catch (err: unknown) {
+        if (signal?.aborted) throw new Error("Cancelled");
+        const errObj = err instanceof Error ? err : new Error(String(err));
+        if (attempt < MAX_RETRIES && isRetryableError(errObj)) {
+          await sleep(RETRY_DELAY_MS * (attempt + 1));
+          continue;
+        }
+        throw errObj;
+      }
+    }
+    return "";
   }
 }
 
