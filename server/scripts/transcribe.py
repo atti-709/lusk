@@ -170,7 +170,18 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
     if holes:
         print(f"decoding {len(holes)} uncovered speech stretches again ({sum(b - a for a, b in holes):.0f} s)", file=sys.stderr)
         segments += [s for s in decode(join_turns(holes)) if not already_said(s, segments)]
-    return sorted(segments, key=lambda s: s["start"])
+    return join_sentences(sorted(segments, key=lambda s: s["start"]))
+
+
+def join_sentences(segments: list[dict]) -> list[dict]:
+    """Each chunk is decoded alone, so Whisper ends it with a full stop even where the speaker only
+    paused mid-sentence; it starts the next chunk in lower case when it hears the sentence go on
+    (E00, a conversation: "prvý rozhovor. z ...", "okolo seba. politikov"). That stop is dropped."""
+    for seg, nxt in zip(segments, segments[1:]):
+        text, following = seg["text"].rstrip(), nxt["text"].lstrip()
+        if text.endswith(".") and not text.endswith("..") and following[:1].islower():
+            seg["text"] = text[:-1]
+    return segments
 
 
 def plain_words(text: str) -> list[str]:
