@@ -315,6 +315,9 @@ const MAX_LINE_CHARS = 42;
 const MAX_BLOCK_CHARS = 84;
 const MIN_DISPLAY_MS = 1000;
 const MIN_GAP_MS = 80;
+// A cue stays up a little past its last word (until the next cue): aligned word ends fall early
+// on fast speech, and a cue ending with the voice was gone before the line was read (E08 1:02).
+const END_HOLD_MS = 700;
 const SILENCE_GAP_MS = 1000;
 
 export function groupCaptionBlocks(captions: CaptionWord[], lang: TranscriptionLanguage): CaptionWord[][] {
@@ -394,7 +397,7 @@ function applyPyramidRuleText(text: string, maxLineChars: number, lang: Transcri
   return words.slice(0, bestSplit + 1).join(" ") + "\n" + words.slice(bestSplit + 1).join(" ");
 }
 
-function formatSrtBlocks(
+export function formatSrtBlocks(
   blocks: { text: string; startMs: number; endMs: number }[],
   lang: TranscriptionLanguage,
 ): string {
@@ -405,6 +408,7 @@ function formatSrtBlocks(
   for (let gi = 0; gi < blocks.length; gi++) {
     let { startMs, endMs } = blocks[gi];
 
+    endMs += END_HOLD_MS;
     if (endMs - startMs < MIN_DISPLAY_MS) endMs = startMs + MIN_DISPLAY_MS;
 
     if (gi + 1 < blocks.length) {
