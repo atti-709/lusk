@@ -12,6 +12,7 @@ stdout when the work moves on to the next stage.
 
 import argparse
 import json
+import re
 import sys
 
 MLX_MODELS = {
@@ -39,6 +40,11 @@ STOCK_PHRASES = {
     "dakujem za sledovanie", "dakujeme za sledovanie", "thank you for watching",
     "thank you for your attention",
 }
+
+
+# Letters Slovak never uses: Whisper now and then writes a Cyrillic word into Slovak speech
+# (E00 17:25 "Kцési."); the segment is dropped and its speech decoded again.
+FOREIGN_SCRIPT = re.compile("[\u0400-\u04FF\u0590-\u06FF\u3040-\u30FF\u4E00-\u9FFF]")
 
 
 def is_stock_phrase(text: str) -> bool:
@@ -159,7 +165,7 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
                     # "hears" there is invented (E42: "Zdravíte!" stretched over the 30 s after a
                     # chunk that ended in music): keep a segment only if most of it is real audio.
                     inside = max(0.0, min(s["end"], length) - max(s["start"], 0.0)) / max(s["end"] - s["start"], 1e-3)
-                    if inside >= 0.5 and not is_stock_phrase(s["text"]):
+                    if inside >= 0.5 and not is_stock_phrase(s["text"]) and not FOREIGN_SCRIPT.search(s["text"]):
                         segments.append({"start": start + s["start"], "end": min(start + s["end"], end), "text": s["text"]})
                 bar.update(round(length * 100))
         return segments
