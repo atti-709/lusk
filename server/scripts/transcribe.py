@@ -120,8 +120,11 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
         import mlx_whisper
     except ImportError:
         return None
+    import mlx.core as mx
     from whisperx.audio import SAMPLE_RATE
 
+    # Dozens of short decodes grew MLX's buffer cache by ~1.7 GB (E66: peak 6.3 GB → 4.6 GB capped)
+    mx.set_cache_limit(512 * 2**20)
     phase("vad")
     turns = speech_turns(audio)
     total = len(audio) / SAMPLE_RATE
@@ -140,6 +143,7 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
         with tqdm.tqdm(total=round(sum(b - a for a, b in spans) * 100), unit="frames") as bar:
             for start, end in spans:
                 clip = audio[round(start * SAMPLE_RATE):round(end * SAMPLE_RATE)]
+                mx.clear_cache()
                 result = mlx_whisper.transcribe(
                     clip,
                     path_or_hf_repo=MLX_MODELS.get(model, model),
