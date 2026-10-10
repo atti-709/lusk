@@ -16,7 +16,8 @@
     "dist": "npm run bundle && electron-builder --publish never",
     "release": "npm run bundle && GH_TOKEN=$(gh auth token) electron-builder --publish always",
     "test:e2e": "playwright test",
-    "batch": "tsx scripts/batch-episodes.ts"
+    "batch": "tsx scripts/batch-episodes.ts",
+    "captions": "tsx scripts/upload-captions.ts"
   },
   "dependencies": {
     "electron-updater": "^6.3.0"
