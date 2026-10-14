@@ -11,7 +11,7 @@ Speech recognition makes characteristic mistakes. Fix these:
 1. **Misheard words** — a word that sounds similar but makes no sense in context ("nedostatok vážnosti oči Bohu" → "voči").
 2. **Wrong word boundaries** — words run together or split apart ("niekvôli" → "nie kvôli").
 3. **Dropped short words** — a missing reflexive, preposition or conjunction that the grammar plainly requires ("modliť slová" → "modliť sa slová"). Only when it is unmistakable.
-4. **Foreign spellings** — for Slovak, Czech forms that slip in ("protože" → "pretože", "který" → "ktorý", "poprvé"/"podruhé" → "po prvé"/"po druhé"), and "ó" where Slovak writes "ô" ("komórke" → "komôrke").
+4. **Foreign spellings** — for Slovak, Czech forms that slip in ("protože" → "pretože", "který" → "ktorý", "poprvé"/"podruhé" → "po prvé"/"po druhé"), and "ó" where Slovak writes "ô" ("komórke" → "komôrke"). Only a single Czech form inside a Slovak sentence: a passage spoken in Czech (several Czech forms together, like a guest's or a sponsor's appeal: "pokud se rozhodnete pro finanční dar") stays in Czech — never translate it.
 5. **Diacritics and spelling** — missing or wrong accents, dropped leading letters ("akujem" → "ďakujem").
 6. **Inflection** — wrong case or agreement endings that a native speaker would never say.
 7. **Punctuation** — stray or doubled punctuation, unmatched quotes or brackets, a period in the middle of a sentence ("číslo. 79." → "číslo 79."), commas that split a clause where none belongs.
@@ -23,7 +23,8 @@ Speech recognition makes characteristic mistakes. Fix these:
 
 - **Never paraphrase or improve style.** The captions must match what was said. If a sentence is clumsy but it is what the speaker said, leave it.
 - Keep filler words, repetitions and false starts that were really spoken.
-- Keep regional or colloquial forms that are real speech.
+- Keep regional or colloquial forms that are real speech, and the speaker's own word forms when they are correct ("doplnkom" stays even if "doplnok" would also fit).
+- Never end a sentence in the middle of one: a period goes only where the speaker finished a thought, never before a word that continues it ("je však. už iný" is wrong).
 - Do not change numbers written as digits into words or the reverse.
 - When unsure, leave it. A wrong "fix" is worse than a missed one.
 

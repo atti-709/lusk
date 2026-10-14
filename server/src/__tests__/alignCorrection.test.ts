@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { alignCorrectedRows, keepHeardScript, misplacedBreaks } from "../services/alignCorrection.js";
+import { alignCorrectedRows, dropStrayStops, keepHeardScript, misplacedBreaks } from "../services/alignCorrection.js";
 
 const tsv = (words: string[]) => words.map((w, i) => `00:00:${String(i).padStart(2, "0")}.000\t${w}`);
 const texts = (lines: string[]) => lines.map((l) => l.split("\t")[1]);
@@ -60,5 +60,20 @@ describe("keepHeardScript", () => {
     const heard = ["00:00:01.000\tsvetlo.", "00:00:02.000\tAkoby"];
     const corrected = ["00:00:01.000\tsvetло.", "00:00:02.000\tAkoby"];
     expect(keepHeardScript(heard, corrected, (t) => /[Ѐ-ӿ]/.test(t))).toEqual(heard);
+  });
+});
+
+describe("dropStrayStops", () => {
+  const text = (s: string) => dropStrayStops(s.split(" ").map((word) => ({ word, startMs: 0, endMs: 0 }))).map((w) => w.word).join(" ");
+
+  it("drops a full stop the sentence carries on after (E35)", () => {
+    expect(text("Tizian je však. už iný. Je ubitý")).toBe("Tizian je však už iný. Je ubitý");
+    expect(text("im. dáva mená „Dismas.“ a potom")).toBe("im dáva mená „Dismas“ a potom");
+  });
+
+  it("keeps ordinals, abbreviations, ellipses, questions and real sentence ends", () => {
+    for (const s of ["pápeža Pavla III. už v 20. storočí", "napr. keď", "To je... no", "Dobre? ale", "Koniec. Ďalší", "koniec."]) {
+      expect(text(s)).toBe(s);
+    }
   });
 });

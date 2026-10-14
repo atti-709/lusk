@@ -5,6 +5,7 @@ import { tempManager } from "../services/TempManager.js";
 import { geminiService, wordsToTsv, msToTimestamp } from "../services/GeminiService.js";
 import { settingsService } from "../services/SettingsService.js";
 import { parseTsv, wordsToCaptions, groupCaptionBlocks, geminiClipsToViralClips } from "./align.js";
+import { dropStrayStops } from "../services/alignCorrection.js";
 import type { TranscribeRequest, ErrorResponse, ViralClip, TranscriptWord, TranslatedBlock } from "@lusk/shared";
 
 type Logger = Pick<FastifyInstance["log"], "error">;
@@ -91,7 +92,7 @@ export async function runGeminiAutomation(
 
     // 2. Proofread: a sparse word-level pass that catches what the row-for-row
     //    correction misses (and is the only correction a script-less project gets)
-    words = await proofread(sessionId, words, session.scriptText ?? null, signal);
+    words = dropStrayStops(await proofread(sessionId, words, session.scriptText ?? null, signal));
 
     const tsvForClips = wordsToTsv(words);
     orchestrator.setTranscript(sessionId, { text: "", words });

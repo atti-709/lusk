@@ -174,12 +174,33 @@ export function misplacedBreaks(lines: string[]): number {
   const words = lines.filter((l) => l.trim()).map((l) => rowText(l).trim());
   let count = 0;
   for (let i = 0; i + 1 < words.length; i++) {
-    const m = /^(.*?)[.!?]["'“”»]?$/.exec(words[i]);
-    if (!m || /^\d+$/.test(m[1]) || ABBREVIATIONS.has(m[1].toLowerCase())) continue;
-    const next = words[i + 1].replace(/^["'„“»(]+/, "");
-    if (next && next[0] !== next[0].toUpperCase()) count++;
+    if (endsBeforeLowercase(words[i], words[i + 1], /[.!?]/)) count++;
   }
   return count;
+}
+
+/** `word` ends a sentence with one of `marks`, yet `next` carries on in lower case. */
+function endsBeforeLowercase(word: string, next: string, marks: RegExp): boolean {
+  const m = /^(.*?)(\.\.\.|…|[.!?])["'“”»]?$/.exec(word);
+  if (!m || m[2].length > 1 || m[2] === "…" || !marks.test(m[2])) return false;
+  // an ordinal ("v 20. storočí", "Pavla III. už") or an abbreviation ("napr.") keeps its dot
+  if (/^\d+$/.test(m[1]) || /^[IVXLC]+$/.test(m[1]) || ABBREVIATIONS.has(m[1].toLowerCase())) return false;
+  const first = next.replace(/^["'„“»(]+/, "")[0];
+  return !!first && first !== first.toUpperCase();
+}
+
+/**
+ * A full stop before a lower-case word ends the sentence too early: the correction and
+ * proofread passes still put a few onto the word before (E35: "Tizian je však. už iný",
+ * "im. dáva mená" — 1 in Whisper's transcript, 6 after them). The sentence goes on, so the
+ * stop goes. A question or an exclamation is left alone ("Dobre? ale…" may be a real one).
+ */
+export function dropStrayStops<T extends { word: string }>(words: T[]): T[] {
+  return words.map((w, i) => {
+    const next = words[i + 1];
+    if (!next || !endsBeforeLowercase(w.word, next.word, /\./)) return w;
+    return { ...w, word: w.word.replace(/\.(["'“”»]?)$/, "$1") };
+  });
 }
 
 /** A corrected row whose word is in a script Slovak never uses keeps the heard word ("svetло"). */
