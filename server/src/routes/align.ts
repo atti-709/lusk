@@ -270,11 +270,20 @@ function msToSrtTimestamp(ms: number): string {
   return `${h}:${m}:${s},${msStr}`;
 }
 
-// Per-language word sets for subtitle line-breaking
+// Per-language word sets for subtitle line-breaking (a cue doesn't start on these)
 const NO_BREAK_BEFORE: Record<TranscriptionLanguage, Set<string>> = {
   sk: new Set(["a", "i", "v", "k", "s", "z", "u", "o"]),
   cs: new Set(["a", "i", "v", "k", "s", "z", "u", "o"]),
   en: new Set(["a", "I"]),
+};
+
+// Words a subtitle line never ends on: a one-letter preposition or conjunction belongs with the
+// word after it (Slovak and Czech typesetting; Netflix and BBC: never split a preposition or an
+// article from its phrase). 59 of 1,032 line breaks ended on one (v4, 2026-10-14).
+const NO_LINE_END: Record<TranscriptionLanguage, Set<string>> = {
+  sk: new Set(["a", "i", "v", "k", "s", "z", "u", "o"]),
+  cs: new Set(["a", "i", "v", "k", "s", "z", "u", "o"]),
+  en: new Set(["a", "an", "the", "i"]),
 };
 
 const BREAK_BEFORE: Record<TranscriptionLanguage, Set<string>> = {
@@ -315,6 +324,10 @@ const MAX_LINE_CHARS = 42;
 const MAX_BLOCK_CHARS = 84;
 const MIN_DISPLAY_MS = 1000;
 const MIN_GAP_MS = 80;
+// Netflix timing: a gap under half a second between cues reads as a flicker, so the cue runs
+// on to the next one (21% of gaps were 0.1-0.5 s); and nothing stays up past 7 s.
+const CLOSE_GAP_MS = 500;
+const MAX_DISPLAY_MS = 7000;
 // A cue stays up a little past its last word (until the next cue): aligned word ends fall early
 // on fast speech, and a cue ending with the voice was gone before the line was read (E08 1:02).
 const END_HOLD_MS = 700;
@@ -362,39 +375,42 @@ export function groupCaptionBlocks(captions: CaptionWord[], lang: TranscriptionL
   return groups;
 }
 
-// Pyramid rule for plain text: split into 2 lines where top ≤ bottom
+// Pyramid rule for plain text: split into 2 lines where top ≤ bottom, never after a word that
+// belongs with the next one; a top-heavy split only where no other fits (a line over 42 chars
+// was left whole before: 100 of 3,906 lines).
 function applyPyramidRuleText(text: string, maxLineChars: number, lang: TranscriptionLanguage): string {
   if (text.length <= maxLineChars) return text;
 
   const words = text.split(/\s+/);
   const totalLen = text.length;
   const idealTop = Math.floor(totalLen / 2);
-  let bestSplit = -1;
-  let bestScore = Infinity;
+  const bare = (w: string) => w.toLowerCase().replace(/[.,;:!?„“"()–—]/g, "");
 
-  let runLen = 0;
-  for (let i = 0; i < words.length - 1; i++) {
-    runLen += words[i].length + (i > 0 ? 1 : 0);
-    const bottomLen = totalLen - runLen - 1;
+  for (const pyramid of [true, false]) {
+    let bestSplit = -1;
+    let bestScore = Infinity;
+    let runLen = 0;
+    for (let i = 0; i < words.length - 1; i++) {
+      runLen += words[i].length + (i > 0 ? 1 : 0);
+      const bottomLen = totalLen - runLen - 1;
 
-    if (runLen > maxLineChars || bottomLen > maxLineChars) continue;
-    if (runLen > bottomLen) continue;
+      if (runLen > maxLineChars || bottomLen > maxLineChars) continue;
+      if (pyramid && runLen > bottomLen) continue;
+      if (NO_LINE_END[lang].has(bare(words[i]))) continue;
 
-    const nextWord = words[i + 1].toLowerCase().replace(/[.,;:!?]/g, "");
-    if (NO_BREAK_BEFORE[lang].has(nextWord)) continue;
+      const nextWord = bare(words[i + 1]);
+      let score = Math.abs(runLen - idealTop);
+      if (endsWithPunctuation(words[i])) score -= 20;
+      if (isBreakPoint(nextWord, lang) || NO_LINE_END[lang].has(nextWord)) score -= 10;
 
-    let score = Math.abs(runLen - idealTop);
-    if (endsWithPunctuation(words[i])) score -= 20;
-    if (isBreakPoint(nextWord, lang)) score -= 10;
-
-    if (score < bestScore) {
-      bestScore = score;
-      bestSplit = i;
+      if (score < bestScore) {
+        bestScore = score;
+        bestSplit = i;
+      }
     }
+    if (bestSplit !== -1) return words.slice(0, bestSplit + 1).join(" ") + "\n" + words.slice(bestSplit + 1).join(" ");
   }
-
-  if (bestSplit === -1) return text;
-  return words.slice(0, bestSplit + 1).join(" ") + "\n" + words.slice(bestSplit + 1).join(" ");
+  return text;
 }
 
 export function formatSrtBlocks(
@@ -406,13 +422,18 @@ export function formatSrtBlocks(
   let index = 1;
 
   for (let gi = 0; gi < blocks.length; gi++) {
-    let { startMs, endMs } = blocks[gi];
+    const { startMs, endMs: spokenEndMs } = blocks[gi];
+    // held and gap-closed only up to 7 s on screen (speech that itself runs longer keeps its end)
+    const latestEndMs = Math.max(spokenEndMs, startMs + MAX_DISPLAY_MS);
 
-    endMs += END_HOLD_MS;
+    let endMs = Math.min(spokenEndMs + END_HOLD_MS, latestEndMs);
     if (endMs - startMs < MIN_DISPLAY_MS) endMs = startMs + MIN_DISPLAY_MS;
 
     if (gi + 1 < blocks.length) {
       const nextStart = blocks[gi + 1].startMs;
+      if (nextStart - endMs < CLOSE_GAP_MS && nextStart - MIN_GAP_MS <= latestEndMs) {
+        endMs = nextStart - MIN_GAP_MS;
+      }
       if (endMs > nextStart - MIN_GAP_MS) {
         endMs = Math.max(startMs + MIN_DISPLAY_MS, nextStart - MIN_GAP_MS);
       }
@@ -420,7 +441,8 @@ export function formatSrtBlocks(
 
     const start = msToSrtTimestamp(startMs);
     const end = msToSrtTimestamp(endMs);
-    const text = applyPyramidRuleText(blocks[gi].text, MAX_LINE_CHARS, lang);
+    // one line ending through the file (the two lines of a cue were LF in a CRLF file)
+    const text = applyPyramidRuleText(blocks[gi].text, MAX_LINE_CHARS, lang).replace(/\n/g, crlf);
     srt += `${index}${crlf}${start} --> ${end}${crlf}${text}${crlf}${crlf}`;
     index++;
   }
