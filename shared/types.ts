@@ -37,6 +37,9 @@ export interface TranscriptWord {
   word: string;
   startMs: number;
   endMs: number;
+  /** Set only on speech in another language than the project's (a Czech appeal in a Slovak
+   *  show): it is shown as heard, never corrected into the project's language. */
+  lang?: string;
 }
 
 export interface TranscriptData {

@@ -211,3 +211,24 @@ export function keepHeardScript(inputLines: string[], alignedLines: string[], fo
   const inputs = inputLines.filter((l) => l.trim());
   return alignedLines.map((line, i) => (foreign(rowText(line)) && inputs[i] ? inputs[i] : line));
 }
+
+/**
+ * Speech in another language than the project's comes back exactly as it was heard. The
+ * correction and proofread passes read it as Slovak and "fixed" it into Slovak (E35's Czech
+ * appeal: "kdyby se spoustu lidí" → "keby sa spústa ľudí"), whatever the prompts said. Each run
+ * of heard words tagged with a language replaces whatever the passes made of its time span.
+ */
+export function keepForeignSpeech<T extends { word: string; startMs: number; endMs: number; lang?: string }>(heard: T[], words: T[]): T[] {
+  const runs: { from: number; to: number; words: T[] }[] = [];
+  for (let i = 0; i < heard.length;) {
+    if (!heard[i].lang) { i++; continue; }
+    let j = i;
+    while (j < heard.length && heard[j].lang) j++;
+    runs.push({ from: heard[i].startMs, to: heard[j - 1].startMs, words: heard.slice(i, j) });
+    i = j;
+  }
+  if (!runs.length) return words;
+  const inRun = (w: T) => runs.some((r) => w.startMs >= r.from && w.startMs <= r.to);
+  return [...words.filter((w) => !inRun(w)), ...runs.flatMap((r) => r.words)].sort((a, b) => a.startMs - b.startMs);
+}
+

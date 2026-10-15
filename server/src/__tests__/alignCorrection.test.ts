@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { alignCorrectedRows, dropStrayStops, keepHeardScript, misplacedBreaks } from "../services/alignCorrection.js";
+import { alignCorrectedRows, dropStrayStops, keepForeignSpeech, keepHeardScript, misplacedBreaks } from "../services/alignCorrection.js";
 
 const tsv = (words: string[]) => words.map((w, i) => `00:00:${String(i).padStart(2, "0")}.000\t${w}`);
 const texts = (lines: string[]) => lines.map((l) => l.split("\t")[1]);
@@ -83,3 +83,19 @@ describe("dropStrayStops", () => {
     }
   });
 });
+
+describe("keepForeignSpeech", () => {
+  const w = (word: string, startMs: number, lang?: string) => ({ word, startMs, endMs: startMs + 200, ...(lang ? { lang } : {}) });
+  it("puts back the heard words of a passage in another language", () => {
+    // E35 19:12: the Czech appeal came back from the passes as Slovak
+    const heard = [w("je", 0), w("náruč.", 300), w("Tento", 600, "cs"), w("podcast", 900, "cs"), w("kdyby", 1200, "cs"), w("se", 1500, "cs")];
+    const final = [w("je", 0), w("náruč.", 300), w("Tento", 600), w("podcast", 900), w("keby", 1200), w("sa", 1500)];
+    expect(keepForeignSpeech(heard, final).map((x) => x.word)).toEqual(["je", "náruč.", "Tento", "podcast", "kdyby", "se"]);
+  });
+  it("keeps the passes' words everywhere else", () => {
+    const heard = [w("Dakujem", 0), w("za", 300)];
+    const final = [w("Ďakujem", 0), w("za", 300)];
+    expect(keepForeignSpeech(heard, final)).toBe(final);
+  });
+});
+

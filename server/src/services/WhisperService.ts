@@ -39,6 +39,8 @@ interface WhisperXSegment {
   end: number;
   text: string;
   words: WhisperXWord[];
+  /** Set by transcribe.py when the segment was decoded in another language than requested. */
+  language?: string;
 }
 
 interface WhisperXOutput {
@@ -59,7 +61,7 @@ function fmtSec(sec: number): string {
 }
 
 /** A word before unalignable entries have been given timestamps; null = not aligned. */
-type UntimedWord = { word: string; startMs: number | null; endMs: number | null };
+type UntimedWord = { word: string; startMs: number | null; endMs: number | null; lang?: string };
 
 /** Duration assumed for an unalignable word with no aligned neighbour to borrow from. */
 const UNALIGNED_WORD_MS = 300;
@@ -362,6 +364,7 @@ class WhisperService {
           word,
           startMs: aligned ? Math.round(w.start! * 1000) : null,
           endMs: aligned ? Math.round(w.end! * 1000) : null,
+          ...(segment.language ? { lang: segment.language } : {}),
         });
       }
     }
@@ -405,6 +408,7 @@ class WhisperService {
       word: w.word,
       startMs: w.startMs ?? 0,
       endMs: w.endMs ?? 0,
+      ...(w.lang ? { lang: w.lang } : {}),
     }));
 
     for (let i = 0; i < untimed.length; i++) {

@@ -192,8 +192,8 @@ def mlx_model(name: str) -> str:
 
 
 def chunk_languages(audio, chunks: list[tuple[float, float]], base: str, own: str) -> list[str]:
-    """The language of each chunk, as the base model identifies it: `own` unless another language
-    is clearly more likely."""
+    """The language of each chunk (or segment), as the base model identifies it: `own` unless
+    another language is clearly more likely."""
     import mlx.core as mx
     from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
     from mlx_whisper.transcribe import ModelHolder
@@ -269,7 +269,8 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
                     # chunk that ended in music): keep a segment only if most of it is real audio.
                     inside = max(0.0, min(s["end"], length) - max(s["start"], 0.0)) / max(s["end"] - s["start"], 1e-3)
                     if inside >= 0.5 and not is_stock_phrase(s["text"]) and not FOREIGN_SCRIPT.search(s["text"]):
-                        segments.append({"start": start + s["start"], "end": min(start + s["end"], end), "text": s["text"]})
+                        segments.append({"start": start + s["start"], "end": min(start + s["end"], end), "text": s["text"],
+                                         "language": language})
                 bar.update(round(length * 100))
         finally:
             if own:
@@ -290,8 +291,18 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
         clips = as_clips(chunks, total)
         with tqdm.tqdm(total=round(sum(b - a for a, b in zip(clips[::2], clips[1::2])) * 100), unit="frames") as bar:
             segments = decode([c for c, l in zip(chunks, langs) if l == language], bar=bar)
+            foreign = []
             for other in others:
-                segments += decode([c for c, l in zip(chunks, langs) if l == other], base, other, bar=bar)
+                foreign += decode([c for c, l in zip(chunks, langs) if l == other], base, other, bar=bar)
+        # a chunk is up to 30 s: a sentence of the own language inside a foreign chunk (the line before
+        # E35's Czech appeal, "A jediné miesto…", came back as Czech "město") is decoded again by the fine-tune
+        if foreign:
+            again = [(s["start"], s["end"]) for s, l in zip(foreign, chunk_languages(audio, [(s["start"], s["end"]) for s in foreign], base, language)) if l == language]
+            if again:
+                print(f"{len(again)} of {len(foreign)} sentences in those chunks are {language}: fine-tuned model", file=sys.stderr)
+                foreign = [s for s in foreign if (s["start"], s["end"]) not in again]
+                segments += decode(again)
+            segments += foreign
         return segments
 
     phase("transcribe:mlx")
@@ -374,6 +385,12 @@ def main() -> None:
     aligned = whisperx.align(segments, align_model, metadata, audio, "cpu",
                              return_char_alignments=False, print_progress=True)
 
+    # each aligned segment keeps the language it was decoded in (by overlap with the decoded ones):
+    # the host leaves speech in another language as it was heard, never "corrected" into this one
+    for seg in aligned["segments"]:
+        lang = max(segments, key=lambda s: min(s["end"], seg["end"]) - max(s["start"], seg["start"]), default={}).get("language")
+        if lang and lang != args.language:
+            seg["language"] = lang
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump({"segments": aligned["segments"]}, f, ensure_ascii=False)
     phase("done")
