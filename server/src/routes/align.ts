@@ -308,6 +308,11 @@ const BREAK_BEFORE: Record<TranscriptionLanguage, Set<string>> = {
   ]),
 };
 
+/** A word without its punctuation, lower-cased. */
+function bareWord(w: string): string {
+  return w.trim().toLowerCase().replace(/[.,;:!?„“"()–—]/g, "");
+}
+
 function isBreakPoint(word: string, lang: TranscriptionLanguage): boolean {
   return BREAK_BEFORE[lang].has(word.toLowerCase().replace(/[.,;:!?"""()–—]/g, ""));
 }
@@ -351,15 +356,19 @@ export function groupCaptionBlocks(captions: CaptionWord[], lang: TranscriptionL
     // a cue that could no longer be set as two lines of 42 closes first (it was left as one line
     // of 80+ characters: 256 cues in v4, 2026-10-15)
     if (currentBlock.length > 0 && !fitsTwoLines([...currentBlock.map((w) => w.text.trim()), word.text.trim()].join(" "), lang)) {
+      // nor does a cue end on a one-letter word: it goes on with the next ("…nás podporiť. A" /
+      // "jelikož…", 143 of 10,322 cues in v4)
+      const last = currentBlock[currentBlock.length - 1];
+      const carry = currentBlock.length > 1 && NO_LINE_END[lang].has(bareWord(last.text)) ? currentBlock.pop()! : null;
       groups.push(currentBlock);
-      currentBlock = [];
+      currentBlock = carry ? [carry] : [];
     }
 
     if (currentBlock.length >= 4 && projectedLen > MAX_LINE_CHARS) {
       const prevWord = currentBlock[currentBlock.length - 1].text.trim();
       const currWord = word.text.trim().toLowerCase().replace(/[.,;:!?]/g, "");
 
-      if (endsWithPunctuation(prevWord) || isBreakPoint(currWord, lang)) {
+      if ((endsWithPunctuation(prevWord) || isBreakPoint(currWord, lang)) && !NO_LINE_END[lang].has(bareWord(prevWord))) {
         if (!NO_BREAK_BEFORE[lang].has(currWord)) {
           groups.push(currentBlock);
           currentBlock = [];
@@ -399,7 +408,6 @@ function fitsTwoLines(text: string, lang: TranscriptionLanguage): boolean {
 function lineSplit(words: string[], maxLineChars: number, lang: TranscriptionLanguage): number {
   const totalLen = words.join(" ").length;
   const idealTop = Math.floor(totalLen / 2);
-  const bare = (w: string) => w.toLowerCase().replace(/[.,;:!?„“"()–—]/g, "");
 
   for (const pyramid of [true, false]) {
     let bestSplit = -1;
@@ -411,9 +419,9 @@ function lineSplit(words: string[], maxLineChars: number, lang: TranscriptionLan
 
       if (runLen > maxLineChars || bottomLen > maxLineChars) continue;
       if (pyramid && runLen > bottomLen) continue;
-      if (NO_LINE_END[lang].has(bare(words[i]))) continue;
+      if (NO_LINE_END[lang].has(bareWord(words[i]))) continue;
 
-      const nextWord = bare(words[i + 1]);
+      const nextWord = bareWord(words[i + 1]);
       let score = Math.abs(runLen - idealTop);
       if (endsWithPunctuation(words[i])) score -= 20;
       if (isBreakPoint(nextWord, lang) || NO_LINE_END[lang].has(nextWord)) score -= 10;

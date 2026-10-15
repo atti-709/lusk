@@ -80,4 +80,13 @@ describe("formatSrtBlocks layout", () => {
     expect(lines).toHaveLength(2);
     expect(Math.abs(lines[0].length - lines[1].length)).toBeLessThan(25);
   });
+
+  it("never ends a cue on a one-letter word", () => {
+    // E35 19:14: "…nás modlitebně nebo finančne podporiť. A" / "jelikož my chceme…"
+    const text = "kdyby se spousta lidí nerozhodla nás modlitebně nebo finančně podpořit a jelikož my chceme v tomto projektu nadále pokračovat";
+    const words = text.split(" ").map((word, i) => ({ word, startMs: i * 300, endMs: i * 300 + 250 }));
+    const groups = groupCaptionBlocks(wordsToCaptions(words), "sk");
+    expect(groups.length).toBeGreaterThan(1);
+    for (const g of groups.slice(0, -1)) expect(g[g.length - 1].text.trim()).not.toMatch(/^[aivkszuo]$/i);
+  });
 });
