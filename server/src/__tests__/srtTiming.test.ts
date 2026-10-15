@@ -89,4 +89,13 @@ describe("formatSrtBlocks layout", () => {
     expect(groups.length).toBeGreaterThan(1);
     for (const g of groups.slice(0, -1)) expect(g[g.length - 1].text.trim()).not.toMatch(/^[aivkszuo]$/i);
   });
+
+  it("closes a cue before its speech runs past 7 s", () => {
+    // E54: slow conversation filled two lines over 8.5 s
+    const words = "Volám sa Emma a som dcérou kazateľa a moja mamka".split(" ").map((word, i) => ({ word, startMs: i * 900, endMs: i * 900 + 600 }));
+    for (const g of groupCaptionBlocks(wordsToCaptions(words), "sk")) {
+      expect(g[g.length - 1].endMs - g[0].startMs).toBeLessThanOrEqual(7000);
+    }
+  });
 });
+

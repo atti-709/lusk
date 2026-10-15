@@ -354,8 +354,12 @@ export function groupCaptionBlocks(captions: CaptionWord[], lang: TranscriptionL
       : word.text.trim().length;
 
     // a cue that could no longer be set as two lines of 42 closes first (it was left as one line
-    // of 80+ characters: 256 cues in v4, 2026-10-15)
-    if (currentBlock.length > 0 && !fitsTwoLines([...currentBlock.map((w) => w.text.trim()), word.text.trim()].join(" "), lang)) {
+    // of 80+ characters: 256 cues in v4, 2026-10-15), and so does one whose speech would run past
+    // 7 s (slow conversation filled two lines over 8-10 s: 30 cues in 11 episodes)
+    if (currentBlock.length > 0 && (
+      !fitsTwoLines([...currentBlock.map((w) => w.text.trim()), word.text.trim()].join(" "), lang) ||
+      word.endMs - currentBlock[0].startMs > MAX_DISPLAY_MS
+    )) {
       // nor does a cue end on a one-letter word: it goes on with the next ("…nás podporiť. A" /
       // "jelikož…", 143 of 10,322 cues in v4)
       const last = currentBlock[currentBlock.length - 1];
