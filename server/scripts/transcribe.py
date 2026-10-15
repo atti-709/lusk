@@ -140,12 +140,37 @@ def uncovered(turns: list[tuple[float, float]], segments: list[dict]) -> list[tu
     return holes
 
 
+_resolved: dict[str, str] = {}
+
+
+def cached(repo: str) -> str:
+    """The local snapshot of a Hugging Face repo, downloaded only when it isn't cached. Given a repo
+    name, mlx-whisper asked the hub for updates on every load, and one such request hung in its TLS
+    handshake for 38 minutes (E66, 2026-10-15)."""
+    from pathlib import Path
+
+    if Path(repo).exists():
+        return repo
+    from huggingface_hub import snapshot_download
+
+    try:
+        return snapshot_download(repo_id=repo, local_files_only=True)
+    except Exception:
+        return snapshot_download(repo_id=repo)
+
+
 def mlx_model(name: str) -> str:
-    """The path or Hugging Face repo mlx-whisper loads for a model name. A fine-tuned transformers
-    checkpoint is downloaded and converted to MLX once (Apple's mlx-examples whisper/convert.py,
-    MIT: rename the weights, put the conv kernels last, float16)."""
+    """The local folder mlx-whisper loads for a model name. A fine-tuned transformers checkpoint is
+    downloaded and converted to MLX once (Apple's mlx-examples whisper/convert.py, MIT: rename the
+    weights, put the conv kernels last, float16)."""
+    if name not in _resolved:
+        _resolved[name] = _mlx_model(name)
+    return _resolved[name]
+
+
+def _mlx_model(name: str) -> str:
     if name not in LANGUAGE_MODELS:
-        return MLX_MODELS.get(name, name)
+        return cached(MLX_MODELS.get(name, name))
     import os
     from pathlib import Path
 
@@ -381,7 +406,10 @@ def main() -> None:
         segments = transcribe_whisperx(audio, args.model, args.language)
 
     phase("align")
-    align_model, metadata = whisperx.load_align_model(language_code=args.language, device="cpu")
+    try:  # the cached model, without asking the hub (see `cached`)
+        align_model, metadata = whisperx.load_align_model(language_code=args.language, device="cpu", model_cache_only=True)
+    except Exception:
+        align_model, metadata = whisperx.load_align_model(language_code=args.language, device="cpu")
     aligned = whisperx.align(segments, align_model, metadata, audio, "cpu",
                              return_char_alignments=False, print_progress=True)
 
