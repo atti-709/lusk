@@ -20,6 +20,18 @@ MLX_MODELS = {
     "large-v3": "mlx-community/whisper-large-v3-mlx",
 }
 
+# Whisper fine-tuned on one language: (Hugging Face transformers checkpoint, its language, the base
+# model). KInIT's Slovak turbo (MIT) heard the show far better than turbo itself (2026-10-15, judged by
+# listening: E00, a conversation with no script, 257 spans better / 58 worse; E08 14 / 5), but it has
+# forgotten every other language. Speech the base model identifies as another language (the Czech
+# closing appeal, an English clip) is transcribed by the base model in that language.
+LANGUAGE_MODELS = {
+    "large-v3-turbo-sk": ("kinit/whisper-large-v3-turbo-sk", "sk", "large-v3-turbo"),
+}
+# A chunk goes to the base model only when it is clearly another language: Slovak and Czech are
+# close, and the base model gives Slovak speech some Czech probability too.
+OTHER_LANGUAGE_MIN_P = 0.6
+
 
 def phase(name: str) -> None:
     print(f"PHASE {name}", flush=True)
@@ -45,6 +57,18 @@ STOCK_PHRASES = {
 # Letters Slovak never uses: Whisper now and then writes a Cyrillic word into Slovak speech
 # (E00 17:25 "Kцési."); the segment is dropped and its speech decoded again.
 FOREIGN_SCRIPT = re.compile("[\u0400-\u04FF\u0590-\u06FF\u3040-\u30FF\u4E00-\u9FFF]")
+
+
+def is_loop(text: str) -> bool:
+    """Whisper stuck repeating itself: a unit of 1-4 words five times or more in a row (the Slovak
+    model, E00 37:10: "Tak," 24 times over speech turbo heard as "No, tak bude vedieť...")."""
+    words = plain_words(text)
+    for n in range(1, 5):
+        for i in range(len(words) - 5 * n + 1):
+            unit = words[i:i + n]
+            if all(words[i + k * n:i + (k + 1) * n] == unit for k in range(1, 5)):
+                return True
+    return False
 
 
 def is_stock_phrase(text: str) -> bool:
@@ -116,6 +140,76 @@ def uncovered(turns: list[tuple[float, float]], segments: list[dict]) -> list[tu
     return holes
 
 
+def mlx_model(name: str) -> str:
+    """The path or Hugging Face repo mlx-whisper loads for a model name. A fine-tuned transformers
+    checkpoint is downloaded and converted to MLX once (Apple's mlx-examples whisper/convert.py,
+    MIT: rename the weights, put the conv kernels last, float16)."""
+    if name not in LANGUAGE_MODELS:
+        return MLX_MODELS.get(name, name)
+    import os
+    from pathlib import Path
+
+    repo = LANGUAGE_MODELS[name][0]
+    hf_home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
+    out = hf_home / "lusk-mlx" / repo.replace("/", "--")
+    if (out / "weights.safetensors").exists() and (out / "config.json").exists():
+        return str(out)
+
+    import mlx.core as mx
+    from huggingface_hub import snapshot_download
+
+    phase("download:model")
+    src = Path(snapshot_download(repo_id=repo, allow_patterns=["config.json", "model.safetensors"]))
+    hf = json.loads((src / "config.json").read_text())
+    config = {
+        "n_mels": hf["num_mel_bins"], "n_audio_ctx": hf["max_source_positions"], "n_audio_state": hf["d_model"],
+        "n_audio_head": hf["encoder_attention_heads"], "n_audio_layer": hf["encoder_layers"],
+        "n_vocab": hf["vocab_size"], "n_text_ctx": hf["max_target_positions"], "n_text_state": hf["d_model"],
+        "n_text_head": hf["decoder_attention_heads"], "n_text_layer": hf["decoder_layers"], "model_type": "whisper",
+    }
+    renames = [("model.", ""), (".layers", ".blocks"), (".self_attn", ".attn"), (".attn_layer_norm", ".attn_ln"),
+               (".encoder_attn.", ".cross_attn."), (".encoder_attn_layer_norm", ".cross_attn_ln"),
+               (".final_layer_norm", ".mlp_ln"), (".q_proj", ".query"), (".k_proj", ".key"), (".v_proj", ".value"),
+               (".out_proj", ".out"), (".fc1", ".mlp1"), (".fc2", ".mlp2"),
+               ("embed_positions.weight", "positional_embedding"), ("decoder.embed_tokens", "decoder.token_embedding"),
+               ("encoder.layer_norm", "encoder.ln_post"), ("decoder.layer_norm", "decoder.ln")]
+    weights = {}
+    for key, value in mx.load(str(src / "model.safetensors")).items():
+        if key == "proj_out.weight":  # tied to the token embedding
+            continue
+        for a, b in renames:
+            key = key.replace(a, b)
+        if key == "encoder.positional_embedding":  # sinusoidal, computed by the model
+            continue
+        if "conv" in key and value.ndim == 3:
+            value = value.swapaxes(1, 2)
+        weights[key] = value.astype(mx.float16)
+    out.mkdir(parents=True, exist_ok=True)
+    mx.save_safetensors(str(out / "weights.partial.safetensors"), weights)
+    (out / "config.json").write_text(json.dumps(config, indent=2))
+    (out / "weights.partial.safetensors").rename(out / "weights.safetensors")
+    return str(out)
+
+
+def chunk_languages(audio, chunks: list[tuple[float, float]], base: str, own: str) -> list[str]:
+    """The language of each chunk, as the base model identifies it: `own` unless another language
+    is clearly more likely."""
+    import mlx.core as mx
+    from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
+    from mlx_whisper.transcribe import ModelHolder
+    from whisperx.audio import SAMPLE_RATE
+
+    model = ModelHolder.get_model(mlx_model(base), mx.float16)
+    found = []
+    for start, end in chunks:
+        clip = audio[round(start * SAMPLE_RATE):round(end * SAMPLE_RATE)]
+        mel = pad_or_trim(log_mel_spectrogram(clip, n_mels=model.dims.n_mels, padding=N_SAMPLES), N_FRAMES, axis=-2)
+        _, probs = model.detect_language(mel.astype(mx.float16))
+        best = max(probs, key=probs.get)
+        found.append(best if best != own and probs[best] >= OTHER_LANGUAGE_MIN_P else own)
+    return found
+
+
 def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
     """Only the speech is decoded. Fed whole 30 s windows, Whisper read music, silence and
     the outro sting as speech: a window that began in a music bed came back as one
@@ -135,7 +229,7 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
     turns = speech_turns(audio)
     total = len(audio) / SAMPLE_RATE
 
-    def decode(regions):
+    def decode(regions, model=model, language=language, bar=None):
         """Each chunk is decoded from its own slice of the audio. mlx-whisper's own
         `clip_timestamps` never seeks to a clip's start — every clip is decoded from where
         the previous one ended, the music between them included (E47, E67: sentences after
@@ -146,13 +240,16 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
         spans = list(zip(clips[::2], clips[1::2]))
         segments = []
         # one bar over all chunks, counted in frames like mlx-whisper's own (the host parses it)
-        with tqdm.tqdm(total=round(sum(b - a for a, b in spans) * 100), unit="frames") as bar:
+        own = bar is None
+        if own:
+            bar = tqdm.tqdm(total=round(sum(b - a for a, b in spans) * 100), unit="frames")
+        try:
             for start, end in spans:
                 clip = audio[round(start * SAMPLE_RATE):round(end * SAMPLE_RATE)]
                 mx.clear_cache()
                 result = mlx_whisper.transcribe(
                     clip,
-                    path_or_hf_repo=MLX_MODELS.get(model, model),
+                    path_or_hf_repo=mlx_model(model),
                     language=language,
                     # Feeding each window the previous one's text is what lets Whisper fall into
                     # a repetition loop on long recordings; podcasts gain little from it in return.
@@ -160,6 +257,12 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
                     verbose=None,  # no per-chunk bar
                 )
                 length = end - start
+                base = LANGUAGE_MODELS.get(model, (None, None, None))[2]
+                if base and any(is_loop(s["text"]) for s in result["segments"]):
+                    # a fine-tuned model stuck in a loop: the chunk is decoded by the base model instead
+                    print(f"repetition loop at {start:.0f} s: base model", file=sys.stderr)
+                    result = mlx_whisper.transcribe(clip, path_or_hf_repo=mlx_model(base), language=language,
+                                                    condition_on_previous_text=False, verbose=None)
                 for s in result["segments"]:
                     # Past the clip's end Whisper's window is padded with silence, and what it
                     # "hears" there is invented (E42: "Zdravíte!" stretched over the 30 s after a
@@ -168,14 +271,35 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
                     if inside >= 0.5 and not is_stock_phrase(s["text"]) and not FOREIGN_SCRIPT.search(s["text"]):
                         segments.append({"start": start + s["start"], "end": min(start + s["end"], end), "text": s["text"]})
                 bar.update(round(length * 100))
+        finally:
+            if own:
+                bar.close()
+        return segments
+
+    def routed(chunks):
+        """A fine-tuned model decodes its own language; the base model every chunk in another one."""
+        if model not in LANGUAGE_MODELS or language != LANGUAGE_MODELS[model][1]:
+            return decode(chunks)
+        import tqdm
+
+        base = LANGUAGE_MODELS[model][2]
+        langs = chunk_languages(audio, chunks, base, language)
+        others = sorted({l for l in langs if l != language})
+        if others:
+            print(f"{sum(l != language for l in langs)} of {len(chunks)} chunks in {', '.join(others)}: base model", file=sys.stderr)
+        clips = as_clips(chunks, total)
+        with tqdm.tqdm(total=round(sum(b - a for a, b in zip(clips[::2], clips[1::2])) * 100), unit="frames") as bar:
+            segments = decode([c for c, l in zip(chunks, langs) if l == language], bar=bar)
+            for other in others:
+                segments += decode([c for c, l in zip(chunks, langs) if l == other], base, other, bar=bar)
         return segments
 
     phase("transcribe:mlx")
-    segments = decode(join_turns(turns))
+    segments = routed(join_turns(turns))
     holes = uncovered(turns, segments)
     if holes:
         print(f"decoding {len(holes)} uncovered speech stretches again ({sum(b - a for a, b in holes):.0f} s)", file=sys.stderr)
-        segments += [s for s in decode(join_turns(holes)) if not already_said(s, segments)]
+        segments += [s for s in routed(join_turns(holes)) if not already_said(s, segments)]
     return join_sentences(sorted(segments, key=lambda s: s["start"]))
 
 
@@ -213,6 +337,8 @@ def already_said(seg: dict, segments: list[dict]) -> bool:
 
 def transcribe_whisperx(audio, model: str, language: str) -> list[dict]:
     import whisperx
+
+    model = LANGUAGE_MODELS.get(model, (None, None, model))[2]  # faster-whisper has only the base models
 
     phase("transcribe:whisperx")
     asr = whisperx.load_model(model, "cpu", compute_type="int8", language=language)

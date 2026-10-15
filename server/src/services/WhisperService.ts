@@ -10,6 +10,8 @@ import { spawnGroup, killGroup } from "./ChildProcesses.js";
 import { probeCodecs } from "./PlayableVideo.js";
 
 const WHISPERX_MODEL = "large-v3-turbo";
+/** Languages with a fine-tuned model (transcribe.py's LANGUAGE_MODELS): Slovak heard far better. */
+const LANGUAGE_MODELS: Record<string, string> = { sk: "large-v3-turbo-sk" };
 
 /** Where Hugging Face caches the MLX build of the model — absent before the first run. */
 const MLX_MODEL_CACHE = path.join(
@@ -210,7 +212,8 @@ class WhisperService {
     const args = [
       pythonEnvService.getScriptPath("transcribe.py"),
       audioPath,
-      "--model", WHISPERX_MODEL,
+      // LUSK_WHISPER_MODEL: another MLX Whisper (a local folder or a Hugging Face repo), to compare models
+      "--model", process.env.LUSK_WHISPER_MODEL || LANGUAGE_MODELS[language] || WHISPERX_MODEL,
       "--language", language,
       "--out", jsonPath,
     ];
@@ -256,6 +259,9 @@ class WhisperService {
         for (const line of parts) {
           const phase = /^PHASE (\S+)/.exec(line);
           if (phase) {
+            if (phase[1] === "download:model") {
+              onProgress?.(current.from, "Downloading the Slovak transcription model (first run, ~1.6 GB)...");
+            }
             if (phase[1] === "transcribe:mlx" && !fs.existsSync(MLX_MODEL_CACHE)) {
               onProgress?.(current.from, "Downloading the transcription model (first run, ~1.6 GB)...");
             }

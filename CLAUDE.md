@@ -37,11 +37,12 @@
 ### **2. Transcription (Server Side)**
 
 * **Tool:** `server/scripts/transcribe.py`, run in the managed Python env by `WhisperService.ts`.
-* **Model:** `large-v3-turbo`, language from settings (default `sk`).
+* **Model:** for Slovak `large-v3-turbo-sk` — KInIT's Slovak fine-tune of turbo (`kinit/whisper-large-v3-turbo-sk`, MIT), judged by listening far better than turbo (E00 257:58, E08 14:5); other languages `large-v3-turbo`. Language from settings (default `sk`). `LUSK_WHISPER_MODEL` overrides the model (a local MLX folder or a Hugging Face repo) for comparisons.
+* **Other languages in Slovak speech:** the fine-tune has forgotten every other language, so turbo identifies each chunk's language first (`chunk_languages`); a chunk clearly in another one (≥0.6, e.g. the Czech closing appeal) is decoded by turbo in that language. A chunk the fine-tune decodes as a repetition loop (`is_loop`: "Tak," ×24, E00) is decoded by turbo instead.
 * **Flow:** Server extracts audio to `audio.wav` (16kHz mono via ffmpeg). The script transcribes with **mlx-whisper on the Apple GPU** (Metal; ~6× faster than WhisperX's CPU-only faster-whisper), then runs **WhisperX's wav2vec2 forced alignment** for per-word timings. Without MLX it falls back to WhisperX's own transcriber. Output is WhisperX's JSON shape.
 * **Speech only:** MLX decodes only what WhisperX's pyannote VAD marks as speech (turns joined up to 30 s across ≤2 s pauses, each chunk decoded from its own audio slice — mlx-whisper's `clip_timestamps` never seeks to a clip's start and decoded the music between clips). Fed whole windows, Whisper invented "Ďakujem za pozornosť." over music, silence and the outro sting, and skipped the speech after a music bed (15-27 s lost in E08, E42, E47, E66, E67). Segments mostly outside the decoded audio (Whisper "hears" words in its silence padding) and stock sign-offs are dropped; speech no segment covers (≥1 s) is decoded again on its own. A chunk's final full stop is dropped when the next chunk starts lower-case (a mid-sentence pause; ordinals and abbreviations keep theirs). MLX's buffer cache is capped (E66 peak 6.3 → 4.6 GB).
 * **Output:** Per-word `start`/`end` timestamps in seconds. Words with missing alignment are interpolated linearly between their neighbours.
-* **First-run model download:** the MLX model (`mlx-community/whisper-large-v3-turbo`, ~1.6 GB) and the Slovak wav2vec2 alignment model download on first use into `~/.cache/huggingface`.
+* **First-run model download:** the MLX model (`mlx-community/whisper-large-v3-turbo`, ~1.6 GB), the Slovak fine-tune (~1.6 GB, converted to MLX once into `~/.cache/huggingface/lusk-mlx/` by `mlx_model`) and the Slovak wav2vec2 alignment model download on first use into `~/.cache/huggingface`. Peak memory with both Whisper models: ~6 GB.
 * **Note:** `server/whisper.cpp/` is a legacy artifact — it is not used.
 
 ### **3. Viral Clip Detection (Server Side)**
