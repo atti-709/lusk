@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatSrtBlocks } from "../routes/align.js";
+import { formatSrtBlocks, groupCaptionBlocks, wordsToCaptions } from "../routes/align.js";
 
 const times = (srt: string) => [...srt.matchAll(/(\d\d:\d\d:\d\d,\d{3}) --> (\d\d:\d\d:\d\d,\d{3})/g)].map((m) => [m[1], m[2]]);
 
@@ -57,5 +57,27 @@ describe("formatSrtBlocks layout", () => {
     const lines = cue(formatSrtBlocks([{ text, startMs: 0, endMs: 3000 }], "sk"));
     expect(lines).toHaveLength(2);
     for (const l of lines) expect(l.length).toBeLessThanOrEqual(42);
+  });
+
+  it("closes a cue before it could no longer be set as two lines of 42", () => {
+    // E22 0:04: 84 characters whose only 42/42 splits end a line on "s" or "a" came out as one line
+    const text = "že náš vesmír je jemne vyladený pre existenciu inteligentného života s presnosťou a zložitosťou";
+    const words = text.split(" ").map((word, i) => ({ word, startMs: i * 300, endMs: i * 300 + 250 }));
+    const blocks = groupCaptionBlocks(wordsToCaptions(words), "sk").map((g) => ({
+      text: g.map((w) => w.text.trim()).join(" "), startMs: g[0].startMs, endMs: g[g.length - 1].endMs,
+    }));
+    const srt = formatSrtBlocks(blocks, "sk");
+    for (let i = 0; i < blocks.length; i++) {
+      const lines = cue(srt, i);
+      expect(lines.length).toBeLessThanOrEqual(2);
+      for (const l of lines) expect(l.length).toBeLessThanOrEqual(42);
+    }
+  });
+
+  it("sets a translation too long for two lines of 42 on two balanced lines", () => {
+    const text = "And this is exactly what the authors of the gospel wanted to show to the people of their own time";
+    const lines = cue(formatSrtBlocks([{ text, startMs: 0, endMs: 5000 }], "en"));
+    expect(lines).toHaveLength(2);
+    expect(Math.abs(lines[0].length - lines[1].length)).toBeLessThan(25);
   });
 });

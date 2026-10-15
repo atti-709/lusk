@@ -321,7 +321,6 @@ function blockTextLength(words: CaptionWord[]): number {
 }
 
 const MAX_LINE_CHARS = 42;
-const MAX_BLOCK_CHARS = 84;
 const MIN_DISPLAY_MS = 1000;
 const MIN_GAP_MS = 80;
 // Netflix timing: a gap under half a second between cues reads as a flicker, so the cue runs
@@ -349,7 +348,9 @@ export function groupCaptionBlocks(captions: CaptionWord[], lang: TranscriptionL
       ? blockTextLength(currentBlock) + 1 + word.text.trim().length
       : word.text.trim().length;
 
-    if (currentBlock.length > 0 && projectedLen > MAX_BLOCK_CHARS) {
+    // a cue that could no longer be set as two lines of 42 closes first (it was left as one line
+    // of 80+ characters: 256 cues in v4, 2026-10-15)
+    if (currentBlock.length > 0 && !fitsTwoLines([...currentBlock.map((w) => w.text.trim()), word.text.trim()].join(" "), lang)) {
       groups.push(currentBlock);
       currentBlock = [];
     }
@@ -380,9 +381,23 @@ export function groupCaptionBlocks(captions: CaptionWord[], lang: TranscriptionL
 // was left whole before: 100 of 3,906 lines).
 function applyPyramidRuleText(text: string, maxLineChars: number, lang: TranscriptionLanguage): string {
   if (text.length <= maxLineChars) return text;
-
   const words = text.split(/\s+/);
-  const totalLen = text.length;
+  let at = lineSplit(words, maxLineChars, lang);
+  // a translation can run past two lines of 42 in a cue timed to the Slovak (75-120 chars, 167
+  // cues in 12 episodes): two balanced lines read better than one that runs off the screen
+  if (at === -1) at = lineSplit(words, Math.ceil(text.length / 2) + 12, lang);
+  if (at === -1) return text;
+  return words.slice(0, at + 1).join(" ") + "\n" + words.slice(at + 1).join(" ");
+}
+
+/** Whether a cue's text can be set on at most two lines (see `lineSplit`). */
+function fitsTwoLines(text: string, lang: TranscriptionLanguage): boolean {
+  return text.length <= MAX_LINE_CHARS || lineSplit(text.split(/\s+/), MAX_LINE_CHARS, lang) !== -1;
+}
+
+/** The word the top line ends on, or -1 when no split keeps both lines within the limit. */
+function lineSplit(words: string[], maxLineChars: number, lang: TranscriptionLanguage): number {
+  const totalLen = words.join(" ").length;
   const idealTop = Math.floor(totalLen / 2);
   const bare = (w: string) => w.toLowerCase().replace(/[.,;:!?„“"()–—]/g, "");
 
@@ -408,9 +423,9 @@ function applyPyramidRuleText(text: string, maxLineChars: number, lang: Transcri
         bestSplit = i;
       }
     }
-    if (bestSplit !== -1) return words.slice(0, bestSplit + 1).join(" ") + "\n" + words.slice(bestSplit + 1).join(" ");
+    if (bestSplit !== -1) return bestSplit;
   }
-  return text;
+  return -1;
 }
 
 export function formatSrtBlocks(
