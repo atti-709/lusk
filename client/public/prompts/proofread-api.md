@@ -18,6 +18,7 @@ Speech recognition makes characteristic mistakes. Fix these:
 8. **Capitalization** — a capital letter after a comma, or a lowercase sentence start. Names, places and books keep their capitals.
 9. **Hallucinated repeats** — the same word or phrase transcribed twice in a row when it was said once.
 10. **Names** — characters, places and people in their established Slovak spelling (the Slovak release or common usage: "Rafiki", "Scar", "Elsa", "Arendelle"), even where the script spells them differently.
+11. **Written forms of spoken words** — the transcriber sometimes writes what was said in words as a numeral or an abbreviation: an enumeration ("1.", "(1)", "2.)" for "Po prvé", "Po druhé") or an abbreviation said in full ("tzv." for "takzvanú", "resp." for "respektíve", "napr." for "napríklad"). Write them out as they were said, in the form the sentence needs.
 
 ## What NOT to change
 
@@ -25,7 +26,7 @@ Speech recognition makes characteristic mistakes. Fix these:
 - Keep filler words, repetitions and false starts that were really spoken.
 - Keep regional or colloquial forms that are real speech, and the speaker's own word forms when they are correct ("doplnkom" stays even if "doplnok" would also fit).
 - Never end a sentence in the middle of one: a period goes only where the speaker finished a thought, never before a word that continues it ("je však. už iný" is wrong).
-- Do not change numbers written as digits into words or the reverse.
+- Do not change other numbers written as digits into words or the reverse (a year, "98 %", "10 Božích prikázaní" stay as they are).
 - When unsure, leave it. A wrong "fix" is worse than a missed one.
 
 {{SCRIPT_NOTE}}
