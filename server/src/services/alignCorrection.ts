@@ -153,6 +153,9 @@ export function alignCorrectedRows(inputLines: string[], outputLines: string[]):
     }
     if (text[k]) {
       words[i] = isCorrection(inputs[i].norm, normalizeWord(text[k])) ? text[k] : keepHeard(inputs[i].word, text[k]);
+      // brackets Gemini put round words that were heard plainly (E45: 97 words of a quotation as
+      // "[nám] [vložil] [večnosť]", which the translation copied)
+      if (/[[\]]/.test(words[i]) && !/[[\]]/.test(inputs[i].word)) words[i] = words[i].replace(/[[\]]/g, "");
     }
     if (pendingEnd !== null) {
       if (!TRAILING_PUNCT.test(words[i])) words[i] += pendingEnd;

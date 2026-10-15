@@ -10,6 +10,12 @@ describe("alignCorrectedRows", () => {
     expect(out).toEqual(["00:00:00.000\tĎakujem", "00:00:01.000\tza", "00:00:02.000\tmyšlienku."]);
   });
 
+  it("drops brackets Gemini puts round words that were heard plainly", () => {
+    // E45 9:46: a quotation came back as "[nám] [vložil] [večnosť]" and the translation copied it
+    const out = alignCorrectedRows(tsv(["Boh", "nám", "vložil", "väčnosť", "[smiech]"]), tsv(["Boh", "[nám]", "[vložil]", "[večnosť]", "[smiech]"]));
+    expect(texts(out)).toEqual(["Boh", "nám", "vložil", "večnosť", "[smiech]"]);
+  });
+
   it("does not shift rows between a script word inserted and another dropped", () => {
     // Same row count, but "božiu" was inserted and "dnes" dropped: by index every row
     // between them would take its neighbour's word.
