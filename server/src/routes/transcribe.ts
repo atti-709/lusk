@@ -102,9 +102,19 @@ export async function runGeminiAutomation(
     orchestrator.setCorrectedTranscriptRaw(sessionId, tsvForClips);
     orchestrator.setCaptions(sessionId, wordsToCaptions(words));
 
-    // 3. Detect viral clips
+    // 3. Detect viral clips. A failure here no longer throws the finished captions away: it
+    //    aborted the translation and left the project short of READY (E01, E16 in the
+    //    2026-10-15 batch, after 1.5-8.5 min of retries). The clips can be asked for again
+    //    with Regenerate on the clips page.
     const transcriptEndMs = rawTranscript.words.at(-1)?.endMs ?? 0;
-    const clips = await detectClips(sessionId, tsvForClips, words, transcriptEndMs, signal);
+    let clips: ViralClip[] = [];
+    try {
+      clips = await detectClips(sessionId, tsvForClips, words, transcriptEndMs, signal);
+    } catch (err: any) {
+      if (signal?.aborted) throw err;
+      log.error(err, "Clip detection failed, continuing without clips");
+      orchestrator.updateProgress(sessionId, 88, "Clip suggestions failed — use Regenerate on the clips page");
+    }
     orchestrator.setViralClips(sessionId, clips);
 
     // 4. Translate captions to English (if source language is not English)
