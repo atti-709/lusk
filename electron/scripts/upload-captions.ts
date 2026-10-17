@@ -7,9 +7,13 @@
  *   npm run captions -w @lusk/electron -- confirm         # accept that table (plan/upload refuse until then)
  *   npm run captions -w @lusk/electron -- plan            # dry run: per video, which tracks would be added / replaced
  *   npm run captions -w @lusk/electron -- upload --only E01
- *   caffeinate -i npm run captions -w @lusk/electron -- upload --all --wait
+ *   npm run captions -w @lusk/electron -- upload --all --wait
  *
  * Nothing on the drive is written: the SRTs and `.lusk` projects are only read.
+ *
+ * Where the published video isn't the drive's cut (an intro added, pieces cut out), the
+ * subtitles timed to it go in `<work>/published/E##_captions_<lang>.srt` and are uploaded
+ * instead of the drive's file for that language.
  *
  * Matching uses the episode number in the YouTube title, the title words, and the duration:
  * the episode's `.lusk` project records its source's length, and a video of the same length
@@ -84,6 +88,7 @@ const STATE_FILE = path.join(WORK, "state.json");
 const FINAL_FILE = path.join(WORK, "final.json");
 const LOG_FILE = path.join(WORK, "upload.log");
 const BACKUP_DIR = path.join(WORK, "backups");
+const PUBLISHED_DIR = path.join(WORK, "published");
 
 const SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl";
 const API = "https://www.googleapis.com/youtube/v3";
@@ -449,8 +454,9 @@ function scanEpisodes(withDurations: boolean): Episode[] {
     const dir = path.join(EPISODES, name);
     const srt: Episode["srt"] = {};
     for (const lang of LANGS) {
-      const file = path.join(dir, `${code}_captions_${lang}.srt`);
-      if (existsSync(file)) srt[lang] = file;
+      const name = `${code}_captions_${lang}.srt`;
+      const file = [path.join(PUBLISHED_DIR, name), path.join(dir, name)].find((f) => existsSync(f));
+      if (file) srt[lang] = file;
     }
     if (!Object.keys(srt).length) continue;
     const ep: Episode = { code, num: Number(num), title: title.trim(), dir, srt };
