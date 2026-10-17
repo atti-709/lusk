@@ -43,6 +43,7 @@ VAD_PAD_S = 0.2  # so a soft first or last syllable isn't clipped
 VAD_JOIN_GAP_S = 2.0  # ...but not across a longer pause, which is often music
 HOLE_MARGIN_S = 0.5  # Whisper's segment times are this loose
 HOLE_MIN_S = 1.0  # uncovered speech this long is decoded again on its own (E66 12:39, 1.3 s)
+MAX_CHARS_PER_S = 30  # fast Slovak speech is ~15-20; a segment denser than this has a wrong end time
 
 # What Whisper writes over music, silence or a window's end: the sign-off of the videos it
 # was trained on. Never once spoken in the show's 79 episodes (each case checked against
@@ -288,7 +289,14 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
                     print(f"repetition loop at {start:.0f} s: base model", file=sys.stderr)
                     result = mlx_whisper.transcribe(clip, path_or_hf_repo=mlx_model(base), language=language,
                                                     condition_on_previous_text=False, verbose=None)
-                for s in result["segments"]:
+                found = result["segments"]
+                for i, s in enumerate(found):
+                    # Whisper now and then stamps a long passage over a second or two (E53 11:22: 20 s
+                    # of speech as 681.9-684.4); aligned inside that span, all its words were dropped.
+                    # Such a segment runs on to the next one, or to the clip's end.
+                    if len(s["text"].strip()) > MAX_CHARS_PER_S * max(s["end"] - s["start"], 1e-3):
+                        s["end"] = max(s["end"], min(found[i + 1]["start"] if i + 1 < len(found) else length, length))
+                for s in found:
                     # Past the clip's end Whisper's window is padded with silence, and what it
                     # "hears" there is invented (E42: "Zdravíte!" stretched over the 30 s after a
                     # chunk that ended in music): keep a segment only if most of it is real audio.
