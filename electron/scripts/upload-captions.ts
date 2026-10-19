@@ -835,7 +835,9 @@ async function upload() {
         process.exit(75);
       }
       log(`Waiting until ${resumeAt.toLocaleString("sk-SK")}…`);
-      await sleep(resetIn + 10 * 60_000);
+      // A timer doesn't run while the Mac sleeps: one long wait overslept the reset by days.
+      // Short steps against the wall clock resume as soon as the Mac is awake after it.
+      while (Date.now() < resumeAt.getTime()) await sleep(Math.min(60_000, resumeAt.getTime() - Date.now()));
     }
   }
   const done = Object.keys(state.tracks).length;
