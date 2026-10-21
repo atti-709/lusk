@@ -291,14 +291,33 @@ class ApiError extends Error {
   }
 }
 
+/** Errors where the request never reached Google, so sending it again can't add a second track. */
+const OFFLINE_CODES = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ENETDOWN", "UND_ERR_CONNECT_TIMEOUT"]);
+
+/** Runs `send`, waiting for the network while it's down: right after the Mac wakes, the first
+ *  request after the quota reset failed ("fetch failed", E28) and ended the run. */
+async function whenOnline<T>(send: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await send();
+    } catch (err) {
+      const cause = (err as { cause?: { code?: string; errors?: { code?: string }[] } }).cause;
+      const code = cause?.code ?? cause?.errors?.[0]?.code ?? "";
+      if (!OFFLINE_CODES.has(code) || attempt >= 20) throw err;
+      if (attempt === 0) log(`Network unavailable (${code}), waiting for it…`);
+      await sleep(30_000);
+    }
+  }
+}
+
 async function call(method: string, url: string, units: number, body?: { data: Buffer; contentType: string }): Promise<Response> {
   ensureBudget(units);
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, {
+    const res = await whenOnline(async () => fetch(url, {
       method,
       headers: { Authorization: `Bearer ${await accessToken()}`, ...(body ? { "Content-Type": body.contentType } : {}) },
       body: body && new Uint8Array(body.data),
-    });
+    }));
     // Google counts a request against the quota whether or not it succeeds.
     quotaUsed();
     state.quota.used += units;
