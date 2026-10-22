@@ -827,6 +827,7 @@ async function upload() {
   }
   log(`Upload run: ${entries.length} videos${ONLY ? ` (${ONLY.join(", ")})` : ""}; quota used today ${quotaUsed()}/${DAILY_QUOTA}`);
 
+  let networkRetries = 0;
   for (let i = 0; i < entries.length; ) {
     const entry = entries[i];
     const ep = episodes.get(entry.code);
@@ -841,7 +842,15 @@ async function upload() {
         await uploadTrack(t);
       }
       i++;
+      networkRetries = 0;
     } catch (err) {
+      // The Mac went back to sleep mid-request (E49, 9:29). The episode is planned again from its
+      // live track list, so a track the cut-off request did create is replaced, never doubled.
+      if (err instanceof TypeError && err.message === "fetch failed" && networkRetries++ < 60) {
+        log(`${entry.code}: connection lost (${(err.cause as Error | undefined)?.message ?? "fetch failed"}) — trying again in a minute`);
+        await sleep(60_000);
+        continue;
+      }
       if (!(err instanceof QuotaStop)) {
         log(`${entry.code}: FAILED — ${(err as Error).message}`);
         throw err;
