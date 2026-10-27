@@ -240,6 +240,17 @@ export interface ClipRenderState {
   outputUrl: string | null;
 }
 
+/** Spoken language of a project: set when it is created, read by every pipeline step and export. */
+export type ProjectLanguage = "sk" | "cs" | "en";
+export const PROJECT_LANGUAGES: readonly ProjectLanguage[] = ["sk", "cs", "en"];
+/** What a project saved before the language was stored is read as. */
+export const DEFAULT_PROJECT_LANGUAGE: ProjectLanguage = "sk";
+
+/** `value` if it is a supported language, else `fallback`. */
+export function parseProjectLanguage(value: unknown, fallback: ProjectLanguage = DEFAULT_PROJECT_LANGUAGE): ProjectLanguage {
+  return PROJECT_LANGUAGES.includes(value as ProjectLanguage) ? (value as ProjectLanguage) : fallback;
+}
+
 // Persisted project data (saved to .lusk files)
 export interface ProjectData {
   version: number;
@@ -252,6 +263,7 @@ export interface ProjectData {
   videoWidth: number | null;   // source pixel width
   videoHeight: number | null;  // source pixel height
   videoFps?: number | null;    // source frame rate (absent in projects saved before it was probed)
+  language: ProjectLanguage;   // absent in older .lusk files: read as "sk"
   state: PipelineState;
   transcript: TranscriptData | null;
   originalTranscript?: TranscriptData | null;
@@ -314,6 +326,13 @@ export interface OpenProjectResponse {
   projectId: string;
   videoName: string | null;
   state: PipelineState;
+}
+
+export interface CreateProjectRequest {
+  projectPath: string;
+  videoPath?: string;
+  /** Defaults to the Settings language when omitted. */
+  language?: ProjectLanguage;
 }
 
 export interface CreateProjectResponse {

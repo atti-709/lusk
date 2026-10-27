@@ -4,11 +4,14 @@ import { getFFmpegPath } from "../config/ffmpeg.js";
 import type {
   BrowseRequest,
   BrowseResponse,
+  CreateProjectRequest,
   CreateProjectResponse,
   OpenProjectResponse,
   RecentProject,
   ErrorResponse,
 } from "@lusk/shared";
+import { parseProjectLanguage } from "@lusk/shared";
+import { settingsService } from "../services/SettingsService.js";
 import { orchestrator } from "../services/Orchestrator.js";
 import { projectFileService, probeVideoMeta } from "../services/ProjectFileService.js";
 import { tempManager } from "../services/TempManager.js";
@@ -67,14 +70,17 @@ export const projectsRoute: FastifyPluginAsync = async (server) => {
   // POST /api/projects/create
   // -------------------------------------------------------------------------
   server.post<{
-    Body: { projectPath: string; videoPath?: string };
+    Body: CreateProjectRequest;
     Reply: CreateProjectResponse | ErrorResponse;
   }>("/api/projects/create", async (request, reply) => {
     try {
-      const { projectPath, videoPath } = request.body;
+      const { projectPath, videoPath, language } = request.body;
+      // The Settings language is only the default for a new project; from here on the
+      // project's own value is what every step reads
       const state = await projectFileService.createProject(
         projectPath,
         videoPath,
+        parseProjectLanguage(language, await settingsService.getTranscriptionLanguage()),
       );
       orchestrator.restoreSession(state);
       return reply.send({ success: true, projectId: state.projectId });

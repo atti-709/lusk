@@ -2,9 +2,8 @@ import path from "node:path";
 import fs from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import { access, readFile, unlink } from "node:fs/promises";
-import type { TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
+import type { ProjectLanguage, TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
 import { getFFmpegPath } from "../config/ffmpeg.js";
-import { settingsService } from "./SettingsService.js";
 import { pythonEnvService } from "./PythonEnvService.js";
 import { spawnGroup, killGroup } from "./ChildProcesses.js";
 import { probeCodecs } from "./PlayableVideo.js";
@@ -318,6 +317,7 @@ class WhisperService {
 
   async transcribe(
     sessionDir: string,
+    language: ProjectLanguage,
     onProgress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<TranscriptionResult> {
@@ -337,7 +337,6 @@ class WhisperService {
     if (signal?.aborted) throw new Error("Transcription cancelled");
 
     // Step 3: Run WhisperX (transcription + forced alignment)
-    const language = await settingsService.getTranscriptionLanguage();
     onProgress?.(10, "Starting transcription...");
     const whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, language, onProgress, signal);
 

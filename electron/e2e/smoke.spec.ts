@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { expect, sampleVideo, test } from "./fixtures";
 import { launchLusk } from "./harness";
@@ -22,6 +23,14 @@ test("new project → select video via native dialogs", async ({ lusk }) => {
   const newProject = window.getByRole("button", { name: "+ New Project" });
   test.skip(await newProject.isDisabled(), "WhisperX not available in this environment");
   await newProject.click();
+
+  // The language is asked at creation, defaults to the Settings language (sk) and is stored in the .lusk
+  const language = window.getByLabel("Spoken language");
+  await expect(language).toHaveValue("sk");
+  await language.selectOption("cs");
+  await window.getByTestId("new-project-create").click();
+  const stored = JSON.parse(execFileSync("unzip", ["-p", projectPath, "project.json"], { encoding: "utf-8" }));
+  expect(stored.language).toBe("cs");
 
   await expect(window.getByRole("heading", { name: "Add a source video" })).toBeVisible();
   await window.getByRole("button", { name: "Browse files" }).click();

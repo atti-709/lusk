@@ -122,7 +122,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
       <div className="settings-dialog" onClick={(e) => e.stopPropagation()}>
         <h2>Settings</h2>
         <div className="settings-field">
-          <label htmlFor="transcription-language">Transcription Language</label>
+          <label htmlFor="transcription-language">Default Language for New Projects</label>
           <select
             id="transcription-language"
             value={language}
@@ -133,7 +133,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
             ))}
           </select>
           <p className="settings-hint">
-            Language used for WhisperX transcription and alignment
+            Each project keeps the language it was created with; changing this does not affect existing projects
           </p>
         </div>
         <div className="settings-field">

@@ -14,12 +14,14 @@ import {
 } from "./components/VideoComposition";
 import { Logo } from "./components/Logo";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { NewProjectDialog } from "./components/NewProjectDialog";
 import { UpdateOverlay } from "./components/UpdateOverlay";
 import { useSSE } from "./hooks/useSSE";
 import type {
   CaptionWord,
   ViralClip,
   ProjectState,
+  ProjectLanguage,
 } from "@lusk/shared";
 import "./App.css";
 
@@ -42,6 +44,7 @@ function App() {
   const [geminiAvailable, setGeminiAvailable] = useState<boolean>(false);
   const [scriptFileName, setScriptFileName] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [newProjectPath, setNewProjectPath] = useState<string | null>(null);
   const [logoPopupOpen, setLogoPopupOpen] = useState(false);
   const [pendingVideoPath, setPendingVideoPath] = useState<string | null>(null);
 
@@ -155,10 +158,16 @@ function App() {
     });
     if (saveResult.canceled || !saveResult.filePath) return;
 
+    // The language is asked next and fixed for the project (the dialog's onCreate)
+    setNewProjectPath(saveResult.filePath);
+  }, []);
+
+  const createProject = useCallback(async (projectPath: string, language: ProjectLanguage) => {
+    setNewProjectPath(null);
     const res = await fetch("/api/projects/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectPath: saveResult.filePath }),
+      body: JSON.stringify({ projectPath, language }),
     });
 
     if (res.ok) {
@@ -569,6 +578,12 @@ function App() {
           </button>
         </div>
       </header>
+
+      <NewProjectDialog
+        open={newProjectPath !== null}
+        onCancel={() => setNewProjectPath(null)}
+        onCreate={(language) => newProjectPath && createProject(newProjectPath, language)}
+      />
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onKeySet={setGeminiAvailable} />
 
