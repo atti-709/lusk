@@ -144,9 +144,10 @@ Claude has full testing control over the Electron app via Playwright (`electron/
 * **Run:** `npm run test:e2e` (builds, then runs against `electron/dist/main.js`) · `npm run test:e2e:packaged` (runs against `electron/out/mac-arm64/Lusk.app` — rebuild it first with `npm run package`; `LUSK_E2E_APP=/path/Lusk.app` overrides).
 * **Isolation:** every launch gets a free port and a temp profile (`LUSK_USER_DATA_DIR`), so it never touches real projects and doesn't collide with whatever holds port 3000. `config.json` (Gemini key) and the Python env are reused from the real profile. Builds without these overrides are refused.
 * **Harness:** `launchLusk()` in `electron/e2e/harness.ts` returns `{ app, window, api(), stubSaveDialog(), stubOpenDialog(), logs, close() }`. Native dialogs are stubbed in the main process. `app.evaluate()` gives main-process access.
+* **Headless:** `launchLusk({ headless: true })` (`LUSK_HEADLESS=1`) runs the engine with no window, no Dock icon and no focus; `window` is `null`, drive the app through `api()`. Batch and quality runs (`batch-episodes.ts`) use it so no window opens on the owner's desktop. `npx tsx e2e/headless-run.ts <video> [dev|packaged]` runs transcribe → render headless.
 * **Ad hoc:** write a throwaway script that imports the harness by absolute path, run it with `npx tsx` from `electron/`, and take `window.screenshot()` to inspect the UI visually.
 * **Fixtures:** `sampleVideo()` (`electron/e2e/fixtures.ts`) generates a 5s synthetic clip via ffmpeg (no speech — use a real podcast clip to exercise transcription).
-* **Main-process env overrides** (`electron/src/main.ts`): `LUSK_PORT` (preferred port, default 3000 — the app falls back to the next port free on both IPv4 and IPv6), `LUSK_USER_DATA_DIR`, `LUSK_PYTHON_ENV_DIR`, `LUSK_DISABLE_AUTO_UPDATE=1`.
+* **Main-process env overrides** (`electron/src/main.ts`): `LUSK_PORT` (preferred port, default 3000 — the app falls back to the next port free on both IPv4 and IPv6), `LUSK_USER_DATA_DIR`, `LUSK_PYTHON_ENV_DIR`, `LUSK_DISABLE_AUTO_UPDATE=1`, `LUSK_HEADLESS=1` (no window, no Dock icon, keeps running without windows; errors go to stderr and the exit code is 1 instead of dialogs; a Python env that isn't ready exits with a message instead of showing the setup window).
 
 ## **Distribution (Electron)**
 

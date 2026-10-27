@@ -34,6 +34,31 @@ if (process.env.LUSK_USER_DATA_DIR) {
 }
 const autoUpdateDisabled = process.env.LUSK_DISABLE_AUTO_UPDATE === "1";
 
+/**
+ * Headless engine mode (batch and quality runs): the server runs as usual but no
+ * window opens, the app has no Dock icon and never takes focus. Failures go to
+ * stderr with a non-zero exit code instead of a dialog, which would steal focus.
+ */
+const HEADLESS = process.env.LUSK_HEADLESS === "1";
+if (HEADLESS && process.platform === "darwin") {
+  // Before the app is ready, or the Dock icon flashes up once
+  app.setActivationPolicy("accessory");
+  app.dock?.hide();
+}
+
+/** Report a fatal startup/runtime error: stderr + exit code when headless, else a dialog. */
+function fatal(title: string, message: string): void {
+  if (HEADLESS) {
+    console.error(`${C.red}[lusk]${C.reset} ${title}: ${message}`);
+    isQuitting = true;
+    killServer();
+    app.exit(1);
+    return;
+  }
+  dialog.showErrorBox(title, message);
+  app.quit();
+}
+
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
 let pendingFilePath: string | null = null;
@@ -198,12 +223,10 @@ async function startServer(): Promise<void> {
   serverProcess.on("exit", (code) => {
     console.log(`${C.yellow}[lusk]${C.reset} server exited (code ${code})`);
     if (isQuitting) return;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      dialog.showErrorBox(
-        "Server Error",
-        "The Lusk server has stopped unexpectedly. Please restart the app."
-      );
-      app.quit();
+    if (HEADLESS) {
+      fatal("Server Error", `The Lusk server stopped unexpectedly (code ${code}).`);
+    } else if (mainWindow && !mainWindow.isDestroyed()) {
+      fatal("Server Error", "The Lusk server has stopped unexpectedly. Please restart the app.");
     }
   });
 
@@ -315,6 +338,17 @@ async function ensurePythonEnv(): Promise<void> {
     if (status.ready) return;
   } catch {
     return; // Server not responding, skip
+  }
+
+  // No setup window when headless: say what is missing and stop
+  if (HEADLESS) {
+    fatal(
+      "Python env not ready",
+      `the transcription environment is not set up (LUSK_PYTHON_ENV_DIR=${
+        process.env.LUSK_PYTHON_ENV_DIR ?? path.join(app.getPath("userData"), "python-env")
+      }). Open Lusk normally once to set it up, or point LUSK_PYTHON_ENV_DIR at a ready env.`,
+    );
+    return new Promise<void>(() => {}); // app.exit(1) is on its way
   }
 
   return new Promise<void>((resolve) => {
@@ -437,29 +471,36 @@ app.whenReady().then(async () => {
     }
     await startServer();
   } catch (err) {
-    dialog.showErrorBox(
-      "Failed to Start",
-      `The Lusk server could not be started.\n\n${err}`
-    );
-    app.quit();
+    fatal("Failed to Start", `The Lusk server could not be started.\n\n${err}`);
     return;
   }
 
+  // Lets the e2e harness find the port without a window (Playwright app.evaluate)
+  (globalThis as { __luskPort?: number }).__luskPort = PORT;
+
   await ensurePythonEnv();
-  createWindow();
+  if (HEADLESS) {
+    console.log(`${C.yellow}[lusk]${C.reset} headless: server ready on port ${PORT}, no window`);
+  } else {
+    createWindow();
+  }
 
   // Check for updates (only in packaged app — dev builds have no publish config)
-  if (app.isPackaged && !autoUpdateDisabled) {
+  if (app.isPackaged && !autoUpdateDisabled && !HEADLESS) {
     setupAutoUpdater();
   }
 
   // Once the page has loaded, process any pending file opens
-  mainWindow!.webContents.once("did-finish-load", async () => {
+  mainWindow?.webContents.once("did-finish-load", async () => {
     if (pendingFilePath) {
       openLuskFile(pendingFilePath).catch(console.error);
       pendingFilePath = null;
     }
   });
+  if (HEADLESS && pendingFilePath) {
+    openLuskFile(pendingFilePath).catch(console.error);
+    pendingFilePath = null;
+  }
 
   // macOS: explicit app menu ensures Cmd+Q (Quit) works
   if (process.platform === "darwin") {
@@ -536,13 +577,15 @@ app.whenReady().then(async () => {
 
   app.on("activate", () => {
     // macOS: re-create window when dock icon is clicked
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (!HEADLESS && BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
 });
 
 app.on("window-all-closed", () => {
+  // Headless never has a window: the engine stays up until it is quit
+  if (HEADLESS) return;
   killServer();
   app.quit();
 });

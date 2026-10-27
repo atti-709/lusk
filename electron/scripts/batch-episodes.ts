@@ -2,7 +2,7 @@
  * Batch-produce Lusk shorts and full-episode subtitles for every episode that lacks them.
  *
  *   npm run batch:episodes -- --dry-run         # see the plan: sources, scripts, what's missing
- *   caffeinate -i npm run batch:episodes        # run it (keeps the Mac awake)
+ *   npm run batch:episodes                      # run it
  *
  * (`batch:episodes` rebuilds the app first; from electron/ the script alone is
  * `npx tsx scripts/batch-episodes.ts`.)
@@ -45,7 +45,7 @@
  *   --no-evict         keep downloaded sources on disk
  *   --dry-run          print the plan only
  */
-import { launchLusk, type Lusk } from "../e2e/harness";
+import { launchLusk, type HeadlessLusk as Lusk } from "../e2e/harness";
 import { getClipRenderKey } from "@lusk/shared";
 import { cutAfterClosingWord, leadIn, startAtSentence } from "../../server/src/services/clipBoundaries";
 import { isCopyOf, planPlayable, probeCodecs, stampCopy } from "../../server/src/services/PlayableVideo";
@@ -368,7 +368,7 @@ async function runEpisode(ep: Episode) {
     if (freeGb() < need) throw new Error(`only ${freeGb().toFixed(1)} GB free, need ${need.toFixed(1)} GB — free some space and re-run`);
   }
 
-  const lusk = await launchLusk({ userDataDir: profile });
+  const lusk = await launchLusk({ userDataDir: profile, headless: true });
   current = lusk;
   let projectId: string | null = null;
   let finished = false;
