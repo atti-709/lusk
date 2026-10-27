@@ -322,8 +322,9 @@ show(0);
   try {
     db.collection("votes").onSnapshot((snap) => {
       for (const d of snap.docs) {
-        const local = votes[d.id];
-        if (!local || !d.metadata.hasPendingWrites) votes[d.id] = { ...d.data() };
+        // only this build's windows (an older build's votes share the collection); a vote made here stays authoritative
+        if (!ITEMS.some((it) => it.id === d.id) || votes[d.id]) continue;
+        votes[d.id] = { ...d.data() };
       }
       renderVote(); renderDots();
     }, () => status(L().lost, true));

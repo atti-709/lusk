@@ -46,8 +46,8 @@ standard library and ffmpeg only; run it with `python3 -I`.
 
 ```bash
 python3 -I tools/quality/abtest.py build 01-v0 02-twomodel 0QqML3YiWTA Ccj-zhD0YPA \
-    [--windows 20] [--seconds 25] [--contested judge_worse.json] [--out abtest-out] [--seed N]
-python3 -I tools/quality/abtest.py unblind abtest-out votes.json
+    [--windows 20] [--seconds 25] [--contested judge_worse.json] [--out ~/LuskCorpus/abtest] [--seed N]
+python3 -I tools/quality/abtest.py unblind ~/LuskCorpus/abtest votes.json
 python3 -I tools/quality/abtest_test.py        # checks (span finder, window picking, Wilson interval, a build)
 ```
 
@@ -55,7 +55,7 @@ python3 -I tools/quality/abtest_test.py        # checks (span finder, window pic
   `~/LuskCorpus/runs/<version>/<item>/captions_<lang>.srt` (`--runs`) for both versions. Nothing else is assumed:
   no owner paths, no fixed language.
 * **Windows:** spans where the two versions' words differ (punctuation, case and accents ignored, differences up to 3
-  words apart merged, as `listen.py` does) are the candidates, so every window holds a difference. With `--contested`,
+  words apart merged, as `listen.py` does; accents are folded too, so byt/byť is not a difference) are the candidates, so every window holds a difference. With `--contested`,
   half of the windows are centred on spans the T3 judge marked "worse" or "both wrong" (the rest are random, and all
   random when no file or too few spans); otherwise all are random. Windows of one item never overlap, items are served
   round-robin, the sampling is seeded. `--contested` takes `{"<item>": [{t0, t1, verdict}]}` or a flat list with an
@@ -75,3 +75,7 @@ python3 -I tools/quality/abtest_test.py        # checks (span finder, window pic
   Treat the test as a veto, not a win: with 20 votes a 14:6 split is only p ~ 0.06, ties are common, so "the
   candidate's interval includes 50 %" means no veto, not proof of improvement. The main gate is the judge being
   net-positive on every dev item.
+* **Output folder and ids:** `--out` defaults to `~/LuskCorpus/abtest` (outside the repo). Window ids end in a per-build
+  suffix, so votes left in the artifact database by an older build are ignored by the page and skipped (with a warning) by
+  `unblind`. `unblind` accepts `{id: {choice, note}}`, a `{"votes": …}` wrapper, `votes/<id>` keys and lists of
+  `{id, choice, note}` or `{id, data}`; a vote without a valid choice is an error.

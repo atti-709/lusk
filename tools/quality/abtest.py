@@ -18,6 +18,7 @@ Python 3 standard library and ffmpeg only.
 import argparse
 import base64
 import difflib
+import hashlib
 import json
 import math
 import os
@@ -164,7 +165,7 @@ def pick_windows(per_item, seconds, total, rng, contested=None):
     picked = {i: [] for i in items}
 
     def free(item, s):
-        return all(abs(s - p["t0"]) >= seconds for p in picked[item])
+        return all(abs(s - p["t0"]) >= seconds + PRE for p in picked[item])
 
     def differs(item, s):
         d = per_item[item]
@@ -258,7 +259,7 @@ def build(args):
         lang = it["language"]
         if lang not in LABELS:
             raise SystemExit(f"{item}: language {lang!r} has no labels (sk, cs)")
-        wav = it["paths"]["audioWav"] if "paths" in it else os.path.join(os.path.dirname(os.path.expanduser(args.manifest)), item, "audio.wav")
+        wav = (it.get("paths") or {}).get("audioWav") or os.path.join(os.path.dirname(os.path.expanduser(args.manifest)), item, "audio.wav")
         if not os.path.exists(wav):
             raise SystemExit(f"{item}: {wav} missing")
         sides = {}
@@ -270,7 +271,7 @@ def build(args):
         a, b = sides[args.version_a], sides[args.version_b]
         per_item[item] = {"lang": lang, "wav": wav, "a": a, "b": b,
                           "spans": spans(cue_words(a), cue_words(b)),
-                          "limit": max([c[1] for c in a + b] or [0.0])}
+                          "limit": float(it.get("audioWavSeconds") or max([c[1] for c in a + b] or [0.0]))}
         print(f"{item} ({lang}): {len(per_item[item]['spans'])} differing spans", file=sys.stderr)
     windows = pick_windows(per_item, args.seconds, args.windows, rng, contested)
     if len(windows) < args.windows:
@@ -278,13 +279,15 @@ def build(args):
     if not windows:
         raise SystemExit("no differing windows: nothing to test")
     rng.shuffle(windows)
+    # votes of an older build in the same artifact database must never be read through this build's key
+    build_id = hashlib.sha1(f"{args.version_a}|{args.version_b}|{args.seed}|{args.windows}|{args.seconds}|{os.urandom(4).hex()}".encode()).hexdigest()[:6]
 
     items, audio, key = [], {}, {}
     for w in windows:
         d = per_item[w["item"]]
         a0 = max(0.0, w["t0"] - PRE)
         a1 = w["t0"] + args.seconds
-        wid = f"{w['item']}-{int(w['t0'])}"
+        wid = f"{w['item']}-{int(w['t0'])}-{build_id}"
         a_first = rng.random() < 0.5
         va, vb = (args.version_a, args.version_b) if a_first else (args.version_b, args.version_a)
         by = {args.version_a: d["a"], args.version_b: d["b"]}
@@ -301,7 +304,7 @@ def build(args):
     with open(os.path.join(args.out, "abtest.html"), "w", encoding="utf-8") as f:
         f.write(page)
     with open(os.path.join(args.out, "key.json"), "w", encoding="utf-8") as f:
-        json.dump({"versionA": args.version_a, "versionB": args.version_b, "seed": args.seed, "windows": key}, f, ensure_ascii=False, indent=1)
+        json.dump({"versionA": args.version_a, "versionB": args.version_b, "seed": args.seed, "build": build_id, "windows": key}, f, ensure_ascii=False, indent=1)
     n_c = sum(1 for w in key.values() if w["source"] == "contested")
     print(f"{len(items)} windows ({n_c} contested, {len(items) - n_c} random), {len(page) / 1e6:.2f} MB -> {args.out}/abtest.html; key -> {args.out}/key.json")
     if len(page) > 16 * 1024 * 1024:
@@ -328,7 +331,8 @@ def tally(key, votes):
     same, rows = 0, []
     for wid, v in sorted(votes.items()):
         if wid not in key["windows"]:
-            raise SystemExit(f"vote for unknown window {wid}")
+            print(f"warning: vote for {wid} is not in this key (an older build?), skipped", file=sys.stderr)
+            continue
         w = key["windows"][wid]
         choice = (v or {}).get("choice")
         if choice not in ("A", "B", "same"):
@@ -343,11 +347,29 @@ def tally(key, votes):
 
 
 def load_votes(path):
+    """{window id: {choice, note}}. Accepts that object, a {"votes": {...}} wrapper, ids prefixed "votes/", and lists of
+    {id, choice, note} or {id, data: {choice, note}} (a collection export). A vote without a valid choice is an error."""
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    if isinstance(data, list):  # an array of {id, choice, note}
-        data = {d["id"]: d for d in data}
-    return data
+    if isinstance(data, dict) and isinstance(data.get("votes"), (dict, list)):
+        data = data["votes"]
+    if isinstance(data, list):
+        pairs = []
+        for d in data:
+            if not isinstance(d, dict) or "id" not in d:
+                raise SystemExit(f"vote entry without an id: {d!r}")
+            pairs.append((d["id"], d["data"] if isinstance(d.get("data"), dict) else d))
+    elif isinstance(data, dict):
+        pairs = list(data.items())
+    else:
+        raise SystemExit("votes file: expected an object or a list")
+    out = {}
+    for wid, v in pairs:
+        wid = str(wid).split("/")[-1]
+        if not isinstance(v, dict) or v.get("choice") not in ("A", "B", "same"):
+            raise SystemExit(f"vote {wid}: no valid choice (A, B or same): {v!r}")
+        out[wid] = v
+    return out
 
 
 def pct(x):
@@ -401,7 +423,7 @@ def main(argv=None):
     b.add_argument("--windows", type=int, default=20)
     b.add_argument("--seconds", type=float, default=25.0)
     b.add_argument("--contested", help="JSON of judge spans (worse / both wrong) with item, t0, t1")
-    b.add_argument("--out", default="abtest")
+    b.add_argument("--out", default=os.path.join(CORPUS, "abtest"), help="output folder (default ~/LuskCorpus/abtest, outside the repo: it holds the answer key)")
     b.add_argument("--manifest", default=os.path.join(CORPUS, "manifest.json"))
     b.add_argument("--runs", default=os.path.join(CORPUS, "runs"), help="folder holding <version>/<item>/captions_<lang>.srt")
     b.add_argument("--seed", type=int, default=20261027)

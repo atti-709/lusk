@@ -105,6 +105,30 @@ def test_tally():
     assert wins == {"01-v0": 0, "02-x": 2} and same == 1 and len(rows) == 3
 
 
+def test_load_votes():
+    with tempfile.TemporaryDirectory() as t:
+        p = os.path.join(t, "v.json")
+        want = {"w1": {"choice": "A", "note": "n"}}
+        for shape in (want, {"votes": want}, {"votes/w1": want["w1"]},
+                      [{"id": "w1", "choice": "A", "note": "n"}], [{"id": "w1", "data": want["w1"]}]):
+            json.dump(shape, open(p, "w"))
+            assert ab.load_votes(p) == {"w1": {"choice": "A", "note": "n"}} or ab.load_votes(p)["w1"]["choice"] == "A", shape
+        for bad in ({"w1": {"choice": None}}, [{"choice": "A"}], {"w1": "A"}):
+            json.dump(bad, open(p, "w"))
+            try:
+                ab.load_votes(p)
+            except SystemExit:
+                continue
+            raise AssertionError(f"accepted {bad}")
+
+
+def test_window_gap():
+    a, b, _ = synthetic()
+    d = {"x": {"spans": ab.spans(ab.cue_words(a), ab.cue_words(b)), "limit": 2000.0, "a": a, "b": b}}
+    s = sorted(x["t0"] for x in ab.pick_windows(d, 25.0, 20, random.Random(4)))
+    assert all(q - p >= 25.0 + ab.PRE for p, q in zip(s, s[1:])), "clips (with their lead-in) never overlap"
+
+
 def test_build_and_unblind():
     a, b, changed = synthetic()
     with tempfile.TemporaryDirectory() as t:
