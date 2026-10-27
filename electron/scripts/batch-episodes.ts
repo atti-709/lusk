@@ -381,7 +381,7 @@ async function runEpisode(ep: Episode) {
       ({ projectId } = await lusk.api<any>("/api/projects/open", { method: "POST", headers: json, body: JSON.stringify({ projectPath }) }));
       log(`  ${ep.code} reopened ${path.basename(projectPath)}`);
     } else {
-      ({ projectId } = await lusk.api<any>("/api/projects/create", { method: "POST", headers: json, body: JSON.stringify({ projectPath }) }));
+      ({ projectId } = await lusk.api<any>("/api/projects/create", { method: "POST", headers: json, body: JSON.stringify({ projectPath, language: "sk" }) }));
     }
     let s = await lusk.api<any>(`/api/projects/${projectId}`);
     // Transcription and renders read the source; subtitles for a ready project don't
