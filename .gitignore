@@ -26,3 +26,5 @@ tools/quality/runs/
 
 # Quality corpus lives outside the repo (~/LuskCorpus)
 LuskCorpus/
+__pycache__/
+*.pyc
