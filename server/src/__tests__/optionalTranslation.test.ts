@@ -97,6 +97,15 @@ describe("optional English translation", () => {
     expect(translate).toHaveBeenCalledOnce();
   });
 
+  it("drops an earlier translation when the captions are regenerated with the setting off", async () => {
+    const id = await runAutomation();
+    orchestrator.setTranslatedCaptions(id, [{ text: "Old English", startMs: 0, endMs: 2000 }]);
+    orchestrator.transition(id, "ALIGNING");
+    await runGeminiAutomation(id, { words: WORDS }, log);
+    expect(translate).not.toHaveBeenCalled();
+    expect(orchestrator.getSession(id)?.translatedCaptions).toBeNull();
+  });
+
   it("still exports the English SRT of a project that has a translation while off", async () => {
     const id = "t18-existing";
     orchestrator.createSession(id, "/v.mp4");

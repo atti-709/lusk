@@ -120,9 +120,12 @@ export async function runGeminiAutomation(
     }
     orchestrator.setViralClips(sessionId, clips);
 
-    // 4. Translate captions to English — only when the setting is on (off by default)
+    // 4. Translate captions to English — only when the setting is on (off by default).
+    //    Off: drop a translation left by an earlier run, its cues are timed from captions
+    //    that were just regenerated and would no longer match.
     try {
       if (await settingsService.getTranslateToEnglish()) await translateCaptions(sessionId, signal);
+      else orchestrator.setTranslatedCaptions(sessionId, null);
     } catch (err: any) {
       if (signal?.aborted) throw err;
       console.warn("[runGeminiAutomation] Translation failed, continuing without:", err?.message);
