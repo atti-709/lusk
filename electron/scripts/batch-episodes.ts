@@ -57,6 +57,7 @@ import {
 import { pipeline } from "node:stream/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { acquireLock, LockHeldError } from "../../tools/quality/lock";
 
 // ── Options ─────────────────────────────────────────────────────────────────
 
@@ -563,6 +564,14 @@ async function main() {
   }
   console.log(`\nfree: ${freeGb().toFixed(1)} GB · work dir: ${WORK}\n`);
   if (DRY) return;
+  // One heavy job at a time: shares ~/LuskCorpus/.lock with tools/quality/run.ts
+  try {
+    const release = acquireLock("batch-episodes.ts");
+    process.on("exit", release);
+  } catch (err) {
+    if (err instanceof LockHeldError) { console.error(err.message); process.exit(3); }
+    throw err;
+  }
   saveState(); // keeps a --rerender list for later runs
 
   const dist = path.join(REPO, "electron/dist/main.js");
