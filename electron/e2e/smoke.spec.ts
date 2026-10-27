@@ -54,3 +54,18 @@ test("falls back to a free port when the preferred one is taken", async () => {
     blocker.close();
   }
 });
+
+test("Settings: 'Translate captions to English' is off by default and toggles", async ({ lusk }) => {
+  const { window } = lusk;
+  await window.getByTitle("Settings").click();
+  const box = window.getByLabel("Translate captions to English");
+  await expect(box).not.toBeChecked();
+  await box.check();
+  await window.getByRole("button", { name: "Save" }).click();
+  await expect(window.getByText("Saved")).toBeVisible();
+  expect((await lusk.api<{ translateToEnglish: boolean }>("/api/settings")).translateToEnglish).toBe(true);
+  await box.uncheck();
+  await window.getByRole("button", { name: "Save" }).click();
+  await expect(window.getByText("Saved")).toBeVisible();
+  expect((await lusk.api<{ translateToEnglish: boolean }>("/api/settings")).translateToEnglish).toBe(false);
+});

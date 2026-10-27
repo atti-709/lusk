@@ -18,6 +18,8 @@ export interface AppSettings {
   fps?: number;
   outroOverlapFrames?: number;
   outroEnabled?: boolean;
+  /** Also translate the captions to English (an extra SRT). Off unless switched on. */
+  translateToEnglish?: boolean;
   captionStyles?: {
     fontSize?: number;
     highlightColor?: string;
@@ -114,6 +116,11 @@ class SettingsService {
   async getFps(): Promise<number> {
     const settings = await this.load();
     return settings.fps ?? MATCH_SOURCE_FPS;
+  }
+
+  async getTranslateToEnglish(): Promise<boolean> {
+    const settings = await this.load();
+    return settings.translateToEnglish ?? false;
   }
 
   async getOutroOverlapFrames(): Promise<number> {

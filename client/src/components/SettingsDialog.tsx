@@ -40,6 +40,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
   const [isSet, setIsSet] = useState(false);
   const [language, setLanguage] = useState("sk");
   const [fpsValue, setFpsValue] = useState(MATCH_SOURCE_FPS);
+  const [translateToEnglish, setTranslateToEnglish] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -67,6 +68,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
         if (settings.geminiApiKeySet) setApiKey("");
         if (settings.transcriptionLanguage) setLanguage(settings.transcriptionLanguage);
         setFpsValue(settings.fps ?? MATCH_SOURCE_FPS);
+        setTranslateToEnglish(settings.translateToEnglish ?? false);
         setPrompts({
           correctionPrompt: settings.correctionPrompt ?? null,
           viralClipsPrompt: settings.viralClipsPrompt ?? null,
@@ -85,9 +87,10 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
     setSaving(true);
     setStatus(null);
     try {
-      const body: Record<string, string | number | null> = {
+      const body: Record<string, string | number | boolean | null> = {
         transcriptionLanguage: language,
         fps: fpsValue,
+        translateToEnglish,
       };
       if (apiKey.trim()) body.geminiApiKey = apiKey;
       // Send prompts: null means reset to default, string means custom
@@ -113,7 +116,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
     } finally {
       setSaving(false);
     }
-  }, [apiKey, language, fpsValue, prompts, appSettings]);
+  }, [apiKey, language, fpsValue, translateToEnglish, prompts, appSettings]);
 
   if (!open) return null;
 
@@ -147,6 +150,22 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
           />
           <p className="settings-hint">
             Get a key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>
+          </p>
+        </div>
+
+        <div className="settings-field">
+          <label htmlFor="settings-translate">
+            <input
+              id="settings-translate"
+              data-testid="settings-translate"
+              type="checkbox"
+              checked={translateToEnglish}
+              onChange={(e) => setTranslateToEnglish(e.target.checked)}
+            />{" "}
+            Translate captions to English
+          </label>
+          <p className="settings-hint">
+            Captions always stay in the spoken language. When on, a project also gets an English subtitle file (SRT) after processing; projects that already have one keep it
           </p>
         </div>
 

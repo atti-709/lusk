@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
+import { settingsService } from "../services/SettingsService.js";
 import { geminiService, wordsToTsv, msToTimestamp } from "../services/GeminiService.js";
 import { parseTsv, wordsToCaptions, groupCaptionBlocks, geminiClipsToViralClips } from "./align.js";
 import { dropStrayStops, keepForeignSpeech } from "../services/alignCorrection.js";
@@ -119,9 +120,9 @@ export async function runGeminiAutomation(
     }
     orchestrator.setViralClips(sessionId, clips);
 
-    // 4. Translate captions to English (if source language is not English)
+    // 4. Translate captions to English — only when the setting is on (off by default)
     try {
-      await translateCaptions(sessionId, signal);
+      if (await settingsService.getTranslateToEnglish()) await translateCaptions(sessionId, signal);
     } catch (err: any) {
       if (signal?.aborted) throw err;
       console.warn("[runGeminiAutomation] Translation failed, continuing without:", err?.message);
@@ -146,7 +147,7 @@ export async function runGeminiAutomation(
  * Translate the session's captions to English, caption block by caption block, into
  * `translatedCaptions` (the English SRT). Nothing to do for an English transcript.
  */
-async function translateCaptions(sessionId: string, signal?: AbortSignal): Promise<void> {
+export async function translateCaptions(sessionId: string, signal?: AbortSignal): Promise<void> {
   const session = orchestrator.getSession(sessionId);
   const lang = session?.language ?? DEFAULT_PROJECT_LANGUAGE;
   const captions = session?.captions;
@@ -356,6 +357,9 @@ export async function transcribeRoute(app: FastifyInstance) {
       }
       if (session.state !== "READY") {
         return reply.status(409).send({ success: false, error: `Cannot translate in state: ${session.state}` });
+      }
+      if (!(await settingsService.getTranslateToEnglish())) {
+        return reply.status(409).send({ success: false, error: "English translation is switched off — enable \"Translate captions to English\" in Settings" });
       }
       try {
         await translateCaptions(projectId);

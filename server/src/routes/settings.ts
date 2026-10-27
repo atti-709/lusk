@@ -36,6 +36,7 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
       outroOverlapFrames: settings.outroOverlapFrames ?? 4,
       outroSet,
       outroEnabled: settings.outroEnabled ?? true,
+      translateToEnglish: settings.translateToEnglish ?? false,
       captionStyles: settings.captionStyles ?? null,
     };
   });
@@ -59,6 +60,7 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
       fps?: number;
       outroOverlapFrames?: number;
       outroEnabled?: boolean;
+      translateToEnglish?: boolean;
       captionStyles?: {
         fontSize?: number;
         highlightColor?: string;
@@ -71,7 +73,7 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
     };
   }>("/api/settings", async (request) => {
     const current = await settingsService.load();
-    const { geminiApiKey, transcriptionLanguage, correctionPrompt, viralClipsPrompt, viralClipsManualPrompt, fps, outroOverlapFrames, outroEnabled, captionStyles } =
+    const { geminiApiKey, transcriptionLanguage, correctionPrompt, viralClipsPrompt, viralClipsManualPrompt, fps, outroOverlapFrames, outroEnabled, translateToEnglish, captionStyles } =
       request.body ?? {};
 
     if (geminiApiKey !== undefined) {
@@ -102,6 +104,10 @@ export const settingsRoute: FastifyPluginAsync = async (server) => {
 
     if (outroEnabled !== undefined) {
       current.outroEnabled = outroEnabled;
+    }
+
+    if (typeof translateToEnglish === "boolean") {
+      current.translateToEnglish = translateToEnglish;
     }
 
     if (captionStyles !== undefined) {

@@ -370,6 +370,8 @@ async function runEpisode(ep: Episode) {
 
   const lusk = await launchLusk({ userDataDir: profile, headless: true });
   current = lusk;
+  // The English SRT is part of every episode's delivery; the setting is off by default
+  await lusk.api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ translateToEnglish: true }) });
   let projectId: string | null = null;
   let finished = false;
   try {
