@@ -128,7 +128,7 @@ class Orchestrator extends EventEmitter {
     this.persistSession(id);
   }
 
-  setTranslatedCaptions(id: string, blocks: TranslatedBlock[]): void {
+  setTranslatedCaptions(id: string, blocks: TranslatedBlock[] | null): void {
     const session = this.requireSession(id);
     session.translatedCaptions = blocks;
     this.persistSession(id);

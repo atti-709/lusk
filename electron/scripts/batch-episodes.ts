@@ -373,6 +373,8 @@ async function runEpisode(ep: Episode) {
   let projectId: string | null = null;
   let finished = false;
   try {
+    // The English SRT is part of every episode's delivery; the setting is off by default
+    await lusk.api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ translateToEnglish: true }) });
     const projectDir = path.join(ep.dir, "PROJECT", "LUSK");
     mkdirSync(projectDir, { recursive: true });
     const projectPath = path.join(projectDir, ep.project);
