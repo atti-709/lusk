@@ -8,6 +8,7 @@ import type {
   TranslatedBlock,
   ViralClip,
   ClipRenderState,
+  RunReport,
 } from "@lusk/shared";
 import { DEFAULT_PROJECT_LANGUAGE } from "@lusk/shared";
 import { projectFileService } from "./ProjectFileService.js";
@@ -126,6 +127,14 @@ class Orchestrator extends EventEmitter {
     const session = this.requireSession(id);
     session.captions = captions;
     this.persistSession(id);
+  }
+
+  /** Start a fresh report for a pipeline run, or merge `patch` into the current one. */
+  setRunReport(id: string, patch: Partial<RunReport> | null): void {
+    const session = this.requireSession(id);
+    session.runReport = patch === null
+      ? { correction: "skipped", proofread: null, clips: null, translation: null }
+      : { ...(session.runReport ?? { correction: "skipped", proofread: null, clips: null, translation: null }), ...patch };
   }
 
   setTranslatedCaptions(id: string, blocks: TranslatedBlock[] | null): void {

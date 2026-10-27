@@ -29,6 +29,7 @@ export async function doTranscribe(sessionId: string, log: Logger, signal?: Abor
   const sessionDir = tempManager.getSessionDir(sessionId);
 
   orchestrator.updateProgress(sessionId, 0, "Starting transcription...");
+  orchestrator.setRunReport(sessionId, null);
 
   const language = orchestrator.getSession(sessionId)?.language ?? DEFAULT_PROJECT_LANGUAGE;
   const { transcript, captions } = await whisperService.transcribe(
@@ -73,6 +74,13 @@ export async function runGeminiAutomation(
 
   try {
     let words: TranscriptWord[];
+    orchestrator.setRunReport(sessionId, {
+      correction: session.scriptText ? "ran" : "skipped",
+      proofread: null,
+      clips: null,
+      translation: null,
+      failed: undefined,
+    });
 
     if (session.scriptText) {
       orchestrator.updateProgress(sessionId, 5, "Starting Gemini correction...");
@@ -113,8 +121,10 @@ export async function runGeminiAutomation(
     let clips: ViralClip[] = [];
     try {
       clips = await detectClips(sessionId, tsvForClips, words, transcriptEndMs, signal);
+      orchestrator.setRunReport(sessionId, { clips: { status: "ok", count: clips.length } });
     } catch (err: any) {
       if (signal?.aborted) throw err;
+      orchestrator.setRunReport(sessionId, { clips: { status: "failed", count: 0, error: err?.message ?? String(err) } });
       log.error(err, "Clip detection failed, continuing without clips");
       orchestrator.updateProgress(sessionId, 88, "Clip suggestions failed — use Regenerate on the clips page");
     }
@@ -124,10 +134,16 @@ export async function runGeminiAutomation(
     //    Off: drop a translation left by an earlier run, its cues are timed from captions
     //    that were just regenerated and would no longer match.
     try {
-      if (await settingsService.getTranslateToEnglish()) await translateCaptions(sessionId, signal);
-      else orchestrator.setTranslatedCaptions(sessionId, null);
+      if (await settingsService.getTranslateToEnglish()) {
+        await translateCaptions(sessionId, signal);
+        orchestrator.setRunReport(sessionId, { translation: { status: "ran" } });
+      } else {
+        orchestrator.setTranslatedCaptions(sessionId, null);
+        orchestrator.setRunReport(sessionId, { translation: { status: "skipped" } });
+      }
     } catch (err: any) {
       if (signal?.aborted) throw err;
+      orchestrator.setRunReport(sessionId, { translation: { status: "failed", error: err?.message ?? String(err) } });
       console.warn("[runGeminiAutomation] Translation failed, continuing without:", err?.message);
     }
 
@@ -137,6 +153,7 @@ export async function runGeminiAutomation(
   } catch (err: any) {
     if (signal?.aborted) throw err; // re-throw cancellation
     log.error(err, "Gemini automation failed, falling back to manual");
+    orchestrator.setRunReport(sessionId, { failed: err?.message ?? String(err) });
     const reason = err?.message?.includes("503") || err?.message?.includes("UNAVAILABLE")
       ? "Gemini is overloaded (503) — try again later or use manual workflow"
       : err?.message?.includes("Chunk validation")
@@ -204,11 +221,13 @@ async function proofread(
     if (result.rejected.length) {
       console.log(`[proofread] dropped ${result.rejected.length} edit(s) that didn't match the transcript:`, JSON.stringify(result.rejected));
     }
+    orchestrator.setRunReport(sessionId, { proofread: { status: "ok", applied: result.applied.length, rejected: result.rejected.length } });
     orchestrator.updateProgress(sessionId, 85, `Proofread fixed ${result.applied.length} word${result.applied.length === 1 ? "" : "s"}`);
     return result.words;
   } catch (err: any) {
     if (signal?.aborted) throw err;
     console.warn("[proofread] failed, continuing without:", err?.message);
+    orchestrator.setRunReport(sessionId, { proofread: { status: "failed", applied: 0, rejected: 0, error: err?.message ?? String(err) } });
     return words;
   }
 }
