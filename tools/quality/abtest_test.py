@@ -21,8 +21,13 @@ def srt(cues):
 
 def test_spans():
     a = ab.cue_words([(0, 2, "Dobrý deň, vážení."), (2, 4, "Dnes budeme hovoriť o láske.")])
-    same_but_punct = ab.cue_words([(0, 2, "dobry den vazeni"), (2, 4, "Dnes budeme hovoriť, o láske!")])
-    assert ab.spans(a, same_but_punct) == [], "punctuation, case and accents are not differences"
+    same_but_punct = ab.cue_words([(0, 2, "dobrý deň vážení"), (2, 4, "Dnes budeme hovoriť, o láske!")])
+    assert ab.spans(a, same_but_punct) == [], "punctuation and case are not differences"
+    decomposed = ab.cue_words([(0, 2, "Dobry\u0301 den\u030c, va\u0301z\u030cení.")])
+    assert ab.spans(ab.cue_words([(0, 2, "Dobrý deň, vážení.")]), decomposed) == [], "NFC vs NFD is not a difference"
+    accent = ab.spans(ab.cue_words([(0, 2, "to musí byť pravda")]), ab.cue_words([(0, 2, "to musí byt pravda")]))
+    assert len(accent) == 1 and accent[0]["a"] == "byť" and accent[0]["b"] == "byt", "an accent-only difference is a span"
+    assert ab.window_text([(0, 2, "byť")], 0, 2) != ab.window_text([(0, 2, "byt")], 0, 2), "and a window differs"
     b = ab.cue_words([(0, 2, "Dobrý deň, vážení."), (2, 4, "Dnes budeme hovoriť o láskavosti.")])
     s = ab.spans(a, b)
     assert len(s) == 1 and s[0]["a"] == "láske." and s[0]["b"] == "láskavosti.", s

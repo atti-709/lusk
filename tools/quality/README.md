@@ -55,7 +55,7 @@ python3 -I tools/quality/abtest_test.py        # checks (span finder, window pic
   `~/LuskCorpus/runs/<version>/<item>/captions_<lang>.srt` (`--runs`) for both versions. Nothing else is assumed:
   no owner paths, no fixed language.
 * **Windows:** spans where the two versions' words differ (punctuation, case and accents ignored, differences up to 3
-  words apart merged, as `listen.py` does; accents are folded too, so byt/byť is not a difference) are the candidates, so every window holds a difference. With `--contested`,
+  words apart merged, as `listen.py` does; diacritics are kept, deliberately unlike `listen.py` which folds them: byt/byť and nas/nás are different words in sk/cs and the owner judges by reading; NFC-normalised so composed vs decomposed forms match) are the candidates, so every window holds a difference. With `--contested`,
   half of the windows are centred on spans the T3 judge marked "worse" or "both wrong" (the rest are random, and all
   random when no file or too few spans); otherwise all are random. Windows of one item never overlap, items are served
   round-robin, the sampling is seeded. `--contested` takes `{"<item>": [{t0, t1, verdict}]}` or a flat list with an
@@ -68,7 +68,7 @@ python3 -I tools/quality/abtest_test.py        # checks (span finder, window pic
   UI text follows each window's language (sk, cs). Votes go to the artifact database as `votes/<window id>` =
   `{choice: "A"|"B"|"same", note}` when the page runs in claude.ai (`window.claude.use("db")`); the "copy votes as
   JSON" button is the fallback (`{id: {choice, note}}`).
-* **Publishing:** done by a Claude session with its Artifact tool (declare the `db` capability); read the votes back
+* **Publishing:** done by a Claude session with its Artifact tool; the publisher must declare the `db` capability, and `key.json` never leaves the machine; read the votes back
   from the `votes` collection with ArtifactData, save them as JSON and unblind.
 * **Unblind:** `unblind` maps votes through the key and prints, per version, the wins and the share of decided votes
   with a 95 % Wilson interval, the split between contested and random windows, and the per-window verdicts with notes.

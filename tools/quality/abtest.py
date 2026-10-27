@@ -7,7 +7,7 @@
 
 build   reads the manifest (language, audio.wav per item) and the SRTs
         <runs>/<version>/<item>/captions_<lang>.srt, finds the spans where the two versions' words differ
-        (punctuation and case ignored), picks the windows (half from the spans the judge marked worse / both wrong
+        (case and punctuation ignored, diacritics kept), picks the windows (half from the spans the judge marked worse / both wrong
         when --contested is given, the rest random, seeded), cuts MP3 snippets with ffmpeg, shuffles which version
         is A per window and writes <out>/abtest.html (self-contained, audio embedded) and <out>/key.json (the answer key).
 unblind prints the tally per version with a 95 % Wilson interval and the per-window verdicts.
@@ -71,8 +71,10 @@ LABELS = {
 # ---------------------------------------------------------------------------------------------- SRT and spans
 
 def norm(w):
-    """Word key: lower case, accents folded, punctuation dropped (a punctuation-only token has an empty key)."""
-    return "".join(c for c in unicodedata.normalize("NFD", w.lower()) if c.isalnum())
+    """Word key: NFC, lower case, punctuation dropped, diacritics kept (byt and byť are different words in sk/cs;
+    this deliberately differs from listen.py, which folds accents). A punctuation-only token has an empty key."""
+    return "".join(c for c in unicodedata.normalize("NFC", w).lower()
+                   if c.isalnum() or unicodedata.category(c).startswith("M"))
 
 
 def parse_srt(text):
@@ -99,7 +101,7 @@ def cue_words(cues):
 
 
 def spans(a_words, b_words):
-    """Spans where the two word lists differ (normalised), as listen.py does it: differences up to MERGE_GAP words
+    """Spans where the two word lists differ (normalised, diacritics kept), as listen.py does it: differences up to MERGE_GAP words
     apart are merged. Each span: {t0, t1, a, b} with the differing words (a / b) and the time range both sides cover."""
     ka, kb = [norm(w[0]) for w in a_words], [norm(w[0]) for w in b_words]
     ops = [o for o in difflib.SequenceMatcher(None, ka, kb, autojunk=False).get_opcodes() if o[0] != "equal"]

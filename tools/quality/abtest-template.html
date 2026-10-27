@@ -158,8 +158,8 @@ const clock = (s) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 };
 const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-// punctuation and case never count as a difference
-const norm = (w) => w.toLowerCase().normalize("NFD").replace(/[^\p{L}\p{N}]/gu, "");
+// punctuation and case never count as a difference; diacritics do
+const norm = (w) => w.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{N}\p{M}]/gu, "");
 const tokens = (cues) => cues.flatMap((c) => c[2].split(/\s+/).filter(Boolean));
 
 // word-level LCS between the two sides; true = this token has no counterpart on the other side
