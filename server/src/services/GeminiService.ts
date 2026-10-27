@@ -210,6 +210,15 @@ function isRetryableError(err: unknown): boolean {
   return false;
 }
 
+/**
+ * A structured-JSON answer that is retryable: a transient API error, or an answer
+ * that stopped mid-document ("Unterminated string in JSON at position 6811" on a
+ * 72 min sermon, Lr0U-0HMQgo) — asking again gets a complete one.
+ */
+export function isRetryableJsonError(err: unknown): boolean {
+  return isRetryableError(err) || err instanceof SyntaxError;
+}
+
 /** Caption blocks per translation request. */
 const TRANSLATION_CHUNK = 200;
 const SENTENCE_END = /[.?!…]["'“”»]?$/;
@@ -577,10 +586,10 @@ export class GeminiService {
       } catch (err: unknown) {
         if (signal?.aborted) throw new Error("Cancelled");
         const errObj = err instanceof Error ? err : new Error(String(err));
-        if (attempt < MAX_RETRIES && isRetryableError(errObj)) {
+        if (attempt < MAX_RETRIES && isRetryableJsonError(errObj)) {
           const delay = RETRY_DELAY_MS * (attempt + 1);
           console.warn(`[GeminiService] Clip detection attempt ${attempt + 1} failed (${errObj.message}). Retrying in ${delay / 1000}s...`);
-          onProgress(85, `Gemini is busy — retrying in ${delay / 1000}s...`);
+          onProgress(85, errObj instanceof SyntaxError ? `Gemini's answer was cut short — retrying in ${delay / 1000}s...` : `Gemini is busy — retrying in ${delay / 1000}s...`);
           await sleep(delay);
           continue;
         }
@@ -662,7 +671,7 @@ export class GeminiService {
           raw = null;
           if (signal?.aborted) throw new Error("Cancelled");
           const errObj = err instanceof Error ? err : new Error(String(err));
-          if (attempt < MAX_RETRIES && (isRetryableError(errObj) || errObj instanceof SyntaxError)) {
+          if (attempt < MAX_RETRIES && isRetryableJsonError(errObj)) {
             const delay = RETRY_DELAY_MS * (attempt + 1);
             console.warn(`[GeminiService] Proofread chunk ${ci} attempt ${attempt + 1} failed (${errObj.message}). Retrying in ${delay / 1000}s...`);
             await sleep(delay);
