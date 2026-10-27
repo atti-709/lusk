@@ -1,0 +1,291 @@
+{
+  "source": "Notion Corpus database (collection://2467addf-141e-4cab-9bf5-d7c36b262f49), exported 2026-10-27; keep in sync by hand",
+  "items": [
+    {
+      "id": "Ccj-zhD0YPA",
+      "title": "Cesta štědrosti: Reálný krok důvěry — Michal Apetauer",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "holdout",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 35,
+      "video": "audio only"
+    },
+    {
+      "id": "wxc54e9tpxE",
+      "title": "Srdcovky: Kreativní Bůh — Terka Viková",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "holdout",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 28,
+      "video": "audio only"
+    },
+    {
+      "id": "6dFWPu-hwUM",
+      "title": "Cesta štědrosti: Dobrý správce — Michal Apetauer",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "holdout",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 37,
+      "video": "audio only"
+    },
+    {
+      "id": "sk4y82zUf9Y",
+      "title": "Srdcovky: Víra jako rozhodnutí — Betty Veselá",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "dev",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 27,
+      "video": "1080p"
+    },
+    {
+      "id": "kmewc8VjMJ0",
+      "title": "Úcta a láska k sebe podľa vzoru Ježiša — Martina Polohová",
+      "channel": "CampFest",
+      "language": "sk",
+      "set": "holdout",
+      "type": [
+        "sermon",
+        "stage"
+      ],
+      "minutes": 44,
+      "video": "audio only"
+    },
+    {
+      "id": "bVHN-IrAdDA",
+      "title": "Srdcovky: Vodní křty — Kuba Vejmělka",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "holdout",
+      "type": [
+        "sermon",
+        "worship"
+      ],
+      "minutes": 30,
+      "video": "audio only"
+    },
+    {
+      "id": "t039qvM0HHo",
+      "title": "Méně: Změnit můj svět — Chenza Šeda",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "dev",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 43,
+      "video": "audio only"
+    },
+    {
+      "id": "Xc-KJnnLdic",
+      "title": "Srdcovky: Honba za vším — Veronika Štěpánová",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "holdout",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 34,
+      "video": "audio only"
+    },
+    {
+      "id": "85b6CuVebsM",
+      "title": "Keď muž nájde svoje poslanie — Diskusia",
+      "channel": "Otcov dom",
+      "language": "sk",
+      "set": "dev",
+      "type": [
+        "panel"
+      ],
+      "minutes": 50,
+      "video": "1080p"
+    },
+    {
+      "id": "haLOUpqEQeE",
+      "title": "Srdcovky: Trpělivé spěchání — Ondra Motyka",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "holdout",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 36,
+      "video": "audio only"
+    },
+    {
+      "id": "PQp46fUb9TA",
+      "title": "Kde sú muži, ktorí sa postavia do medzery? — Štefan Baláž",
+      "channel": "Otcov dom",
+      "language": "sk",
+      "set": "dev",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 28,
+      "video": "1080p"
+    },
+    {
+      "id": "lVQOHGe5zus",
+      "title": "Srdcovky: Seberozvoj bez filtru — Lucie Mészáros",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "holdout",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 36,
+      "video": "audio only"
+    },
+    {
+      "id": "Lr0U-0HMQgo",
+      "title": "Príliš múdry na Boha? — Nagypal, Paštrnák",
+      "channel": "CampFest",
+      "language": "sk",
+      "set": "dev",
+      "type": [
+        "panel",
+        "stage"
+      ],
+      "minutes": 72,
+      "video": "1080p"
+    },
+    {
+      "id": "AQxZMQlnPiM",
+      "title": "Srdcovky: Než zazní první píseň — Monča Šiborová",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "dev",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 32,
+      "video": "audio only"
+    },
+    {
+      "id": "1YR8lRj1h6s",
+      "title": "Keď pustíš kontrolu, Boh začne konať — Martina Žáková",
+      "channel": "Otcov dom",
+      "language": "sk",
+      "set": "dev",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 55,
+      "video": "audio only"
+    },
+    {
+      "id": "YeBSbqKcCR0",
+      "title": "Cesta štědrosti: Překvapeni štědrostí — Stephen Wyndham",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "excluded",
+      "type": [
+        "sermon",
+        "interpreted"
+      ],
+      "minutes": 37,
+      "video": "audio only"
+    },
+    {
+      "id": "w6O75HIIRh0",
+      "title": "Srdcovky: Samota a ticho — Jakub Peša",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "dev",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 34,
+      "video": "audio only"
+    },
+    {
+      "id": "rtCpPRtYADU",
+      "title": "Je Boh dobrý? — Ester Jankovičová",
+      "channel": "CampFest",
+      "language": "sk",
+      "set": "dev",
+      "type": [
+        "sermon",
+        "stage",
+        "distant preacher"
+      ],
+      "minutes": 52,
+      "video": "1080p"
+    },
+    {
+      "id": "PrJJ-OeF8v8",
+      "title": "Ženou podľa Božieho srdca — Džubakovská, Paštrnáková, …",
+      "channel": "CampFest",
+      "language": "sk",
+      "set": "holdout",
+      "type": [
+        "panel",
+        "stage"
+      ],
+      "minutes": 53,
+      "video": "audio only"
+    },
+    {
+      "id": "0QqML3YiWTA",
+      "title": "Zdroj nádeje — Matej Kurbel",
+      "channel": "CampFest",
+      "language": "sk",
+      "set": "dev",
+      "type": [
+        "sermon",
+        "stage",
+        "distant preacher"
+      ],
+      "minutes": 33,
+      "video": "1080p"
+    },
+    {
+      "id": "JEokdLimPV8",
+      "title": "Cesta štědrosti: Příběh štědrosti — Talkshow s Honzou Viktorinem",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "dev",
+      "type": [
+        "talkshow"
+      ],
+      "minutes": 46,
+      "video": "1080p"
+    },
+    {
+      "id": "1nHSs9ytu_o",
+      "title": "Méně: Méně je více — Michal Apetauer",
+      "channel": "CityHouse Brno",
+      "language": "cs",
+      "set": "dev",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 37,
+      "video": "1080p"
+    },
+    {
+      "id": "yeAh-T1A2Gg",
+      "title": "Srdcovky: Štědrost s lehkostí — Filip Mészáros",
+      "channel": "CityHouse Brno",
+      "language": "sk",
+      "set": "dev",
+      "type": [
+        "sermon",
+        "mixed cs/sk"
+      ],
+      "minutes": 28,
+      "video": "audio only"
+    }
+  ]
+}
