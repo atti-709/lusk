@@ -132,3 +132,50 @@ is expanded. `wav` / `video` default to `<corpus dir>/<id>/audio.wav` / `video.m
 
 The owner's copy is `~/LuskBatch/corpus_svatonazor.json` (E00, E08, E35, E64, E65, E71; the script is the episode's Drive-folder
 `.md`, else `regen4/script_map.json` + `texts/`, as in `regen4.ts`; E00 has none). It holds owner paths and is not committed.
+
+## Quality report (`report.py`)
+
+One Markdown report per run version, with the judge decisions in JSON next to it. Python 3 standard library and ffmpeg; run it with
+`python3 -I`. The VAD and the reference pass use the app's managed Python as a subprocess. Needs the Gemini key in the owner's
+`config.json` (or `GEMINI_API_KEY`) for the judge and the audit.
+
+```bash
+python3 -I tools/quality/report.py 01-v0 --vs youtube                      # all items of the run, against the YouTube auto-captions
+python3 -I tools/quality/report.py 02-twomodel --vs 01-v0 --items 0QqML3YiWTA Ccj-zhD0YPA
+python3 -I tools/quality/report.py 01-v0 --items E08 E64 --manifest ~/LuskBatch/corpus_svatonazor.json
+python3 -I tools/quality/report.py 01-v0 --skip judge,audit               # the Gemini-free sections only
+python3 -I tools/quality/report.py 01-v0 --ref                            # + the mlx-whisper word-timestamp reference pass (heavy)
+python3 -I tools/quality/report_test.py                                    # checks (no network)
+```
+
+Output in `~/LuskCorpus/reports/` (`--out`): `<version>[-vs-<other>].md`, `.json` (every judge decision with both texts, the shuffle and what was
+said; every audit window with the per-word marks; the lost-speech holes; timing and layout detail), `.contested.json` (the spans marked worse or
+both wrong, `[{item, t0, t1, verdict, ...}]`: pass it to `abtest.py build --contested`) and `.checkpoint.json`.
+
+* **Pass-set guard.** Both versions' `meta.json` are read. An item whose run is not `completed` with `passesOk`, or whose pass statuses
+  (correction, proofread, clips, translation), Gemini model names or language differ from the `--vs` version's, is **not** judged against it; the report says
+  why. YouTube has no meta: it is compared only when the run's own passes are ok. A different Whisper model is stated but is not a refusal
+  (it is the variable under test in T6 / T9).
+* **A/B judge.** Spans where the two SRTs' words differ (the `abtest.py` rule: NFC, lower case, punctuation dropped, diacritics kept, differences up
+  to 3 words apart merged; YouTube `[tags]` and `>>` removed first). Gemini (`gemini-3.8-flash`, 15 snippets of at most 25 s per call, sides
+  shuffled by a seeded RNG) answers A / B / same / neither; the prompt follows the item's language (Slovak or Czech, colloquial forms count as right,
+  names in their established spelling). With more than `--max-spans` (120) spans in an item a seeded sample is judged and the report says so (`0` = all).
+* **Absolute audit.** 30 fixed 8 s windows per item, seeded by the item id only, so every version of an item is audited on the same audio. Gemini
+  marks each caption word of the window right or wrong with a type (mishearing, ending, name, number, inserted word, punctuation, other) and lists
+  words it heard that the captions lack (`dropped word`). Rate = errors / (caption words + dropped words). With `--vs <run version>` that version is audited too.
+* **Dropped speech.** VAD turns from `server/scripts/transcribe.py` `speech_turns` (cached in `~/LuskCorpus/<id>/vad.json`, keyed by the WAV's size and
+  mtime); stretches of at least 1 s that no caption word covers are lost speech, except where a YouTube `[hudba]`-style cue (+-1 s) covers them: that is
+  reported as masked/music seconds (`[potlesk]` and other sound tags as "other sound"). Stock phrases (`is_stock_phrase`) and loops (`is_loop`) are checked on the words.
+  Items without a YouTube SRT (Svätonázor) have no masks.
+* **Timing.** VAD lag: the first caption word of each speech turn after a pause of at least 0.4 s against the turn's start (median, p10, p90, p95,
+  count beyond 0.7 s late or early). `--ref` adds `timing.py`'s approach: an mlx-whisper (base turbo) word-timestamp pass on the VAD chunks, cached in
+  `~/LuskCorpus/<id>/ref_words_<lang>.json`, matched to the caption words in runs of 3+; reported as word-onset and cue-start lag. It costs about as much as a transcription, so it is opt-in.
+* **Layout.** Cues over 7 s, lines over 42 characters, a line ending on a one-letter word, a full stop before a lower-case word (digits, `...` and the
+  sk / cs abbreviation lists excepted), "?" before a lower-case word; for this version and the `--vs` run version.
+* **Heavy jobs.** VAD and `--ref` take `~/LuskCorpus/.lock` (same format as `lock.ts`) and wait (up to `--wait-hours`, default 3) while
+  `transcribe.py`, `track_speaker.py` or a Remotion render runs or another job holds the lock. The Gemini calls are not heavy and do not take the lock.
+* **Gemini failures.** 429 / 5xx / network errors back off exponentially (2 s doubling to 60 s) for up to 5 minutes per call. Every finished batch is saved to
+  `.checkpoint.json` (keyed by its content), so rerunning the same command resumes. If the API keeps failing the tool exits with code 3, writes no
+  report and says so. Confirm the key's tier before a full dev-set run (about 150 judge + 26 audit calls per comparison).
+* **Spot checks.** Each judge decision in the JSON has `t0`/`t1`, `dt` (the first differing word), both texts, `verdict`, `said` and `sideA`.
+  Cut the audio with `ffmpeg -ss <t0> -t <t1-t0> -i audio.wav out.wav` to listen.
