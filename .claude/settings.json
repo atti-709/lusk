@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/Library/Application Support/@lusk/electron/config.json)",
+      "Read(./docs/TEXTS/**)",
+      "Edit(./docs/TEXTS/**)",
+      "Write(./docs/TEXTS/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-git.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-check.sh\"",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

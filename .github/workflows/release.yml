@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  push:
-    branches:
-      - main
+  # Releases are cut by hand (Actions > Release > Run workflow, or `gh workflow run release.yml -f bump=patch`),
+  # so that merging a pull request to main no longer ships an update to every install.
   workflow_dispatch:
     inputs:
       bump:

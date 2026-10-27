@@ -161,7 +161,7 @@ Claude has full testing control over the Electron app via Playwright (`electron/
 ### CI/CD (GitHub Actions)
 
 * **Workflow:** `.github/workflows/release.yml`.
-* **Trigger:** Every push to `main` (auto patch bump) or manual `workflow_dispatch` (choose patch/minor/major).
+* **Trigger:** manual `workflow_dispatch` only (choose patch/minor/major; `gh workflow run release.yml -f bump=patch`). Merging to `main` does not release.
 * **Versioning:** Derived from the latest `v*` git tag — `electron/package.json` version is overwritten at build time and not committed back. Tags are the source of truth.
 * **Publishing:** `electron-builder --publish always` uploads DMG, ZIP, and `latest-mac.yml` to a GitHub Release. Uses `GITHUB_TOKEN` (automatic).
 * **Note:** `electron-builder` is installed globally in CI to avoid `app-builder-bin` arm64 binary issues with npm workspace hoisting.
@@ -206,6 +206,11 @@ The DMG build has a different runtime environment than `npm run dev`. Common iss
 * **Pins:** `torch`, `torchaudio`, and `whisperx` are pinned together — they must be compatible. `transformers` 5.x requires `torch >= 2.6` (CVE-2025-32434). WhisperX 3.8.x requires `torch ~= 2.8.0` and `numpy >= 2.1.0`.
 * **Setup flow:** Electron shows a setup dialog on first launch that streams progress via SSE from `POST /api/python-env/setup`. The SSE endpoint uses `reply.hijack()` to prevent Fastify from interfering.
 * **Verification:** `import whisperx` cold start takes ~5s (loads torch). The `isReady()` check uses a 30s timeout.
+
+## **Working on Tasks (Claude Code)**
+
+* The backlog is the Notion project "Lusk — Universal Shorts" (Tasks database); `/task <number>` works one task end to end: claim, worktree, implement, verify, review by the `reviewer` subagent, PR, Notion update. Rules that have no exceptions are enforced by `.claude/settings.json`: no push to `main` (PRs only; the owner merges), Conventional Commits, and typecheck + server unit tests must pass before a session may stop.
+* One heavy job (transcription, tracking, render) at a time on this machine; batch and quality runs use the headless engine mode so no app window opens.
 
 ## **User Instructions**
 
