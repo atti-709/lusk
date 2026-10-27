@@ -159,15 +159,15 @@ both wrong, `[{item, t0, t1, verdict, ...}]`: pass it to `abtest.py build --cont
 * **A/B judge.** Spans where the two SRTs' words differ (the `abtest.py` rule: NFC, lower case, punctuation dropped, diacritics kept, differences up
   to 3 words apart merged; YouTube `[tags]` and `>>` removed first). Gemini (`gemini-3.8-flash`, 15 snippets of at most 25 s per call, sides
   shuffled by a seeded RNG) answers A / B / same / neither; the prompt follows the item's language (Slovak or Czech, colloquial forms count as right,
-  names in their established spelling). With more than `--max-spans` (120) spans in an item a seeded sample is judged and the report says so (`0` = all).
+  names in their established spelling). Every differing span is judged by default; `--max-spans N` judges a seeded sample of N per item instead (the report says so). Filler sounds (`eh`, `e`) are left out of both sides: YouTube transcribes them, Whisper does not.
 * **Absolute audit.** 30 fixed 8 s windows per item, seeded by the item id only, so every version of an item is audited on the same audio. Gemini
   marks each caption word of the window right or wrong with a type (mishearing, ending, name, number, inserted word, punctuation, other) and lists
   words it heard that the captions lack (`dropped word`). Rate = errors / (caption words + dropped words). With `--vs <run version>` that version is audited too.
 * **Dropped speech.** VAD turns from `server/scripts/transcribe.py` `speech_turns` (cached in `~/LuskCorpus/<id>/vad.json`, keyed by the WAV's size and
   mtime); stretches of at least 1 s that no caption word covers are lost speech, except where a YouTube `[hudba]`-style cue (+-1 s) covers them: that is
-  reported as masked/music seconds (`[potlesk]` and other sound tags as "other sound"). Stock phrases (`is_stock_phrase`) and loops (`is_loop`) are checked on the words.
+  reported as masked/music seconds (`[potlesk]` and other sound tags as "other sound"). The mask times come from `youtube_auto.json3` (the SRT rebuild caps a `[hudba]` at ~1.8 s), else from the SRT. Stock phrases (`is_stock_phrase`, plus a few Czech sign-offs until T10 adds them to `transcribe.py`) and loops (`is_loop`) are checked on the words.
   Items without a YouTube SRT (Svätonázor) have no masks.
-* **Timing.** VAD lag: the first caption word of each speech turn after a pause of at least 0.4 s against the turn's start (median, p10, p90, p95,
+* **Timing.** VAD lag: the first caption word (and the first SRT cue) of each speech turn after a pause of at least 0.4 s against the turn's start (median, p10, p90, p95,
   count beyond 0.7 s late or early). `--ref` adds `timing.py`'s approach: an mlx-whisper (base turbo) word-timestamp pass on the VAD chunks, cached in
   `~/LuskCorpus/<id>/ref_words_<lang>.json`, matched to the caption words in runs of 3+; reported as word-onset and cue-start lag. It costs about as much as a transcription, so it is opt-in.
 * **Layout.** Cues over 7 s, lines over 42 characters, a line ending on a one-letter word, a full stop before a lower-case word (digits, `...` and the

@@ -27,7 +27,7 @@ import re
 import subprocess
 import sys
 import time
-import unicodedata  # noqa: F401
+import unicodedata
 import urllib.error
 import urllib.request
 import wave
@@ -40,7 +40,9 @@ import abtest  # noqa: E402  (norm, SRT parsing, the span merge rule and the mp3
 REPO = os.path.dirname(os.path.dirname(HERE))
 CORPUS = os.path.expanduser("~/LuskCorpus")
 CONFIG = os.path.expanduser("~/Library/Application Support/@lusk/electron/config.json")
-MANAGED_PYTHON = os.path.expanduser("~/Library/Application Support/@lusk/electron/python-env/venv/bin/python")
+MANAGED_PYTHON = next((p for p in (os.path.expanduser("~/Library/Application Support/@lusk/electron/python-env/venv/bin/python"),
+                                   os.path.join(REPO, "server", ".python-env", "venv", "bin", "python")) if os.path.exists(p)),
+                      os.path.expanduser("~/Library/Application Support/@lusk/electron/python-env/venv/bin/python"))
 SCRIPTS = os.path.join(REPO, "server", "scripts")
 MODEL = "gemini-3.8-flash"
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
@@ -130,6 +132,21 @@ def youtube_cues(path):
 FILLERS = {"e", "ee", "eee", "eh", "ehh", "ehm", "ehe", "hm", "hmm", "mm", "mhm", "uh", "um", "aha"}
 
 
+def json3_masks(path):
+    """Sound-tag stretches from the raw json3 captions (event start + offset to the event's end): the SRT rebuild caps a
+    [hudba] at ~1.8 s, the json3 event keeps its real length."""
+    out = []
+    for e in read_json(path).get("events", []):
+        for sg in e.get("segs") or []:
+            txt = sg.get("utf8", "").strip()
+            if txt and not strip_tags(txt) and TAG.search(txt):
+                t0 = (e.get("tStartMs", 0) + sg.get("tOffsetMs", 0)) / 1000
+                t1 = (e.get("tStartMs", 0) + e.get("dDurationMs", 0)) / 1000
+                if t1 > t0:
+                    out.append({"t0": t0, "t1": t1, "kind": "music" if MUSIC_TAG.search(txt) else "sound", "tag": txt})
+    return out
+
+
 def cue_words(cues):
     """(word, cue start, cue end) for the words of the cues, filler sounds left out."""
     return [w for w in abtest.cue_words(cues) if abtest.norm(w[0]) not in FILLERS]
@@ -190,7 +207,7 @@ def pass_signature(meta):
     }
 
 
-def guard(meta_a, meta_b):
+def guard(meta_a, meta_b, run_vs=False):
     """None when a (this version) and b (the --vs version, or None for YouTube) may be compared, else the reason."""
     if meta_a is None:
         return "no meta.json for this version"
@@ -198,7 +215,7 @@ def guard(meta_a, meta_b):
         failed = (meta_a.get("passes") or {}).get("failed")
         return f"this version did not complete with every pass ok (completed={meta_a.get('completed')}, passesOk={meta_a.get('passesOk')}, failed={failed})"
     if meta_b is None:
-        return None
+        return "the other version has no meta.json" if run_vs else None
     if not meta_b.get("completed") or not meta_b.get("passesOk"):
         return f"the other version did not complete with every pass ok (completed={meta_b.get('completed')}, passesOk={meta_b.get('passesOk')})"
     sa, sb = pass_signature(meta_a), pass_signature(meta_b)
@@ -306,8 +323,8 @@ def ask(parts, key, n, **kw):
             res = res.get("results") or res.get("items") or [res]
         by = {r["id"]: r for r in res if isinstance(r, dict) and isinstance(r.get("id"), int)}
         if all(i in by for i in range(n)):
-            break
-    return by
+            return by
+    raise ApiFailure(f"Gemini answered {len(by)} of {n} items twice in a row")
 
 
 # ------------------------------------------------------------------------------------------------------ A/B judge
@@ -428,9 +445,10 @@ def audit_item(item, lang, wav, words, version, key, ck, batch, kw):
 
 
 def summarize_audit(wins):
-    words = sum(len(w["marks"]) for w in wins)
+    answered = [w for w in wins if w["answered"]]
+    words = sum(len(w["marks"]) for w in answered)  # an unanswered window is not counted as all right
     by = {t: 0 for t in ERROR_TYPES}
-    for w in wins:
+    for w in answered:
         for m in w["marks"]:
             if not m["ok"]:
                 by[m["type"]] += 1
@@ -680,6 +698,10 @@ def dropped_speech(turns, words, masks):
             "maskedMusicSeconds": round(masked["music"], 1), "maskedSoundSeconds": round(masked["sound"], 1)}
 
 
+CZ_STOCK = ["dekuji za pozornost", "dekujeme za pozornost", "dekuji za sledovani", "dekujeme za sledovani", "titulky vytvoril", "titulky vytvorilo",
+            "preklad titulku", "konec", "to je vse"]
+
+
 def stock_loop_hits(words, cues):
     """Where transcribe.py's is_stock_phrase / is_loop fire: stock phrases on every cue text and every sentence of the words,
     loops on sliding 40-word groups. -> {"stock": [...], "loop": [...]} or None when the managed Python is unavailable."""
@@ -697,6 +719,10 @@ def stock_loop_hits(words, cues):
     flags = text_hits([t for _, t in items])
     if flags is None:
         return None
+    for f, (_, text) in zip(flags, items):  # transcribe.py's list is Slovak/English; Czech sign-offs until T10 adds them
+        plain = " ".join("".join(c for c in unicodedata.normalize("NFD", x) if c.isalnum()) for x in text.lower().split())
+        if any(plain.startswith(ph) and len(plain.split()) <= len(ph.split()) * 3 for ph in CZ_STOCK):
+            f["stock"] = True
     out = {"stock": [], "loop": []}
     for f, (t, text) in zip(flags, items):
         for kind in ("stock", "loop"):
@@ -729,6 +755,19 @@ def vad_lags(words, turns):
         if j >= len(words) or words[j][1] >= e or words[j][1] < s - 0.5:
             continue
         out.append((words[j][1] - s, s, words[j][0]))
+    return out
+
+
+def vad_cue_lags(cues, turns):
+    """Lag of the start of each SRT cue that opens a speech turn (after a pause of 0.4 s) against the turn's start."""
+    out, j = [], 0
+    for k, (s, e) in enumerate(turns):
+        if k and s - turns[k - 1][1] < 0.4:
+            continue
+        while j < len(cues) and cues[j][1] <= s + 0.05:
+            j += 1
+        if j < len(cues) and cues[j][0] < e and cues[j][0] >= s - 0.5:
+            out.append((cues[j][0] - s, s, cues[j][2][:30]))
     return out
 
 
@@ -965,13 +1004,13 @@ def render(R):
             L.append("")
 
     L.append("## 5. Word timing\n")
-    L.append(f"Lag = caption start minus reference start (positive: late). **VAD lag**: the first caption word of each speech turn that follows a pause of at least 0.4 s, "
+    L.append(f"Lag = caption start minus reference start (positive: late). **VAD lag**: the first caption word (and the first SRT cue) of each speech turn that follows a pause of at least 0.4 s, "
              f"against the turn's start. **Reference lag** (only with `--ref`): word onsets and cue starts against an independent mlx-whisper (base turbo) word-timestamp pass "
              f"on the VAD chunks, matched in runs of 3+ words. Flagged: |lag| > {TIMING_TH} s.\n")
     rows = []
     for i, d in R["items"].items():
         t = d.get("timing") or {}
-        for label, st in (("VAD lag, turn starts", t.get("vad")), ("ref lag, word onsets", t.get("onset")), ("ref lag, cue starts", t.get("cueStart"))):
+        for label, st in (("VAD lag, turn starts (words)", t.get("vad")), ("VAD lag, cue starts", t.get("vadCue")), ("ref lag, word onsets", t.get("onset")), ("ref lag, cue starts", t.get("cueStart"))):
             if st and st.get("n"):
                 rows.append([i, label, st["n"], st["median"], st["p10"], st["p90"], st["p95"],
                              f"{st['lateOver']} ({pct(st['lateOver'], st['n'])})", f"{st['earlyOver']} ({pct(st['earlyOver'], st['n'])})"])
@@ -1012,7 +1051,7 @@ def main(argv=None):
     ap.add_argument("--out", default=os.path.join(CORPUS, "reports"))
     ap.add_argument("--skip", default="", help="comma list of judge,audit,vad,timing,layout")
     ap.add_argument("--ref", action="store_true", help="also run the mlx-whisper word-timestamp reference pass (heavy, cached per item)")
-    ap.add_argument("--max-spans", type=int, default=120, help="judge at most this many spans per item (seeded sample); 0 = all")
+    ap.add_argument("--max-spans", type=int, default=0, help="judge at most this many spans per item (a seeded sample); 0 = all (default)")
     ap.add_argument("--batch", type=int, default=BATCH)
     ap.add_argument("--wait-hours", type=float, default=3.0, help="how long to wait for a running heavy job")
     ap.add_argument("--corpus-cache", default=CORPUS, help="where <id>/vad.json and ref_words_<lang>.json are cached")
@@ -1054,7 +1093,7 @@ def main(argv=None):
         if A["cues"] is None or A["words"] is None:
             reason = f"captions_{lang}.srt or transcript.json missing in {A['dir']}"
         else:
-            reason = guard(A["meta"], B["meta"] if B else None)
+            reason = guard(A["meta"], B["meta"] if B else None, run_vs=B is not None)
         if not reason and B and (B["cues"] is None or B["words"] is None):
             reason = f"the other version has no captions_{lang}.srt / transcript.json"
         if not reason and vs_youtube and not yt:
@@ -1097,6 +1136,12 @@ def main(argv=None):
             masks, yt_cues = [], None
             if c["yt"]:
                 yt_cues, masks = youtube_cues(c["yt"])
+                j3 = os.path.splitext(c["yt"])[0] + ".json3"
+                if os.path.exists(j3):
+                    try:
+                        masks = json3_masks(j3)
+                    except (OSError, ValueError):
+                        pass
             d["layout"], d["layoutDetail"] = {}, {}
             if "layout" not in skip:
                 d["layout"][args.version], d["layoutDetail"][args.version] = layout_counts(cues_with_lines(A["srtText"]), lang)
@@ -1125,7 +1170,7 @@ def main(argv=None):
                 d["dropped"]["hits"] = stock_loop_hits(A["words"], A["cues"])
             if turns is not None and "timing" not in skip:
                 lags = vad_lags(A["words"], turns)
-                d["timing"] = {"vad": lag_stats(lags), "vadWorst": [[round(x[0], 2), round(x[1], 2), x[2]] for x in sorted(lags, key=lambda x: -abs(x[0]))[:10]]}
+                d["timing"] = {"vad": lag_stats(lags), "vadCue": lag_stats(vad_cue_lags(A["cues"], turns)), "vadWorst": [[round(x[0], 2), round(x[1], 2), x[2]] for x in sorted(lags, key=lambda x: -abs(x[0]))[:10]]}
                 refp = os.path.join(args.corpus_cache, item, f"ref_words_{lang}.json")
                 if args.ref and os.path.exists(refp):
                     r = ref_lags(A["words"], A["cues"], read_json(refp))

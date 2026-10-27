@@ -53,6 +53,36 @@ def test_fillers():
     assert [w[0] for w in rp.cue_words([(0, 1, "A ehm Eh")])] == ["A"]
 
 
+def test_review_fixes():
+    # an unanswered audit window is not counted as all right
+    wins = [{"marks": [{"word": "x", "ok": True}] * 5, "missed": [], "answered": False}, {"marks": [{"word": "y", "ok": False, "type": "name"}], "missed": [], "answered": True}]
+    s = rp.summarize_audit(wins)
+    assert s["words"] == 1 and s["rate"] == 1.0 and s["unanswered"] == 1
+    # an answer that lacks items twice is a failure, not an empty result
+    calls = []
+    orig = rp.call_gemini
+    rp.call_gemini = lambda parts, key, **kw: calls.append(1) or [{"id": 0}]
+    try:
+        rp.ask([], "k", 2)
+        raise AssertionError("should have failed")
+    except rp.ApiFailure:
+        assert len(calls) == 2
+    finally:
+        rp.call_gemini = orig
+    # a run version without meta.json is refused (YouTube has none by nature)
+    assert "no meta.json" in rp.guard(meta(), None, run_vs=True) and rp.guard(meta(), None) is None
+    # masks keep their real length from json3
+    with tempfile.TemporaryDirectory() as t:
+        p = os.path.join(t, "y.json3")
+        json.dump({"events": [{"tStartMs": 1000, "dDurationMs": 30000, "segs": [{"utf8": "[hudba]"}]},
+                              {"tStartMs": 40000, "dDurationMs": 4000, "segs": [{"utf8": "slovo"}, {"utf8": " [potlesk]", "tOffsetMs": 2000}]}]}, open(p, "w"))
+        m = rp.json3_masks(p)
+        assert [(x["kind"], x["t0"], x["t1"]) for x in m] == [("music", 1.0, 31.0), ("sound", 42.0, 44.0)], m
+    # cue-start lag against the VAD turn
+    cues = [(5.2, 6.0, "ahoj"), (6.1, 7.0, "svet"), (12.5, 13.0, "dnes")]
+    assert [round(x[0], 2) for x in rp.vad_cue_lags(cues, [(5.0, 7.0), (12.0, 13.0)])] == [0.2, 0.5]
+
+
 def test_audit_windows():
     a = rp.audit_windows("itemX", 1500.0)
     assert len(a) == 30 and a == sorted(set(a)) and all(t % 8 == 0 and t + 8 <= 1500 for t in a)
