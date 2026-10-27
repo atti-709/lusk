@@ -111,6 +111,8 @@ SILENCE_FLOOR = 1e-4  # an envelope this weak at its loud percentile is digital 
 # ---------------------------------------------------------------------------
 
 FFMPEG = "ffmpeg"
+# opt-in (--debug-faces): every face Vision returned per sampled frame, for the framing baseline
+DEBUG_FACES: list[dict] | None = None
 
 
 def log(message: str) -> None:
@@ -292,6 +294,17 @@ def detect_samples(video: str, width: int, height: int, start: float, duration: 
         seen: list[Face] = []
         candidates = []  # (score, cx, kind)
         results = face_req.results() or []
+        if DEBUG_FACES is not None:
+            # raw boxes, y from the top; faces below FACE_MIN_CONFIDENCE included
+            DEBUG_FACES.append({
+                "t": round(t, 3),
+                "faces": [{"x": round(float(r.boundingBox().origin.x), 4),
+                           "y": round(float(1 - r.boundingBox().origin.y - r.boundingBox().size.height), 4),
+                           "w": round(float(r.boundingBox().size.width), 4),
+                           "h": round(float(r.boundingBox().size.height), 4),
+                           "conf": round(float(r.confidence()), 3)} for r in results],
+                "text": [[round(a, 4), round(b, 4)] for a, b in lines],
+            })
         for r in results:
             if r.confidence() < FACE_MIN_CONFIDENCE:
                 continue
@@ -1096,8 +1109,12 @@ def main() -> None:
                         help="seconds into the clip at which the person was picked")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--out", required=True)
+    parser.add_argument("--debug-faces", help="also write every detected face per sampled frame to this JSON file")
     args = parser.parse_args()
     FFMPEG = args.ffmpeg
+    global DEBUG_FACES
+    if args.debug_faces:
+        DEBUG_FACES = []
 
     if args.mode == "pick" and args.subject_x is None:
         parser.error("--mode pick needs --subject-x")
@@ -1151,6 +1168,15 @@ def main() -> None:
             "cuts": [round(c, 3) for c in cuts],
             "keyframes": keyframes,
         }, f)
+    if args.debug_faces and DEBUG_FACES is not None:
+        with open(args.debug_faces, "w", encoding="utf-8") as f:
+            json.dump({
+                "sampleHz": SAMPLE_HZ,
+                "detectWidth": LANDMARK_DETECT_WIDTH if follow_speaker else DETECT_WIDTH,
+                "faceMinConfidence": FACE_MIN_CONFIDENCE,
+                "fitFaceMinH": FIT_FACE_MIN_H,
+                "frames": DEBUG_FACES,
+            }, f)
     progress(100)
 
 
