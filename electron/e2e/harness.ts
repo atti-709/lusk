@@ -35,14 +35,17 @@ export interface LaunchOptions {
   reusePythonEnv?: boolean;
   /** Echo app/server logs to stdout. Default: LUSK_E2E_VERBOSE=1. */
   verbose?: boolean;
+  /**
+   * Engine only: LUSK_HEADLESS=1 — no window, no Dock icon, no focus. `window` is null and
+   * the window wait is skipped; drive the app through `api()`. For batch and quality runs.
+   */
+  headless?: boolean;
   /** Extra env vars for the main process (and thus the server). */
   env?: Record<string, string>;
 }
 
-export interface Lusk {
+interface LuskBase {
   app: ElectronApplication;
-  /** The main window (http://localhost:{port}). */
-  window: Page;
   /** Port the app actually serves on (LUSK_PORT, or the next free one). */
   port: number;
   baseUrl: string;
@@ -56,6 +59,16 @@ export interface Lusk {
   /** Fetch JSON from the app's server. */
   api<T = unknown>(urlPath: string, init?: RequestInit): Promise<T>;
   close(): Promise<void>;
+}
+
+export interface Lusk extends LuskBase {
+  /** The main window (http://localhost:{port}). */
+  window: Page;
+}
+
+/** Launched with `headless: true`: no window exists; drive the app through `api()`. */
+export interface HeadlessLusk extends LuskBase {
+  window: null;
 }
 
 export function resolveTarget(): Target {
@@ -95,7 +108,9 @@ function findReal(file: string): string | null {
   return null;
 }
 
-export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk> {
+export async function launchLusk(opts: LaunchOptions & { headless: true }): Promise<HeadlessLusk>;
+export async function launchLusk(opts?: LaunchOptions): Promise<Lusk>;
+export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk | HeadlessLusk> {
   const target = opts.target ?? resolveTarget();
   const verbose = opts.verbose ?? process.env.LUSK_E2E_VERBOSE === "1";
   const requestedPort = await freePort();
@@ -115,6 +130,7 @@ export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk> {
     LUSK_PORT: String(requestedPort),
     LUSK_USER_DATA_DIR: userDataDir,
     LUSK_DISABLE_AUTO_UPDATE: "1",
+    ...(opts.headless ? { LUSK_HEADLESS: "1" } : {}),
     ...opts.env,
   };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -154,23 +170,47 @@ export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk> {
   app.process().stdout?.on("data", capture);
   app.process().stderr?.on("data", capture);
 
-  // The Python setup window may come first; wait for the main window.
-  // Server startup + Python env check can take a while on a cold start.
-  // The app may fall back to another port if the requested one got taken.
-  const isMain = (p: Page) => p.url().startsWith("http://localhost:");
-  let window = app.windows().find(isMain);
-  const deadline = Date.now() + 90_000;
-  while (!window) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      await app.close().catch(() => {});
-      throw new Error(`Main window never appeared.\n--- logs ---\n${logs.join("").slice(-4000)}`);
+  let window: Page | null = null;
+  let port: number;
+  if (opts.headless) {
+    // No window to read the port from: the main process publishes it once the server is up.
+    // A dead process (Python env not ready, server failed) must fail fast, not time out.
+    let exited = false;
+    app.process().once("exit", () => { exited = true; });
+    const deadline = Date.now() + 90_000;
+    let found = 0;
+    while (!found) {
+      if (exited || Date.now() > deadline) {
+        await app.close().catch(() => {});
+        throw new Error(
+          `Headless app ${exited ? "exited" : "did not start"}.\n--- logs ---\n${logs.join("").slice(-4000)}`,
+        );
+      }
+      found = await app
+        .evaluate(() => (globalThis as { __luskPort?: number }).__luskPort ?? 0)
+        .catch(() => 0);
+      if (!found) await new Promise((r) => setTimeout(r, 300));
     }
-    const next = await app.waitForEvent("window", { timeout: remaining }).catch(() => null);
-    window = next && isMain(next) ? next : app.windows().find(isMain);
+    port = found;
+  } else {
+    // The Python setup window may come first; wait for the main window.
+    // Server startup + Python env check can take a while on a cold start.
+    // The app may fall back to another port if the requested one got taken.
+    const isMain = (p: Page) => p.url().startsWith("http://localhost:");
+    window = app.windows().find(isMain) ?? null;
+    const deadline = Date.now() + 90_000;
+    while (!window) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        await app.close().catch(() => {});
+        throw new Error(`Main window never appeared.\n--- logs ---\n${logs.join("").slice(-4000)}`);
+      }
+      const next = await app.waitForEvent("window", { timeout: remaining }).catch(() => null);
+      window = next && isMain(next) ? next : (app.windows().find(isMain) ?? null);
+    }
+    await window.waitForLoadState("domcontentloaded");
+    port = Number(new URL(window.url()).port);
   }
-  await window.waitForLoadState("domcontentloaded");
-  const port = Number(new URL(window.url()).port);
   const baseUrl = `http://localhost:${port}`;
 
   const stubDialog = (kind: "save" | "open") => (filePath: string | null) =>
@@ -193,7 +233,7 @@ export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk> {
 
   return {
     app,
-    window,
+    window: window as Page,
     port,
     baseUrl,
     userDataDir,
