@@ -79,3 +79,51 @@ python3 -I tools/quality/abtest_test.py        # checks (span finder, window pic
   suffix, so votes left in the artifact database by an older build are ignored by the page and skipped (with a warning) by
   `unblind`. `unblind` accepts `{id: {choice, note}}`, a `{"votes": …}` wrapper, `votes/<id>` keys and lists of
   `{id, choice, note}` or `{id, data}`; a vote without a valid choice is an error.
+
+## Run harness (`run.ts`)
+
+Runs the real app pipeline on corpus items and stores a versioned result. Needs `npm run build:electron` once, the Python
+env of the real profile, and a Gemini key in the owner's `config.json` (or `GEMINI_API_KEY`).
+
+```bash
+npx tsx tools/quality/run.ts 01-v0 sk4y82zUf9Y Ccj-zhD0YPA          # from the repo root
+npx tsx tools/quality/run.ts 01-v0 0QqML3YiWTA --video              # from the item's video.mp4 (framing)
+npx tsx tools/quality/run.ts 01-v0 E08 E64 --manifest ~/LuskBatch/corpus_svatonazor.json
+LUSK_WHISPER_MODEL=<mlx folder or HF repo> npx tsx tools/quality/run.ts 02-cs-large-v3 <item>   # model variants
+```
+
+* `<version>` must match `^\d{2}-[a-z0-9-]+$` (`01-v0`, `02-cs-large-v3`, `00-smoke`); never a bare `v1` that two workstreams reuse.
+* One item at a time, each in a fresh headless app (`LUSK_HEADLESS`, no window). The profile is `runs/<version>/.profile`, and its
+  `config.json` is rewritten for every item with only: the Gemini key, `translateToEnglish: false` and `transcriptionLanguage` = the
+  item's language. Prompt overrides in the owner's real config never leak in. The project is created with the item's language.
+* Input is a black proxy `.mov` carrying the item's `audio.wav` (`--video`: the real `video.mp4`). With a `script` its text is
+  POSTed before transcription, so the correction pass runs as in production.
+* The SRT is fetched right after READY. Output, per item, in `~/LuskCorpus/runs/<version>/<item>/`: `transcript.json` (final words),
+  `transcript_raw.json` (heard words before the text passes), `captions_<lang>.srt`, `clips.json`, `log.txt` (this tool's lines, then
+  the app/server output) and `meta.json`.
+* `meta.json`: `completed`, git `commit` (+ `dirty` for uncommitted source changes), item id/language/set, `settings`, `models`
+  (Whisper model for the language, the `LUSK_WHISPER_MODEL` override, the two Gemini models), `timingsSeconds` (transcribe = until
+  the transcript is done, gemini = correction/proofread/clips, total; polled each second), `peakRssPythonMb` (sum of the
+  `transcribe.py` processes, sampled from `ps` every 2 s), `counts`, and **`passes`**: script correction ran/skipped, proofread
+  `{status, applied, rejected}`, clips `{status, count}`, translation `ran|skipped|failed`, `failed`. Proofread, clips and translation
+  are non-fatal in the app, so a project reaches READY with a pass silently failed; the server's runtime-only `runReport` (on
+  `GET /api/projects/:id`) records it and `passesOk` is false then. **Compare only runs whose `passes` match and `passesOk` is true.**
+* Resumable: an item whose `meta.json` has `completed: true` is skipped; a failed one is run again from scratch.
+* `~/LuskCorpus/.lock` (pid + start time) is held for the whole run; a second run, or `electron/scripts/batch-episodes.ts`
+  (both through `lock.ts`), refuses to start while it is held. A lock whose pid is gone is taken over. Still check
+  `pgrep -fl "transcribe.py|track_speaker|remotion"` before a run: other tools do not take the lock.
+
+### Second manifest (Svätonázor regression set)
+
+`--manifest <path>` replaces `corpus.json`. Items are looked up by `id`; relative paths resolve against the manifest's folder and `~/`
+is expanded. `wav` / `video` default to `<corpus dir>/<id>/audio.wav` / `video.mp4`.
+
+```json
+{ "items": [
+  { "id": "E64", "language": "sk", "set": "regression",
+    "wav": "~/LuskBatch/audio/E64.wav",
+    "script": "<the episode's .md script, optional>" } ] }
+```
+
+The owner's copy is `~/LuskBatch/corpus_svatonazor.json` (E00, E08, E35, E64, E65, E71; the script is the episode's Drive-folder
+`.md`, else `regen4/script_map.json` + `texts/`, as in `regen4.ts`; E00 has none). It holds owner paths and is not committed.
