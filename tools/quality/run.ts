@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchLusk, type HeadlessLusk } from '../../electron/e2e/harness';
-import { acquireLock, LockHeldError } from './lock';
+import { acquireLock, DEFAULT_LOCK, LockHeldError } from './lock';
 import { isValidVersion } from './version';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -22,6 +22,8 @@ const REAL_CONFIG = path.join(os.homedir(), 'Library', 'Application Support', '@
 const json = { 'Content-Type': 'application/json' };
 /** The app of the item being run, so an interrupt can stop it and its Python helper. */
 let current: HeadlessLusk | null = null;
+/** The longest a stage may go without the state, progress or message changing. */
+const STALL_MS = 45 * 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One thing to run. Corpus items get wav/video from their folder; a manifest item can name its own paths. */
@@ -54,14 +56,15 @@ export function loadItems(manifestPath: string, corpusDir: string): RunItem[] {
   return manifest.items.map((raw) => {
     const id = String(raw.id);
     if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`bad item id in ${manifestPath}: ${id}`);
-    const own = resolve(raw.video);
+    // corpus.json's `video` is a label ("1080p", "audio only"); only a path-like value names a file
+    const own = typeof raw.video === 'string' && /[\\/]|\.\w{2,4}$/.test(raw.video) ? resolve(raw.video) : null;
     const corpusVideo = path.join(corpusDir, id, 'video.mp4');
     return {
       id,
       language: String(raw.language),
       set: String(raw.set ?? ''),
       wav: resolve(raw.wav) ?? path.join(corpusDir, id, 'audio.wav'),
-      video: own ?? (raw.video === undefined && fs.existsSync(corpusVideo) ? corpusVideo : null),
+      video: own ?? (fs.existsSync(corpusVideo) ? corpusVideo : null),
       script: resolve(raw.script),
     };
   });
@@ -81,9 +84,31 @@ function modelNames(language: string): Record<string, string | null> {
   return {
     whisper: process.env.LUSK_WHISPER_MODEL || own || base,
     whisperOverride: process.env.LUSK_WHISPER_MODEL || null,
-    geminiFlashLite: gemini.match(/^const MODEL = "([^"]+)"/m)?.[1] ?? null, // correction, translation, proofread
-    geminiReasoning: gemini.match(/^const REASONING_MODEL = "([^"]+)"/m)?.[1] ?? null, // clips
+    geminiFlashLite: gemini.match(/^const MODEL = "([^"]+)"/m)?.[1] ?? null, // correction, translation
+    geminiReasoning: gemini.match(/^const REASONING_MODEL = "([^"]+)"/m)?.[1] ?? null, // proofread, clips
   };
+}
+
+/** newest mtime (ms) of the .ts files under `dir` */
+function newestSource(dir: string): number {
+  let newest = 0;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name === 'dist' || e.name === '__tests__') continue;
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) newest = Math.max(newest, newestSource(full));
+    else if (/\.tsx?$/.test(e.name)) newest = Math.max(newest, fs.statSync(full).mtimeMs);
+  }
+  return newest;
+}
+
+/** The app runs the built server: a stale build would be recorded under the commit it does not match. */
+function assertBuildFresh(): void {
+  if (process.env.LUSK_E2E_TARGET === 'packaged') throw new Error('LUSK_E2E_TARGET=packaged: meta.json would record the repo commit, not the app that ran');
+  const built = path.join(REPO, 'server/dist/index.js');
+  if (!fs.existsSync(built)) throw new Error('server/dist missing — run `npm run build:electron` first');
+  const builtAt = fs.statSync(built).mtimeMs;
+  const stale = [path.join(REPO, 'server/src'), path.join(REPO, 'shared')].filter((d) => newestSource(d) > builtAt);
+  if (stale.length) throw new Error(`server/dist is older than the sources in ${stale.map((d) => path.relative(REPO, d)).join(', ')} — run \`npm run build:electron\` first`);
 }
 
 function gitInfo(): { commit: string; dirty: boolean } {
@@ -189,6 +214,8 @@ async function runItem(item: RunItem, versionDir: string, useVideo: boolean, cor
     await lusk.api('/api/transcribe', { method: 'POST', headers: json, body: JSON.stringify({ sessionId: projectId }) });
 
     let last = '';
+    let lastChange = Date.now();
+    let lastSeen = '';
     let alignAt: number | null = null;
     let s: any;
     for (;;) {
@@ -200,7 +227,11 @@ async function runItem(item: RunItem, versionDir: string, useVideo: boolean, cor
       }
       if (s.state === 'ALIGNING' && alignAt === null) alignAt = Date.now();
       if (s.state === 'READY') break;
-      if (s.progress === -1) throw new Error(s.message);
+      if (s.progress === -1 || /^Error:/.test(String(s.message))) throw new Error(s.message); // updateProgress clamps to 0..100: the failure is in the message
+      if (s.state === 'UPLOADING') throw new Error(`pipeline went back to UPLOADING: ${s.message}`); // cancelled
+      const seen = `${s.state}|${s.progress}|${s.message}`;
+      if (seen !== lastSeen) (lastSeen = seen, lastChange = Date.now());
+      else if (Date.now() - lastChange > STALL_MS) throw new Error(`no progress for ${STALL_MS / 60000} min (${seen})`);
       if (s.state === 'ALIGNING' && s.progress === 100 && /fail|manual|cancel|No Gemini/i.test(s.message)) throw new Error(s.message);
       await sleep(1000);
     }
@@ -219,7 +250,8 @@ async function runItem(item: RunItem, versionDir: string, useVideo: boolean, cor
     const report = s.runReport ?? null;
     const passesOk = !!report && !report.failed && report.proofread?.status === 'ok' && report.clips?.status === 'ok' && report.translation?.status !== 'failed';
     Object.assign(meta, {
-      completed: true,
+      // a run with a failed pass is not a version: it is not skipped on resume and counts as failed
+      completed: passesOk,
       finishedAt: new Date().toISOString(),
       timingsSeconds: {
         transcribe: Math.round(((alignAt ?? t2) - t1) / 1000),
@@ -238,7 +270,11 @@ async function runItem(item: RunItem, versionDir: string, useVideo: boolean, cor
       passesOk,
       counts: { words: s.transcript?.words?.length ?? 0, clips: (s.viralClips ?? []).length },
     });
-    log(`${item.id} done in ${Math.round((t2 - t0) / 60000)} min${passesOk ? '' : ' — A PASS FAILED, see meta.json passes'}`);
+    if (!passesOk) {
+      log(`${item.id} A PASS FAILED: ${JSON.stringify(meta.passes)}`);
+      throw new Error('a Gemini pass failed (proofread, clips or translation): see meta.json passes');
+    }
+    log(`${item.id} done in ${Math.round((t2 - t0) / 60000)} min`);
   } catch (err) {
     meta.error = err instanceof Error ? err.message : String(err);
     log(`${item.id} FAILED: ${meta.error}`);
@@ -272,11 +308,12 @@ async function main() {
     if (!item) throw new Error(`${id} is not in ${manifest}`);
     return item;
   });
+  assertBuildFresh();
   if (!fs.existsSync(path.join(REPO, 'electron/dist/main.js'))) throw new Error('electron/dist/main.js missing — run `npm run build:electron` first');
 
   let release: () => void;
   try {
-    release = acquireLock('quality/run.ts', path.join(corpusDir, '.lock'));
+    release = acquireLock('quality/run.ts', DEFAULT_LOCK);
   } catch (err) {
     if (err instanceof LockHeldError) {
       console.error(err.message);

@@ -104,11 +104,16 @@ LUSK_WHISPER_MODEL=<mlx folder or HF repo> npx tsx tools/quality/run.ts 02-cs-la
 * `meta.json`: `completed`, git `commit` (+ `dirty` for uncommitted source changes), item id/language/set, `settings`, `models`
   (Whisper model for the language, the `LUSK_WHISPER_MODEL` override, the two Gemini models), `timingsSeconds` (transcribe = until
   the transcript is done, gemini = correction/proofread/clips, total; polled each second), `peakRssPythonMb` (sum of the
-  `transcribe.py` processes, sampled from `ps` every 2 s), `counts`, and **`passes`**: script correction ran/skipped, proofread
+  `transcribe.py` processes, sampled from `ps` every 2 s; this is RSS, which may undercount MLX's Metal buffers: use it to compare
+  runs, not as the absolute footprint), `counts`, and **`passes`**: script correction ran/skipped, proofread
   `{status, applied, rejected}`, clips `{status, count}`, translation `ran|skipped|failed`, `failed`. Proofread, clips and translation
   are non-fatal in the app, so a project reaches READY with a pass silently failed; the server's runtime-only `runReport` (on
   `GET /api/projects/:id`) records it and `passesOk` is false then. **Compare only runs whose `passes` match and `passesOk` is true.**
-* Resumable: an item whose `meta.json` has `completed: true` is skipped; a failed one is run again from scratch.
+* Resumable: an item whose `meta.json` has `completed: true` is skipped. `completed` is only true when every pass ran
+  (`passesOk`): an item with a silently failed pass is reported as failed (exit 1) and run again next time, its files kept for inspection.
+  A pipeline error, a cancel, or 45 min without any progress also fails the item, and the run moves on to the next one.
+* The app runs the *built* server: the tool refuses to start when `server/dist` is older than the sources in `server/src` or
+  `shared` (run `npm run build:electron`) or with `LUSK_E2E_TARGET=packaged`, so `meta.json`'s commit is the code that ran.
 * `~/LuskCorpus/.lock` (pid + start time) is held for the whole run; a second run, or `electron/scripts/batch-episodes.ts`
   (both through `lock.ts`), refuses to start while it is held. A lock whose pid is gone is taken over. Still check
   `pgrep -fl "transcribe.py|track_speaker|remotion"` before a run: other tools do not take the lock.
