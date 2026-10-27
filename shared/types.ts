@@ -274,8 +274,25 @@ export interface ProjectData {
   viralClips: ViralClip[] | null;
 }
 
+/**
+ * Which Gemini passes of the last pipeline run actually ran. Proofread, clips and translation are
+ * non-fatal by design, so a session reaches READY even when one failed: a quality run must record
+ * this, or a silently failed pass gets compared as a version. Runtime only, never saved.
+ */
+export interface RunReport {
+  /** Script correction ran only for a project that has a script. */
+  correction: "ran" | "skipped";
+  proofread: { status: "ok" | "failed"; applied: number; rejected: number; error?: string } | null;
+  clips: { status: "ok" | "failed"; count: number; error?: string } | null;
+  translation: { status: "ran" | "skipped" | "failed"; error?: string } | null;
+  /** Set when the Gemini run as a whole failed (the project stays in ALIGNING). */
+  failed?: string;
+}
+
 // Runtime project state (extends persisted data with runtime-only fields)
 export interface ProjectState extends ProjectData {
+  /** Passes of the last pipeline run (absent before one ran in this server process). */
+  runReport?: RunReport;
   sessionId: string; // alias for projectId, kept for backwards compat
   videoUrl: string | null;
   progress: number;
