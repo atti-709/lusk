@@ -1,6 +1,6 @@
 // Framing baseline on the corpus' 1080p items: solve three fixed 45 s ranges per item with track_speaker.py
 // (speaker mode, independent of the caption pipeline) and draw a contact sheet per range.
-//   npx tsx tools/quality/framing-baseline.ts [--only <id>[,<id>]] [--force] [--dir <path>]
+//   npx tsx tools/quality/framing-baseline.ts [--only <id>[,<id>]] [--force] [--resheet] [--dir <path>]
 // Writes ~/LuskCorpus/framing/<id>/<start>s.json (raw framing), <start>s.faces.json (every face Vision returned),
 // <start>s.png (a frame every 2 s with the 9:16 crop, faces, fit ranges and cuts drawn), summary.json/.md per item
 // and for the whole run. Resumable: a range with its JSON and sheet already there is skipped (--force redoes it).
@@ -84,7 +84,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function waitForQuiet(): Promise<void> {
   for (;;) {
     const busy = await new Promise<string>((resolve) =>
-      execFile('pgrep', ['-fl', 'scripts/transcribe.py|scripts/track_speaker.py|remotion render'], (_e, out) => resolve(out.trim())),
+      execFile('pgrep', ['-fl', 'transcribe.py|track_speaker|remotion'], (_e, out) => resolve(out.trim())),
     );
     if (!busy) return;
     console.error(`  waiting: a heavy job is running (${busy.split('\n')[0].slice(0, 80)})`);
@@ -166,7 +166,7 @@ function overlayFilter(t: number, w: number, h: number, framing: Framing, debug:
 async function contactSheet(video: string, start: number, duration: number, framing: Framing, debug: DebugFaces, out: string): Promise<void> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'framing-sheet-'));
   try {
-    await run('ffmpeg', ['-v', 'error', '-ss', String(start), '-i', video, '-t', String(duration), '-vf', `fps=1/${SHEET_STEP_SECONDS},scale=${THUMB_WIDTH}:-2`, path.join(tmp, 'raw_%02d.png')]);
+    await run('ffmpeg', ['-v', 'error', '-ss', String(start), '-i', video, '-t', String(duration), '-vf', `fps=1/${SHEET_STEP_SECONDS}:round=up,scale=${THUMB_WIDTH}:-2`, path.join(tmp, 'raw_%02d.png')]);
     const raws = fs.readdirSync(tmp).filter((n) => n.startsWith('raw_')).sort();
     if (raws.length === 0) throw new Error('no frames extracted');
     const probe = await probeVideo(path.join(tmp, raws[0]));
@@ -216,6 +216,7 @@ function itemMarkdown(item: Item, ranges: RangeSummary[], faces: FaceStats): str
 async function main(): Promise<void> {
   const root = arg('--dir') ?? path.join(os.homedir(), 'LuskCorpus');
   const force = process.argv.includes('--force');
+  const resheet = process.argv.includes('--resheet'); // redraw the sheets from the saved solves
   const only = arg('--only')?.split(',');
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   const items: Item[] = (manifest.items as Item[]).filter((i) => i.paths?.video && (!only || only.includes(i.id)));
@@ -246,7 +247,7 @@ async function main(): Promise<void> {
       }
       const framing: Framing = JSON.parse(fs.readFileSync(framingFile, 'utf8'));
       const debug: DebugFaces = JSON.parse(fs.readFileSync(debugFile, 'utf8'));
-      if (force || solveSeconds !== null || !fs.existsSync(sheet)) await contactSheet(video, start, span, framing, debug, sheet);
+      if (force || resheet || solveSeconds !== null || !fs.existsSync(sheet)) await contactSheet(video, start, span, framing, debug, sheet);
       const fit = framing.fit ?? [];
       const summary: RangeSummary = {
         id: item.id,
@@ -282,17 +283,40 @@ async function main(): Promise<void> {
     overall.push(entry);
   }
 
+  // the overall summary covers every video item with results on disk, also after a partial (--only) run
+  const fwdir = path.join(root, 'framing');
+  const everything: typeof overall = [];
+  const pooled: DebugFaces[] = [];
+  for (const item of manifest.items as Item[]) {
+    const file = path.join(fwdir, item.id, 'summary.json');
+    if (!item.paths?.video || !fs.existsSync(file)) continue;
+    const entry = JSON.parse(fs.readFileSync(file, 'utf8')) as (typeof overall)[number];
+    everything.push(entry);
+    for (const r of entry.ranges) pooled.push(JSON.parse(fs.readFileSync(path.join(fwdir, item.id, `${r.start}s.faces.json`), 'utf8')));
+  }
+  const allFaces = faceStats(mergeDebug(pooled));
   const table = [
     '| item | language | type | fit % | cuts/min | biggest face median | frames no face | frames face < 0.1 |',
     '| --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...overall.map(
+    ...everything.map(
       (o) =>
         `| ${o.item.id} | ${o.item.language} | ${o.item.type.join(', ')} | ${o.fitPercent.toFixed(0)} | ${o.cutsPerMinute.toFixed(1)} | ${f2(o.faces.biggest.median)} | ${pct(o.faces.framesNoFace, o.faces.frames)} | ${pct(o.faces.framesBelowFitMin, o.faces.frames)} |`,
     ),
   ];
-  const fwdir = path.join(root, 'framing');
-  fs.writeFileSync(path.join(fwdir, 'summary.json'), JSON.stringify({ generatedAt: new Date().toISOString(), items: overall }, null, 2));
-  fs.writeFileSync(path.join(fwdir, 'summary.md'), `# Framing baseline\n\n${table.join('\n')}\n\n${overall.map((o) => itemMarkdown(o.item, o.ranges, o.faces)).join('\n')}`);
+  const pooledLines = [
+    `All items pooled (${allFaces.frames} frames): biggest face per frame min ${f2(allFaces.biggest.min)}, median ${f2(allFaces.biggest.median)}, max ${f2(allFaces.biggest.max)}.`,
+    `Histogram of the biggest face: ${histogramRow(allFaces.biggestHistogram)}`,
+    `All faces (${allFaces.all.n}): median ${f2(allFaces.all.median)}; ${histogramRow(allFaces.allHistogram)}`,
+    `Frames with no confident face: ${pct(allFaces.framesNoFace, allFaces.frames)}; with a face under ${HEIGHT_BINS[5]}: ${pct(allFaces.framesBelowFitMin, allFaces.frames)}.`,
+  ];
+  fs.writeFileSync(
+    path.join(fwdir, 'summary.json'),
+    JSON.stringify({ generatedAt: new Date().toISOString(), faces: allFaces, items: everything }, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(fwdir, 'summary.md'),
+    `# Framing baseline\n\n${table.join('\n')}\n\n${pooledLines.join('\n\n')}\n\n${everything.map((o) => itemMarkdown(o.item, o.ranges, o.faces)).join('\n')}`,
+  );
   console.error(`wrote ${path.join(fwdir, 'summary.md')}`);
 }
 

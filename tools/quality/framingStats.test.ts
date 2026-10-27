@@ -69,5 +69,6 @@ describe('range starts', () => {
     expect(rangeStarts(1000)).toEqual([300, 900, 955]);
     expect(rangeStarts(600)).toEqual([300, 555]);
     expect(rangeStarts(100)).toEqual([55]);
+    expect(rangeStarts(950)).toEqual([300, 900]); // 905 would overlap 900
   });
 });

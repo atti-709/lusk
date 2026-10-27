@@ -134,5 +134,9 @@ export function faceStats(debug: DebugFaces): FaceStats {
 /** Start of each fixed range: minutes 5, 15 and 25, pulled back so the range fits inside the video. */
 export function rangeStarts(durationSeconds: number, rangeSeconds = 45, minutes = [5, 15, 25]): number[] {
   const latest = Math.max(0, Math.floor(durationSeconds - rangeSeconds));
-  return [...new Set(minutes.map((m) => Math.min(m * 60, latest)))];
+  const starts: number[] = [];
+  for (const s of minutes.map((m) => Math.min(m * 60, latest))) {
+    if (starts.every((x) => Math.abs(x - s) >= rangeSeconds)) starts.push(s); // no stretch counted twice
+  }
+  return starts;
 }
