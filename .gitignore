@@ -19,3 +19,7 @@ electron/e2e/.fixtures/
 # YouTube caption upload: OAuth client and tokens live in ~/LuskBatch/youtube, never here
 client_secret*.json
 token.json
+# Claude Code worktrees and quality-harness outputs
+.claude/worktrees/
+.claude/settings.local.json
+tools/quality/runs/
