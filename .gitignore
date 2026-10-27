@@ -23,3 +23,6 @@ token.json
 .claude/worktrees/
 .claude/settings.local.json
 tools/quality/runs/
+
+# Quality corpus lives outside the repo (~/LuskCorpus)
+LuskCorpus/
