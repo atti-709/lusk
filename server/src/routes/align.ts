@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
-import { settingsService, type TranscriptionLanguage } from "../services/SettingsService.js";
+import type { TranscriptionLanguage } from "../services/SettingsService.js";
 import archiver from "archiver";
 import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord, TranslatedBlock } from "@lusk/shared";
 import { viralityScore } from "@lusk/shared";
@@ -802,7 +802,7 @@ export async function alignRoute(app: FastifyInstance) {
          }
       }
 
-      const lang = await settingsService.getTranscriptionLanguage();
+      const lang = session.language;
       const srt = captionsToSrt(session.captions, lang);
 
       return reply

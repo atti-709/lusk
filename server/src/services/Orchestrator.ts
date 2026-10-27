@@ -9,6 +9,7 @@ import type {
   ViralClip,
   ClipRenderState,
 } from "@lusk/shared";
+import { DEFAULT_PROJECT_LANGUAGE } from "@lusk/shared";
 import { projectFileService } from "./ProjectFileService.js";
 
 const TRANSITIONS: Record<PipelineState, PipelineState[]> = {
@@ -47,6 +48,7 @@ class Orchestrator extends EventEmitter {
       videoWidth: null,
       videoHeight: null,
       videoFps: null,
+      language: DEFAULT_PROJECT_LANGUAGE,
 
       transcript: null,
       originalTranscript: null,

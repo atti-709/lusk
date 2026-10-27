@@ -22,7 +22,9 @@ import type {
   ProjectState,
   RecentProject,
   PipelineState,
+  ProjectLanguage,
 } from "@lusk/shared";
+import { DEFAULT_PROJECT_LANGUAGE, parseProjectLanguage } from "@lusk/shared";
 import { tempManager } from "./TempManager.js";
 import { isCopyOf, makePlayableCopy, planPlayable, probeCodecs } from "./PlayableVideo.js";
 
@@ -188,6 +190,8 @@ function readLuskFile(filePath: string): ProjectData {
   }
   const raw = entry.getData().toString("utf-8");
   const data = JSON.parse(raw) as ProjectData;
+  // Projects saved before the language was stored were all made with the old default
+  data.language = parseProjectLanguage(data.language);
   // Resolve videoPath relative to the .lusk file location (also handles legacy absolute paths)
   if (data.videoPath && !isAbsolute(data.videoPath)) {
     data.videoPath = resolve(dirname(filePath), data.videoPath);
@@ -337,6 +341,7 @@ class ProjectFileService {
   async createProject(
     projectFilePath: string,
     videoPath?: string,
+    language: ProjectLanguage = DEFAULT_PROJECT_LANGUAGE,
   ): Promise<ProjectState> {
     const projectId = randomUUID();
     const now = new Date().toISOString();
@@ -357,6 +362,7 @@ class ProjectFileService {
       videoWidth: videoMeta.width,
       videoHeight: videoMeta.height,
       videoFps: videoMeta.fps,
+      language,
       state: hasVideo ? "UPLOADING" : "IDLE",
       transcript: null,
       originalTranscript: null,
@@ -472,6 +478,7 @@ class ProjectFileService {
       videoWidth: session.videoWidth ?? null,
       videoHeight: session.videoHeight ?? null,
       videoFps: session.videoFps ?? null,
+      language: session.language,
       state: session.state,
       transcript: session.transcript,
       originalTranscript: session.originalTranscript ?? null,

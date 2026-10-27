@@ -4,7 +4,10 @@ import { homedir } from "node:os";
 import { getClientPublicDir } from "../config/paths.js";
 import { MATCH_SOURCE_FPS } from "@lusk/shared";
 
-export type TranscriptionLanguage = "sk" | "cs" | "en";
+import type { ProjectLanguage } from "@lusk/shared";
+
+/** Kept as an alias: the project language type now lives in shared. */
+export type TranscriptionLanguage = ProjectLanguage;
 
 export interface AppSettings {
   geminiApiKey?: string;

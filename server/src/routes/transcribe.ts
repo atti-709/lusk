@@ -3,10 +3,10 @@ import { orchestrator } from "../services/Orchestrator.js";
 import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
 import { geminiService, wordsToTsv, msToTimestamp } from "../services/GeminiService.js";
-import { settingsService } from "../services/SettingsService.js";
 import { parseTsv, wordsToCaptions, groupCaptionBlocks, geminiClipsToViralClips } from "./align.js";
 import { dropStrayStops, keepForeignSpeech } from "../services/alignCorrection.js";
 import { guardSpokenForms } from "../services/spokenForms.js";
+import { DEFAULT_PROJECT_LANGUAGE } from "@lusk/shared";
 import type { TranscribeRequest, ErrorResponse, ViralClip, TranscriptWord, TranslatedBlock } from "@lusk/shared";
 
 type Logger = Pick<FastifyInstance["log"], "error">;
@@ -29,8 +29,10 @@ export async function doTranscribe(sessionId: string, log: Logger, signal?: Abor
 
   orchestrator.updateProgress(sessionId, 0, "Starting transcription...");
 
+  const language = orchestrator.getSession(sessionId)?.language ?? DEFAULT_PROJECT_LANGUAGE;
   const { transcript, captions } = await whisperService.transcribe(
     sessionDir,
+    language,
     (percent, message) => {
       orchestrator.updateProgress(sessionId, percent, message);
     },
@@ -95,7 +97,7 @@ export async function runGeminiAutomation(
     //    correction misses (and is the only correction a script-less project gets)
     words = dropStrayStops(await proofread(sessionId, words, session.scriptText ?? null, signal));
     words = keepForeignSpeech(rawTranscript.words, words);
-    words = await guardSpokenForms(rawTranscript.words, words, await settingsService.getTranscriptionLanguage());
+    words = await guardSpokenForms(rawTranscript.words, words, session.language);
 
     const tsvForClips = wordsToTsv(words);
     orchestrator.setTranscript(sessionId, { text: "", words });
@@ -145,8 +147,9 @@ export async function runGeminiAutomation(
  * `translatedCaptions` (the English SRT). Nothing to do for an English transcript.
  */
 async function translateCaptions(sessionId: string, signal?: AbortSignal): Promise<void> {
-  const lang = await settingsService.getTranscriptionLanguage();
-  const captions = orchestrator.getSession(sessionId)?.captions;
+  const session = orchestrator.getSession(sessionId);
+  const lang = session?.language ?? DEFAULT_PROJECT_LANGUAGE;
+  const captions = session?.captions;
   if (lang === "en" || !captions || captions.length === 0) return;
 
   const blockTexts = groupCaptionBlocks(captions, lang).map((group) => ({
@@ -182,7 +185,7 @@ async function proofread(
   signal?: AbortSignal,
 ): Promise<TranscriptWord[]> {
   try {
-    const lang = await settingsService.getTranscriptionLanguage();
+    const lang = orchestrator.getSession(sessionId)?.language ?? DEFAULT_PROJECT_LANGUAGE;
     const result = await geminiService.proofreadTranscript(
       words,
       scriptText,
