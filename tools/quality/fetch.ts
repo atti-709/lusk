@@ -190,16 +190,23 @@ async function fetchItem(it: CorpusItem, dir: string, phase: 'audio' | 'video', 
     }
   } else if (it.video === '1080p') {
     const duration = Number(meta.duration);
-    if (!(await durationOk(mp4, duration))) {
+    if (!Number.isFinite(duration)) throw new Error(`${it.id}: no duration in meta.json (audio phase failed), skipping video`);
+    // An existing file counts only if its length, codec and height are right (a bad one is replaced).
+    const existing = (await durationOk(mp4, duration)) ? await probeVideo(mp4) : null;
+    if (!existing || existing.codec !== 'h264' || existing.height < 1000) {
       const info = await ytInfo(it.id, VIDEO_FORMAT);
       const fmts = chosen(info);
       const est = Math.max(fmts.reduce((a, f) => a + (f.filesize ?? 0), 0), it.minutes * 30 * MB);
-      checkSpace(root, est * 1.15, `${it.id}/video.mp4`);
+      // yt-dlp keeps the video and audio files while ffmpeg writes the merged mp4: the peak is about 2x.
+      checkSpace(root, est * 2.15, `${it.id}/video.mp4`);
       fs.rmSync(mp4, { force: true });
       await run(YT_DLP, ['--no-playlist', '-f', VIDEO_FORMAT, '--merge-output-format', 'mp4', '-o', mp4, url]);
       if (!(await durationOk(mp4, duration))) throw new Error(`${it.id}: video.mp4 duration differs from ${duration}s`);
       const v = await probeVideo(mp4);
-      if (v.codec !== 'h264') throw new Error(`${it.id}: video.mp4 is ${v.codec}, expected h264`);
+      if (v.codec !== 'h264' || v.height < 1000) {
+        fs.rmSync(mp4, { force: true });
+        throw new Error(`${it.id}: video.mp4 is ${v.codec} ${v.height}p, expected h264 1080p`);
+      }
       (meta.formats as Record<string, unknown>).video = fmts;
       meta.video = v;
       fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2) + '\n');
@@ -240,7 +247,8 @@ async function main() {
   const corpus = JSON.parse(fs.readFileSync(path.join(here, 'corpus.json'), 'utf8')) as { items: CorpusItem[] };
   const root = arg('--dir') ?? path.join(os.homedir(), 'LuskCorpus');
   const only = arg('--only')?.split(',');
-  const items = corpus.items.filter((i) => i.set !== 'excluded' && (!only || only.includes(i.id)));
+  const all = corpus.items.filter((i) => i.set !== 'excluded');
+  const items = all.filter((i) => !only || only.includes(i.id));
   fs.mkdirSync(root, { recursive: true });
 
   const errors: string[] = [];
@@ -266,7 +274,7 @@ async function main() {
   }
 
   const entries = [];
-  for (const it of items) entries.push(await entry(it, path.join(root, it.id)));
+  for (const it of all) entries.push(await entry(it, path.join(root, it.id)));
   const manifest = {
     generatedAt: new Date().toISOString(),
     root,
