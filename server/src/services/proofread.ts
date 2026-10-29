@@ -94,17 +94,58 @@ function isRewrite(find: string[], replace: string[]): boolean {
   return editDistance(a, b) > MAX_REWRITE_RATIO * Math.max(a.length, b.length);
 }
 
-/** Position of `needle` as a contiguous run inside `haystack`, skipping taken positions. */
+/** A token with the commas and full stops attached to it removed — what a `find` may omit. */
+function looseKey(token: string): string {
+  return token.normalize("NFC").replace(/[,.]/g, "");
+}
+
+/** The punctuation a token ends in ("zhromáždění," → ","), quotes and brackets included. */
+function trailingPunct(token: string): string {
+  return token.match(/[^\p{L}\p{N}]+$/u)?.[0] ?? "";
+}
+
+/**
+ * Position of `needle` as a contiguous run inside `haystack`, skipping taken positions.
+ * A run that matches verbatim wins; failing that, one that matches once the commas and
+ * full stops attached to words are ignored (Gemini often quotes "zhromáždění," as
+ * "zhromáždění").
+ */
 function findRun(haystack: string[], needle: string[], taken: Set<number>, offset: number): number {
-  const eq = (a: string, b: string) => a.normalize("NFC") === b.normalize("NFC");
-  for (let i = 0; i + needle.length <= haystack.length; i++) {
-    let ok = true;
-    for (let k = 0; k < needle.length && ok; k++) {
-      ok = !taken.has(offset + i + k) && eq(haystack[i + k], needle[k]);
+  const exact = (a: string, b: string) => a.normalize("NFC") === b.normalize("NFC");
+  const loose = (a: string, b: string) => looseKey(a) === looseKey(b);
+  for (const eq of [exact, loose]) {
+    for (let i = 0; i + needle.length <= haystack.length; i++) {
+      let ok = true;
+      for (let k = 0; k < needle.length && ok; k++) {
+        ok = !taken.has(offset + i + k) && eq(haystack[i + k], needle[k]);
+      }
+      if (ok) return i;
     }
-    if (ok) return i;
   }
   return -1;
+}
+
+/**
+ * The words an edit puts in, with the line's own punctuation kept wherever the edit did not
+ * speak of it: tokens `find` and `replace` share at either end stay as written on the line,
+ * and a changed last word that carries no punctuation of its own gets the one the replaced
+ * word ended in — unless `find` quoted that punctuation, which makes dropping it deliberate.
+ */
+function keepLinePunctuation(old: string[], find: string[], replace: string[]): string[] {
+  const out = [...replace];
+  const same = (a: string, b: string) => a.normalize("NFC") === b.normalize("NFC");
+  let p = 0;
+  while (p < find.length && p < replace.length && same(find[p], replace[p])) p++;
+  let q = 0;
+  while (q < find.length - p && q < replace.length - p && same(find[find.length - 1 - q], replace[replace.length - 1 - q])) q++;
+  for (let i = 0; i < p; i++) out[i] = old[i];
+  for (let i = 0; i < q; i++) out[out.length - 1 - i] = old[old.length - 1 - i];
+  const last = out.length - 1;
+  if (last >= 0 && q === 0 && trailingPunct(replace[last]) === "") {
+    const orig = trailingPunct(old[old.length - 1]);
+    if (orig !== "" && trailingPunct(find[find.length - 1]) !== orig) out[last] = replace[last] + orig;
+  }
+  return out;
 }
 
 /** Split [fromMs, toMs) between `texts` in proportion to their length. */
@@ -165,7 +206,7 @@ export function applyProofreadEdits(
 ): ProofreadResult {
   const byId = new Map(lines.map((l) => [l.id, l]));
   const taken = new Set<number>();
-  const accepted: { start: number; end: number; replacement: string[]; edit: ProofreadEdit }[] = [];
+  const accepted: { start: number; end: number; find: string[]; replacement: string[]; edit: ProofreadEdit }[] = [];
   const rejected: ProofreadEdit[] = [];
 
   for (const edit of edits) {
@@ -184,20 +225,22 @@ export function applyProofreadEdits(
     }
     const start = line.words[at];
     for (let k = 0; k < find.length; k++) taken.add(start + k);
-    accepted.push({ start, end: start + find.length, replacement: replace, edit });
+    accepted.push({ start, end: start + find.length, find, replacement: replace, edit });
   }
 
   accepted.sort((a, b) => a.start - b.start);
   const out: TranscriptWord[] = [];
   const applied: AppliedEdit[] = [];
   let cursor = 0;
-  for (const { start, end, replacement, edit } of accepted) {
+  for (const { start, end, find, replacement, edit } of accepted) {
     out.push(...words.slice(cursor, start));
     const old = words.slice(start, end);
-    out.push(...retime(old, replacement));
+    const oldTexts = old.map((w) => w.word);
+    const final = keepLinePunctuation(oldTexts, find, replacement);
+    out.push(...retime(old, final));
     applied.push({
-      from: old.map((w) => w.word).join(" "),
-      to: replacement.join(" "),
+      from: oldTexts.join(" "),
+      to: final.join(" "),
       atMs: old[0].startMs,
       reason: edit.reason,
     });
