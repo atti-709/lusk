@@ -7,6 +7,10 @@ describe("isRetryableJsonError", () => {
     expect(isRetryableJsonError(new Error("429 Too Many Requests"))).toBe(true);
   });
 
+  it("retries a 504 deadline error (JEokdLimPV8 clips)", () => {
+    expect(isRetryableJsonError(new Error('{"error":{"code":504,"status":"DEADLINE_EXCEEDED"}}'))).toBe(true);
+  });
+
   it("retries an answer cut short mid-JSON (Lr0U-0HMQgo clips)", () => {
     let err: unknown;
     try {
