@@ -42,4 +42,16 @@ describe("proofread punctuation-tolerant find", () => {
     const b = run("Šli sme do zhromáždění, a potom.", [{ find: "sme do zhromáždění", replace: "úplne iná veta tu" }]);
     expect(b.r.rejected).toHaveLength(1);
   });
+
+  it("moves the line's comma to the new last word on an insertion", () => {
+    const { text } = run("Nebojte, lebo som s vami.", [{ find: "Nebojte", replace: "Nebojte sa" }]);
+    expect(text).toBe("Nebojte sa, lebo som s vami.");
+  });
+
+  it("rejects a deletion that would take the sentence end and a no-op", () => {
+    const a = run("Šli sme domov. Potom spal.", [{ find: "domov", replace: "" }]);
+    expect(a.r.rejected).toHaveLength(1);
+    const b = run("Šli sme domov. Potom spal.", [{ find: "domov,", replace: "domov" }]);
+    expect(b.r.rejected).toHaveLength(1);
+  });
 });

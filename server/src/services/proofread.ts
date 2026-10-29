@@ -141,9 +141,11 @@ function keepLinePunctuation(old: string[], find: string[], replace: string[]): 
   for (let i = 0; i < p; i++) out[i] = old[i];
   for (let i = 0; i < q; i++) out[out.length - 1 - i] = old[old.length - 1 - i];
   const last = out.length - 1;
-  if (last >= 0 && q === 0 && trailingPunct(replace[last]) === "") {
-    const orig = trailingPunct(old[old.length - 1]);
-    if (orig !== "" && trailingPunct(find[find.length - 1]) !== orig) out[last] = replace[last] + orig;
+  const orig = trailingPunct(old[old.length - 1]);
+  if (last >= 0 && q === 0 && orig !== "" && trailingPunct(find[find.length - 1]) !== orig && trailingPunct(replace[last]) === "") {
+    // the replaced span's last word carried punctuation `find` left out: it moves to the new last word
+    if (p === find.length && last >= p) out[p - 1] = old[p - 1].slice(0, old[p - 1].length - orig.length);
+    out[last] = (p === replace.length ? out[last].slice(0, out[last].length - trailingPunct(out[last]).length) : replace[last]) + orig;
   }
   return out;
 }
@@ -206,7 +208,7 @@ export function applyProofreadEdits(
 ): ProofreadResult {
   const byId = new Map(lines.map((l) => [l.id, l]));
   const taken = new Set<number>();
-  const accepted: { start: number; end: number; find: string[]; replacement: string[]; edit: ProofreadEdit }[] = [];
+  const accepted: { start: number; end: number; replacement: string[]; edit: ProofreadEdit }[] = [];
   const rejected: ProofreadEdit[] = [];
 
   for (const edit of edits) {
@@ -223,20 +225,32 @@ export function applyProofreadEdits(
       rejected.push(edit);
       continue;
     }
+    const oldLast = lineTokens[at + find.length - 1];
+    // a deletion would take the line's sentence end or comma with it; `find` didn't quote it
+    if (replace.length === 0 && trailingPunct(oldLast) !== trailingPunct(find[find.length - 1])) {
+      rejected.push(edit);
+      continue;
+    }
     const start = line.words[at];
+    const oldTexts = lineTokens.slice(at, at + find.length);
+    const final = keepLinePunctuation(oldTexts, find, replace);
+    if (final.join(" ") === oldTexts.join(" ")) {
+      rejected.push(edit); // nothing left to change once the line's punctuation is kept
+      continue;
+    }
     for (let k = 0; k < find.length; k++) taken.add(start + k);
-    accepted.push({ start, end: start + find.length, find, replacement: replace, edit });
+    accepted.push({ start, end: start + find.length, replacement: final, edit });
   }
 
   accepted.sort((a, b) => a.start - b.start);
   const out: TranscriptWord[] = [];
   const applied: AppliedEdit[] = [];
   let cursor = 0;
-  for (const { start, end, find, replacement, edit } of accepted) {
+  for (const { start, end, replacement, edit } of accepted) {
     out.push(...words.slice(cursor, start));
     const old = words.slice(start, end);
     const oldTexts = old.map((w) => w.word);
-    const final = keepLinePunctuation(oldTexts, find, replacement);
+    const final = replacement;
     out.push(...retime(old, final));
     applied.push({
       from: oldTexts.join(" "),
