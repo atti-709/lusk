@@ -54,4 +54,25 @@ describe("proofread punctuation-tolerant find", () => {
     const b = run("Šli sme domov. Potom spal.", [{ find: "domov,", replace: "domov" }]);
     expect(b.r.rejected).toHaveLength(1);
   });
+
+  it("does not duplicate the comma when an insertion carries its own punctuation", () => {
+    const { text } = run("Nebojte, lebo som s vami.", [{ find: "Nebojte", replace: "Nebojte sa," }]);
+    expect(text).toBe("Nebojte sa, lebo som s vami.");
+  });
+
+  it("drops a repeat without leaving the kept word's comma behind", () => {
+    expect(run("Vidím, že to, to je ono.", [{ find: "to to je", replace: "to je" }]).text).toBe("Vidím, že to je ono.");
+    expect(run("A, a potom spal.", [{ find: "A a", replace: "A" }]).text).toBe("A potom spal.");
+  });
+
+  it("keeps an inner comma on a word that changed in place", () => {
+    const { text } = run("Povedal Alexo, Konor a odišiel.", [{ find: "Alexo Konor", replace: "Alex Konor" }]);
+    expect(text).toBe("Povedal Alex, Konor a odišiel.");
+  });
+
+  it("rejects an ambiguous loose match but takes a verbatim one", () => {
+    const line = "Šli sme domov, a potom domov, spať.";
+    expect(run(line, [{ find: "domov", replace: "doma" }]).r.rejected).toHaveLength(1);
+    expect(run("Šli sme domov a potom domov, spať.", [{ find: "domov", replace: "doma" }]).text).toBe("Šli sme doma a potom domov, spať.");
+  });
 });

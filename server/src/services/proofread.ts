@@ -113,15 +113,22 @@ function trailingPunct(token: string): string {
 function findRun(haystack: string[], needle: string[], taken: Set<number>, offset: number): number {
   const exact = (a: string, b: string) => a.normalize("NFC") === b.normalize("NFC");
   const loose = (a: string, b: string) => looseKey(a) === looseKey(b);
-  for (const eq of [exact, loose]) {
+  const matches = (eq: (a: string, b: string) => boolean): number[] => {
+    const at: number[] = [];
     for (let i = 0; i + needle.length <= haystack.length; i++) {
       let ok = true;
       for (let k = 0; k < needle.length && ok; k++) {
         ok = !taken.has(offset + i + k) && eq(haystack[i + k], needle[k]);
       }
-      if (ok) return i;
+      if (ok) at.push(i);
     }
-  }
+    return at;
+  };
+  const verbatim = matches(exact);
+  if (verbatim.length) return verbatim[0];
+  // which of several loose matches Gemini meant is unknown: only an unambiguous one is taken
+  const fuzzy = matches(loose);
+  if (fuzzy.length === 1) return fuzzy[0];
   return -1;
 }
 
@@ -140,12 +147,24 @@ function keepLinePunctuation(old: string[], find: string[], replace: string[]): 
   while (q < find.length - p && q < replace.length - p && same(find[find.length - 1 - q], replace[replace.length - 1 - q])) q++;
   for (let i = 0; i < p; i++) out[i] = old[i];
   for (let i = 0; i < q; i++) out[out.length - 1 - i] = old[old.length - 1 - i];
-  const last = out.length - 1;
-  const orig = trailingPunct(old[old.length - 1]);
-  if (last >= 0 && q === 0 && orig !== "" && trailingPunct(find[find.length - 1]) !== orig && trailingPunct(replace[last]) === "") {
+  const lost = (i: number) => trailingPunct(find[i]) !== trailingPunct(old[i]); // `find` left old[i]'s punctuation out
+  const middleEnd = replace.length - q;
+  if (middleEnd === p && p > 0 && p < find.length) {
+    // words deleted after a kept word: the kept word's own punctuation went with the deleted ones
+    out[p - 1] = replace[p - 1];
+  } else if (find.length === replace.length) {
+    // one word for one word: each changed word keeps the punctuation `find` left out
+    for (let i = p; i < replace.length - q; i++) {
+      if (lost(i) && trailingPunct(replace[i]) === "") out[i] = replace[i] + trailingPunct(old[i]);
+    }
+  } else if (q === 0 && lost(find.length - 1)) {
     // the replaced span's last word carried punctuation `find` left out: it moves to the new last word
+    const orig = trailingPunct(old[old.length - 1]);
+    const last = out.length - 1;
     if (p === find.length && last >= p) out[p - 1] = old[p - 1].slice(0, old[p - 1].length - orig.length);
-    out[last] = (p === replace.length ? out[last].slice(0, out[last].length - trailingPunct(out[last]).length) : replace[last]) + orig;
+    if (last >= p && trailingPunct(replace[last]) === "") {
+      out[last] = (p === replace.length ? out[last].slice(0, out[last].length - trailingPunct(out[last]).length) : replace[last]) + orig;
+    }
   }
   return out;
 }
