@@ -11,12 +11,12 @@ import { probeCodecs } from "./PlayableVideo.js";
 const WHISPERX_MODEL = "large-v3-turbo";
 /**
  * Languages with a fine-tuned model (transcribe.py's LANGUAGE_MODELS): Slovak heard far better (KInIT turbo);
- * Czech: mikr's large-v3 fine-tune writes the colloquial forms as spoken (T9, 2026-10-29: judge +43 over turbo).
+ * Czech: mikr's large-v3 fine-tune writes the colloquial forms as spoken (T9, 2026-10-29: judge +74 over turbo on the 6 Czech dev items).
  */
 export const LANGUAGE_MODELS: Record<string, string> = { sk: "large-v3-turbo-sk", cs: "large-v3-cs" };
 
 /** The model name passed to transcribe.py: LUSK_WHISPER_MODEL (a comparison override), else the language's model, else turbo. */
-export function whisperModelFor(language: string, override = process.env.LUSK_WHISPER_MODEL): string {
+export function whisperModelFor(language: string, override: string | undefined = process.env.LUSK_WHISPER_MODEL): string {
   return override || LANGUAGE_MODELS[language] || WHISPERX_MODEL;
 }
 
@@ -269,7 +269,7 @@ class WhisperService {
           const phase = /^PHASE (\S+)/.exec(line);
           if (phase) {
             if (phase[1] === "download:model") {
-              onProgress?.(current.from, "Downloading the Slovak transcription model (first run, ~1.6 GB)...");
+              onProgress?.(current.from, "Downloading the language-specific transcription model (first run, a few GB)...");
             }
             if (phase[1] === "transcribe:mlx" && !fs.existsSync(MLX_MODEL_CACHE)) {
               onProgress?.(current.from, "Downloading the transcription model (first run, ~1.6 GB)...");
