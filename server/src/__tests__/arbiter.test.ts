@@ -158,6 +158,16 @@ describe("applyVerdicts", () => {
     expect(out.endsWith("pôjdeme.")).toBe(true); // the deleted tail's full stop moves to the word before
   });
 
+  it("never brings the base model's repeats or hesitations in with a real difference", () => {
+    const f = [seg("Povedal to je dobrý človek naozaj tu a teraz.")];
+    const b = [seg("Povedal to to je dobré ehm človek naozaj tu a teraz.")];
+    const spans = findSpans(f, b).spans;
+    spans.forEach((s) => { s.verdict = "base"; s.judged = true; });
+    const out = applyVerdicts(f, spans)[0].text;
+    expect(out).toContain("dobré");
+    expect(out).not.toMatch(/to to|ehm/);
+  });
+
   it("summarises what was sent and chosen", () => {
     const { spans } = findSpans(ft, base);
     spans[0].judged = true;

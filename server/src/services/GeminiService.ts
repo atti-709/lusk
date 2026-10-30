@@ -790,9 +790,10 @@ export class GeminiService {
             config: { abortSignal: signal, responseMimeType: "application/json", responseJsonSchema: ARBITER_SCHEMA },
           });
           const text = response.text ?? "";
-          JSON.parse(text); // only cache a well-formed answer
+          const answered = new Set(((JSON.parse(text) as { results?: { id: number }[] }).results ?? []).map((r) => r.id));
           raw = text;
-          await this.setCachedChunk(sessionId, hash, [text.replace(/\n/g, " ")]);
+          // only a complete answer is cached: a partial one would stay "no answer" on every re-run
+          if (batch.every((_, i) => answered.has(i))) await this.setCachedChunk(sessionId, hash, [text.replace(/\n/g, " ")]);
         } catch (err: unknown) {
           raw = null;
           if (signal?.aborted) throw new Error("Cancelled");
@@ -801,7 +802,10 @@ export class GeminiService {
           if (attempt < ARBITER_RETRIES && isRetryableJsonError(errObj)) {
             const delay = RETRY_DELAY_MS * 2 ** attempt;
             console.warn(`[GeminiService] Arbiter batch ${bi} attempt ${attempt + 1} failed (${errObj.message}). Retrying in ${delay / 1000}s...`);
-            await sleep(delay);
+            await new Promise<void>((resolve) => {
+              const t = setTimeout(resolve, delay);
+              signal?.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+            });
             continue;
           }
           console.warn(`[GeminiService] Arbiter batch ${bi} failed, the fine-tune keeps its words: ${errObj.message}`);

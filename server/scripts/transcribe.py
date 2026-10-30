@@ -368,7 +368,10 @@ def decode_base(decode, segments: list[dict], model: str, language: str) -> list
         sys.exit(f"--both-models needs a language fine-tune with a base model, not {model}")
     chunks = sorted({tuple(s["chunk"]) for s in segments if s["language"] == language and "chunk" in s})
     phase("transcribe:base")
-    return decode([list(c) for c in chunks], base, language, exact=True)
+    found = decode([list(c) for c in chunks], base, language, exact=True)
+    # a chunk re-decoded for speech the first pass missed overlaps its neighbours: what a segment of another
+    # chunk already says is not a second opinion but a duplicate (the fine-tune's side drops it the same way)
+    return [s for s in found if not already_said(s, [x for x in segments if x.get("chunk") != s.get("chunk")])]
 
 
 def join_sentences(segments: list[dict]) -> list[dict]:

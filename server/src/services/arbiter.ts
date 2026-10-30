@@ -329,7 +329,15 @@ export function applyVerdicts(segments: DecodedSegment[], spans: ArbiterSpan[]):
     if (!edits) return out;
     const words = seg.text.split(/\s+/).filter(Boolean);
     for (const sp of [...edits].sort((a, b) => b.from - a.from)) {
-      const replacement = adopt(words.slice(sp.from, sp.to), sp.base.split(/\s+/).filter(Boolean), words[sp.from - 1]);
+      // clean text: the base model's hesitations and repeats (also of the word before the span) never come in
+      let prev = normalizeWord(words[sp.from - 1] ?? "");
+      const incoming = sp.base.split(/\s+/).filter(Boolean).filter((w) => {
+        const n = normalizeWord(w);
+        if (FILLERS.has(n) || (n !== "" && n === prev)) return false;
+        prev = n;
+        return true;
+      });
+      const replacement = adopt(words.slice(sp.from, sp.to), incoming, words[sp.from - 1]);
       const dropped = words.slice(sp.from, sp.to);
       words.splice(sp.from, sp.to - sp.from, ...replacement);
       // a deleted tail takes its closing punctuation with it: it moves to the word before
