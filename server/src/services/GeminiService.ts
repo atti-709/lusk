@@ -204,8 +204,11 @@ export function validateChunkRowCount(
 function isRetryableError(err: unknown): boolean {
   if (err instanceof Error) {
     const msg = err.message;
-    // Gemini 503 / 429 / rate limit
-    if (msg.includes("503") || msg.includes("429") || msg.includes("UNAVAILABLE") || msg.includes("RESOURCE_EXHAUSTED")) return true;
+    // Gemini 503 / 429 / rate limit, and a 504 "Deadline expired" on a long clips request (JEokdLimPV8, T9 run)
+    if (
+      msg.includes("503") || msg.includes("429") || msg.includes("504") ||
+      msg.includes("UNAVAILABLE") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("DEADLINE_EXCEEDED")
+    ) return true;
   }
   return false;
 }

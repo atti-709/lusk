@@ -27,6 +27,8 @@ MLX_MODELS = {
 # closing appeal, an English clip) is transcribed by the base model in that language.
 LANGUAGE_MODELS = {
     "large-v3-turbo-sk": ("kinit/whisper-large-v3-turbo-sk", "sk", "large-v3-turbo"),
+    # Czech large-v3 fine-tune on Common Voice 13 (Apache-2.0), T9 candidate
+    "large-v3-cs": ("mikr/whisper-large-v3-czech-cv13", "cs", "large-v3"),
 }
 # A chunk goes to the base model only when it is clearly another language: Slovak and Czech are
 # close, and the base model gives Slovak speech some Czech probability too.
@@ -52,6 +54,8 @@ STOCK_PHRASES = {
     "dakujem za pozornost", "dakujeme za pozornost", "dakujem za pozretie",
     "dakujem za sledovanie", "dakujeme za sledovanie", "thank you for watching",
     "thank you for your attention",
+    # the Czech fine-tune (T9) writes this over the quiet end of a talk (w6O75HIIRh0 33:42, four times)
+    "titulky vytvoril johnyx",
 }
 
 
