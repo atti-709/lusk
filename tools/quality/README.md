@@ -179,3 +179,9 @@ both wrong, `[{item, t0, t1, verdict, ...}]`: pass it to `abtest.py build --cont
   report and says so. Confirm the key's tier before a full dev-set run (about 150 judge + 26 audit calls per comparison).
 * **Spot checks.** Each judge decision in the JSON has `t0`/`t1`, `dt` (the first differing word), both texts, `verdict`, `said` and `sideA`.
   Cut the audio with `ffmpeg -ss <t0> -t <t1-t0> -i audio.wav out.wav` to listen.
+
+## T6 arbiter tools
+
+- `run.ts <version> <items> --arbiter` runs with the `twoModelArbiter` setting on and copies `arbiter.json` / `decodes.json` into the run folder.
+- `make_adjudication.py <version>` builds `~/LuskCorpus/reports/t6-adjudication.html` (about 40 arbiter decisions for the owner to judge by ear; exports `t6-adjudication.md`).
+- `ctc_second_opinion.py <run dir>` (managed Python) and `arbiter-second-opinion.ts <run dir> <out.json>` (another Gemini tier, `--model`) re-judge the same spans without sharing the arbiter's answers.

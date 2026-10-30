@@ -184,7 +184,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
             Check uncertain words by listening (experimental)
           </label>
           <p className="settings-hint">
-            Transcribes twice (about 15 % longer) and lets Gemini listen to short audio snippets, a few seconds each, wherever the two transcripts differ, to pick the better one. Needs a Gemini key. Only these audio snippets leave your Mac, never the video. Off by default
+            Transcribes twice (adds roughly a quarter of the recording's length to the run) and lets Gemini listen to short audio snippets, a few seconds each, wherever the two transcripts differ, to pick the better one. Needs a Gemini key. Only these audio snippets leave your Mac, never the video. Off by default
           </p>
         </div>
 
