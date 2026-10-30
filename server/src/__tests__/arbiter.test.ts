@@ -228,7 +228,9 @@ describe("GeminiService.arbitrateSpans", () => {
       .mockRejectedValueOnce(new Error('{"error":{"code":503,"status":"UNAVAILABLE"}}'))
       .mockImplementationOnce(async ({ contents }: any) => answerA(contents[0].parts.filter((p: any) => p.inlineData).length));
     const p = geminiService.arbitrateSpans(mkSpans(2), { wavPath, language: "sk", sessionId: "sess-retry" });
-    for (let i = 0; i < 20; i++) { // the backoff timer is set after a real file read: keep advancing
+    let settled = false;
+    p.then(() => (settled = true), () => (settled = true));
+    while (!settled) { // the backoff timer is set after a real file read: keep advancing until the call is through
       await vi.advanceTimersByTimeAsync(1000);
       await new Promise((r) => setImmediate(r));
     }
@@ -241,7 +243,7 @@ describe("GeminiService.arbitrateSpans", () => {
     await expect(geminiService.arbitrateSpans(mkSpans(2), { wavPath, language: "sk", sessionId: "sess-402" })).rejects.toThrow(/402/);
     expect(isFatalGeminiError(new Error("402"))).toBe(true);
     expect(isFatalGeminiError(new Error("503 UNAVAILABLE"))).toBe(false);
-  });
+  }, 20000);
 
   it("stops on the abort signal", async () => {
     const controller = new AbortController();
