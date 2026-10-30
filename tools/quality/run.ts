@@ -1,5 +1,5 @@
 // Run the app pipeline on corpus items and store a versioned result under ~/LuskCorpus/runs/<version>/<item>/.
-//   npx tsx tools/quality/run.ts <version> <item…> [--manifest <path>] [--video] [--dir <corpus dir>]
+//   npx tsx tools/quality/run.ts <version> <item…> [--manifest <path>] [--video] [--arbiter] [--dir <corpus dir>]
 // <version> is `<nn>-<tag>` (01-v0, 02-cs-large-v3). Needs `npm run build:electron` first and a free Mac:
 // only one heavy job may run at a time (a lock file in the corpus dir enforces it).
 //
@@ -133,7 +133,7 @@ function startRssSampler(): { stop(): number } {
   return { stop: () => (clearInterval(timer), sample(), peakKb) };
 }
 
-async function runItem(item: RunItem, versionDir: string, useVideo: boolean, corpusDir: string): Promise<void> {
+async function runItem(item: RunItem, versionDir: string, useVideo: boolean, corpusDir: string, arbiter = false): Promise<void> {
   const outDir = path.join(versionDir, item.id);
   const metaPath = path.join(outDir, 'meta.json');
   if (fs.existsSync(metaPath) && JSON.parse(fs.readFileSync(metaPath, 'utf-8')).completed === true) {
@@ -174,7 +174,8 @@ async function runItem(item: RunItem, versionDir: string, useVideo: boolean, cor
   // (no prompt overrides), so a run never depends on what the owner's settings happen to hold
   const key = process.env.GEMINI_API_KEY ? undefined : (JSON.parse(fs.readFileSync(REAL_CONFIG, 'utf-8')).geminiApiKey as string | undefined);
   if (!key && !process.env.GEMINI_API_KEY) throw new Error(`no Gemini API key in ${REAL_CONFIG} or GEMINI_API_KEY`);
-  const settings = { transcriptionLanguage: item.language, translateToEnglish: false };
+  // --arbiter: T6's two-model decode with the listening arbiter (the `twoModelArbiter` setting, off otherwise)
+  const settings = { transcriptionLanguage: item.language, translateToEnglish: false, ...(arbiter ? { twoModelArbiter: true } : {}) };
   fs.mkdirSync(profile, { recursive: true });
   fs.writeFileSync(path.join(profile, 'config.json'), JSON.stringify({ ...(key ? { geminiApiKey: key } : {}), ...settings }, null, 2), { mode: 0o600 });
 
@@ -246,9 +247,17 @@ async function runItem(item: RunItem, versionDir: string, useVideo: boolean, cor
     // the heard words before correction/proofread: what the text passes changed is the diff of the two
     fs.writeFileSync(path.join(outDir, 'transcript_raw.json'), JSON.stringify(s.originalTranscript, null, 1));
     fs.writeFileSync(path.join(outDir, 'clips.json'), JSON.stringify(s.viralClips ?? [], null, 1));
+    if (arbiter) {
+      // both decodes and every arbiter decision (spans, verdicts, what the judge said) for the adjudication page
+      for (const f of ['arbiter.json', 'decodes.json']) {
+        const from = path.join(profile, 'lusk_temp', projectId, f);
+        if (fs.existsSync(from)) fs.copyFileSync(from, path.join(outDir, f));
+      }
+    }
 
     const report = s.runReport ?? null;
-    const passesOk = !!report && !report.failed && report.proofread?.status === 'ok' && report.clips?.status === 'ok' && report.translation?.status !== 'failed';
+    const arbiterOk = !arbiter || report?.arbiter?.status === 'ok'; // a failed listening means the run is not the arbiter version
+    const passesOk = !!report && !report.failed && report.proofread?.status === 'ok' && report.clips?.status === 'ok' && report.translation?.status !== 'failed' && arbiterOk;
     Object.assign(meta, {
       // a run with a failed pass is not a version: it is not skipped on resume and counts as failed
       completed: passesOk,
@@ -264,6 +273,7 @@ async function runItem(item: RunItem, versionDir: string, useVideo: boolean, cor
         proofread: report?.proofread ?? null,
         clips: report?.clips ?? null,
         translation: report?.translation ?? null,
+        ...(arbiter ? { arbiter: report?.arbiter ?? null } : {}),
         failed: report?.failed ?? null,
       },
       // false: a pass failed silently (the project still reached READY); do not compare this run as a version
@@ -296,7 +306,7 @@ async function main() {
   const positional = args.filter((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
   const [version, ...ids] = positional;
   if (!version || !ids.length || !isValidVersion(version)) {
-    console.error('usage: tsx tools/quality/run.ts <nn>-<tag> <item…> [--manifest <path>] [--video] [--dir <corpus dir>]\n' +
+    console.error('usage: tsx tools/quality/run.ts <nn>-<tag> <item…> [--manifest <path>] [--video] [--arbiter] [--dir <corpus dir>]\n' +
       '  <version> must look like 01-v0 or 02-cs-large-v3');
     process.exit(2);
   }
@@ -330,7 +340,7 @@ async function main() {
   let failed = 0;
   for (const item of items) {
     try {
-      await runItem(item, versionDir, process.argv.includes('--video'), corpusDir);
+      await runItem(item, versionDir, process.argv.includes('--video'), corpusDir, process.argv.includes('--arbiter'));
     } catch (err) {
       failed++;
       console.error(`${item.id}: ${err instanceof Error ? err.message : err}`);

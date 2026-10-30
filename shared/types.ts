@@ -285,6 +285,20 @@ export interface RunReport {
   proofread: { status: "ok" | "failed"; applied: number; rejected: number; error?: string } | null;
   clips: { status: "ok" | "failed"; count: number; error?: string } | null;
   translation: { status: "ran" | "skipped" | "failed"; error?: string } | null;
+  /** T6 two-model arbiter: null when the setting is off or there is no key. */
+  arbiter?: {
+    status: "ok" | "failed";
+    /** Spans where the two decodes differ / sent to the judge / given to the base model */
+    spans: number;
+    judged: number;
+    chosenBase: number;
+    calls: number;
+    cacheHits: number;
+    /** Seconds the base decode and the listening took */
+    baseDecodeSeconds: number;
+    arbiterSeconds: number;
+    error?: string;
+  } | null;
   /** Set when the Gemini run as a whole failed (the project stays in ALIGNING). */
   failed?: string;
 }

@@ -152,7 +152,22 @@ export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk | Headl
 
   // Builds that predate the LUSK_USER_DATA_DIR override would run against the
   // user's real profile — bail out before the window/server do any work.
-  const actualUserData = await app.evaluate(({ app }) => app.getPath("userData"));
+  // Right after launch Playwright's first evaluate sometimes dies with "Resulting promise was garbage collected"
+  // although the app is fine (the first item of every quality run failed on it): ask again, and close the app
+  // when it still fails so no headless server is left behind
+  let actualUserData = "";
+  for (let attempt = 1; ; attempt++) {
+    try {
+      actualUserData = await app.evaluate(({ app }) => app.getPath("userData"));
+      break;
+    } catch (err) {
+      if (attempt >= 5) {
+        await app.close().catch(() => {});
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, 300 * attempt));
+    }
+  }
   if (path.resolve(actualUserData) !== path.resolve(userDataDir)) {
     await app.close().catch(() => {});
     throw new Error(
