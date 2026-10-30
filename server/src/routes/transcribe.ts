@@ -32,7 +32,7 @@ export async function doTranscribe(sessionId: string, log: Logger, signal?: Abor
   orchestrator.setRunReport(sessionId, null);
 
   const language = orchestrator.getSession(sessionId)?.language ?? DEFAULT_PROJECT_LANGUAGE;
-  const { transcript, captions } = await whisperService.transcribe(
+  const { transcript, captions, arbiter } = await whisperService.transcribe(
     sessionDir,
     language,
     (percent, message) => {
@@ -41,6 +41,7 @@ export async function doTranscribe(sessionId: string, log: Logger, signal?: Abor
     signal,
   );
 
+  if (arbiter) orchestrator.setRunReport(sessionId, { arbiter });
   orchestrator.setTranscript(sessionId, transcript);
   orchestrator.setOriginalTranscript(sessionId, transcript);
   orchestrator.setCaptions(sessionId, captions);

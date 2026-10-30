@@ -1,12 +1,15 @@
 import path from "node:path";
 import fs from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
-import { access, readFile, unlink } from "node:fs/promises";
-import type { ProjectLanguage, TranscriptData, TranscriptWord, CaptionWord } from "@lusk/shared";
+import { access, readFile, unlink, writeFile } from "node:fs/promises";
+import type { ProjectLanguage, TranscriptData, TranscriptWord, CaptionWord, RunReport } from "@lusk/shared";
 import { getFFmpegPath } from "../config/ffmpeg.js";
 import { pythonEnvService } from "./PythonEnvService.js";
 import { spawnGroup, killGroup } from "./ChildProcesses.js";
 import { probeCodecs } from "./PlayableVideo.js";
+import { settingsService } from "./SettingsService.js";
+import { geminiService, isFatalGeminiError } from "./GeminiService.js";
+import { applyVerdicts, findSpans, summarize, type ArbiterSpan, type BothDecodes } from "./arbiter.js";
 
 const WHISPERX_MODEL = "large-v3-turbo";
 /**
@@ -30,7 +33,15 @@ const MLX_MODEL_CACHE = path.join(
 export interface TranscriptionResult {
   transcript: TranscriptData;
   captions: CaptionWord[];
+  /** The two-model arbiter's report, when it was used */
+  arbiter?: RunReport["arbiter"];
 }
+
+/** What a transcribe.py invocation does: decode and align in one go, only decode with both models, or only align. */
+type ScriptMode =
+  | { kind: "single" }
+  | { kind: "both-models"; outFile: string; /** filled in: when the base decode started and the script finished (ms) */ timing?: { baseStart?: number; end?: number } }
+  | { kind: "align"; segmentsFile: string };
 
 type ProgressCallback = (percent: number, message: string) => void;
 
@@ -216,16 +227,20 @@ class WhisperService {
     language: string,
     onProgress?: ProgressCallback,
     signal?: AbortSignal,
+    mode: ScriptMode = { kind: "single" },
   ): Promise<WhisperXOutput> {
-    const jsonPath = path.join(outputDir, "audio.json");
+    const jsonPath = mode.kind === "both-models" ? mode.outFile : path.join(outputDir, "audio.json");
     const args = [
       pythonEnvService.getScriptPath("transcribe.py"),
       audioPath,
       // LUSK_WHISPER_MODEL: another MLX Whisper (a local folder or a Hugging Face repo), to compare models
       "--model", whisperModelFor(language),
       "--language", language,
+      ...(mode.kind === "both-models" ? ["--both-models"] : mode.kind === "align" ? ["--align", "--segments", mode.segmentsFile] : []),
       "--out", jsonPath,
     ];
+    // Two-model mode splits the bar: both decodes, the listening (done by the host, 62-70), then the alignment
+    const twoModel = mode.kind !== "single";
 
     return new Promise<WhisperXOutput>((resolve, reject) => {
       // Prepend ffmpeg's directory to PATH so WhisperX can find it
@@ -249,7 +264,8 @@ class WhisperService {
 
       // Each stage owns a slice of the progress bar
       const PHASES: Record<string, { from: number; to: number; message: string }> = {
-        "transcribe:mlx": { from: 10, to: 70, message: "Transcribing (Apple GPU)..." },
+        "transcribe:mlx": { from: 10, to: twoModel ? 45 : 70, message: "Transcribing (Apple GPU)..." },
+        "transcribe:base": { from: 45, to: 62, message: "Transcribing again with the base model..." },
         "transcribe:whisperx": { from: 10, to: 70, message: "Transcribing..." },
         align: { from: 70, to: 95, message: "Aligning words..." },
       };
@@ -273,6 +289,10 @@ class WhisperService {
             }
             if (phase[1] === "transcribe:mlx" && !fs.existsSync(MLX_MODEL_CACHE)) {
               onProgress?.(current.from, "Downloading the transcription model (first run, ~1.6 GB)...");
+            }
+            if (mode.kind === "both-models" && mode.timing) {
+              if (phase[1] === "transcribe:base") mode.timing.baseStart = Date.now();
+              if (phase[1] === "done") mode.timing.end = Date.now();
             }
             if (PHASES[phase[1]]) {
               current = PHASES[phase[1]];
@@ -346,7 +366,29 @@ class WhisperService {
 
     // Step 3: Run WhisperX (transcription + forced alignment)
     onProgress?.(10, "Starting transcription...");
-    const whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, language, onProgress, signal);
+    let arbiter: RunReport["arbiter"] = null;
+    let whisperXOutput: WhisperXOutput;
+    if (await this.useArbiter(language)) {
+      const timing: { baseStart?: number; end?: number } = {};
+      const decoded = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, language, onProgress, signal, {
+        kind: "both-models",
+        outFile: path.join(sessionDir, "decodes.json"),
+        timing,
+      }) as unknown as BothDecodes;
+      const chosen = await this.arbitrate(decoded, audioWav, sessionDir, language, onProgress, signal);
+      arbiter = {
+        ...chosen.report,
+        baseDecodeSeconds: timing.baseStart && timing.end ? Math.round((timing.end - timing.baseStart) / 1000) : 0,
+      };
+      const chosenFile = path.join(sessionDir, "chosen.json");
+      await writeFile(chosenFile, JSON.stringify({ segments: chosen.segments }), "utf-8");
+      whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, language, onProgress, signal, {
+        kind: "align",
+        segmentsFile: chosenFile,
+      });
+    } else {
+      whisperXOutput = await this.runWhisperX(audioWav, sessionDir, python3, ffmpegPath, language, onProgress, signal);
+    }
 
     onProgress?.(96, "Processing results...");
 
@@ -401,7 +443,77 @@ class WhisperService {
 
     onProgress?.(100, "Transcription complete");
 
-    return { transcript, captions };
+    return { transcript, captions, arbiter };
+  }
+
+  /**
+   * T6: two decodes and a listening arbiter, only for a language with a fine-tune (its base model is the second
+   * decode), with the setting on, a Gemini key, and no LUSK_WHISPER_MODEL override (a comparison run of one model).
+   */
+  private async useArbiter(language: string): Promise<boolean> {
+    if (process.env.LUSK_WHISPER_MODEL || !LANGUAGE_MODELS[language]) return false;
+    if (!(await settingsService.getTwoModelArbiter())) return false;
+    return geminiService.isAvailable();
+  }
+
+  /**
+   * Choose between the two decodes by listening. Never fatal: when the listening fails (credits, network), the
+   * fine-tune's text goes on to the alignment as it would without the arbiter, and the report says so. The
+   * decisions are kept in the session dir as arbiter.json.
+   */
+  private async arbitrate(
+    decoded: BothDecodes,
+    audioWav: string,
+    sessionDir: string,
+    language: string,
+    onProgress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<{ segments: BothDecodes["segments"]; report: NonNullable<RunReport["arbiter"]> }> {
+    const started = Date.now();
+    const found = findSpans(decoded.segments, decoded.base);
+    const toJudge = found.spans.filter((sp) => !sp.skipped);
+    onProgress?.(62, `Listening to ${toJudge.length} places where the two models differ...`);
+    let stats = { batches: 0, calls: 0, cacheHits: 0 };
+    let error: string | undefined;
+    try {
+      stats = await geminiService.arbitrateSpans(toJudge, {
+        wavPath: audioWav,
+        language,
+        sessionId: path.basename(sessionDir),
+        signal,
+        onProgress: (done, total) => onProgress?.(62 + Math.round((8 * done) / Math.max(1, total)), `Listening to the differences (${done}/${total})...`),
+      });
+    } catch (err: unknown) {
+      if (signal?.aborted) throw new Error("Transcription cancelled");
+      error = err instanceof Error ? err.message : String(err);
+      console.warn(`[arbiter] failed, the fine-tune's text is used: ${error}`);
+      if (!isFatalGeminiError(err)) console.warn("[arbiter] (a transient failure; a re-run reuses the cached answers)");
+      for (const sp of toJudge) { sp.verdict = undefined; sp.judged = false; }
+    }
+    const summary = summarize(found.spans, stats);
+    const segments = error ? decoded.segments : applyVerdicts(decoded.segments, found.spans);
+    const seconds = Math.round((Date.now() - started) / 1000);
+    await writeFile(
+      path.join(sessionDir, "arbiter.json"),
+      JSON.stringify({ language, model: decoded.model, baseModel: decoded.baseModel, summary, error: error ?? null, seconds, spans: found.spans }, null, 1),
+      "utf-8",
+    ).catch(() => {});
+    console.log(`[arbiter] ${found.spans.length} spans, ${summary.judged} judged in ${summary.batches} batches (${summary.calls} calls, ${summary.cacheHits} cached): ` +
+      `${summary.chose.base} to the base model, ${summary.chose.ft} fine-tune, ${summary.chose.same} same, ${summary.chose.neither} neither, ${summary.chose.none} no answer`);
+    return {
+      segments,
+      report: {
+        status: error ? "failed" : "ok",
+        spans: found.spans.length,
+        judged: summary.judged,
+        chosenBase: error ? 0 : summary.chose.base,
+        calls: stats.calls,
+        cacheHits: stats.cacheHits,
+        baseDecodeSeconds: 0,
+        arbiterSeconds: seconds,
+        ...(error ? { error } : {}),
+      },
+    };
   }
 
   /**

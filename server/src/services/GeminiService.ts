@@ -6,6 +6,8 @@ import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
 import { tempManager } from "./TempManager.js";
 import { alignCorrectedRows, keepHeardScript, misplacedBreaks } from "./alignCorrection.js";
+import { sliceWav } from "./wavSlice.js";
+import { BATCH_SIZE, ftIsSideA, verdictFor, type ArbiterSpan } from "./arbiter.js";
 import {
   applyProofreadEdits,
   buildProofreadLines,
@@ -36,6 +38,14 @@ const MODEL = "gemini-3.5-flash-lite";
  * Pinned — the `gemini-flash-latest` alias doesn't say which release it serves.
  */
 const REASONING_MODEL = "gemini-3.8-flash";
+/**
+ * The listening arbiter (T6) hears audio and chooses between two transcripts. LUSK_ARBITER_MODEL swaps the model
+ * (a second opinion from another tier); the default is the same Flash the listening judge uses.
+ */
+const ARBITER_MODEL = process.env.LUSK_ARBITER_MODEL || REASONING_MODEL;
+const ARBITER_RETRIES = 4;
+/** Arbiter requests in flight at once (each carries ~2 minutes of audio snippets). */
+const ARBITER_CONCURRENCY = 3;
 const CHUNK_SIZE = 250;   // lines per API call
 const OVERLAP = 30;       // lines of overlap from previous chunk
 const MAX_RETRIES = 3;    // retries per chunk on transient API error
@@ -88,6 +98,26 @@ const CLIP_SCHEMA = {
     },
   },
   required: ["clips"],
+};
+
+const ARBITER_SCHEMA = {
+  type: "object",
+  properties: {
+    results: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "integer", description: "The item number" },
+          verdict: { type: "string", enum: ["A", "B", "same", "neither"] },
+          said: { type: "string", description: "The differing words as spoken" },
+        },
+        required: ["id", "verdict", "said"],
+        propertyOrdering: ["id", "verdict", "said"],
+      },
+    },
+  },
+  required: ["results"],
 };
 
 const PROOFREAD_SCHEMA = {
@@ -199,6 +229,12 @@ export function validateChunkRowCount(
       `Pipeline halted. Investigate this segment manually.`,
     );
   }
+}
+
+/** An error no retry fixes and no later request can either: depleted credits (402), a rejected key. */
+export function isFatalGeminiError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\b402\b|\b401\b|\b403\b|API key|PERMISSION_DENIED|prepayment/i.test(msg);
 }
 
 function isRetryableError(err: unknown): boolean {
@@ -689,6 +725,112 @@ export class GeminiService {
     }
 
     return applyProofreadEdits(words, lines, edits);
+  }
+
+  /**
+   * T6 arbiter: the judge listens to each span's audio and picks the transcript that matches it. Fills in
+   * `verdict`, `said`, `ftIsA` and `judged` on the spans it is given (never on others), in batches of
+   * BATCH_SIZE with the sides shuffled; answers are cached per batch like the correction chunks. A batch
+   * that keeps failing leaves its spans without an answer (the fine-tune wins); an error no retry can fix
+   * (402, a rejected key) stops the whole arbitration by throwing.
+   */
+  async arbitrateSpans(
+    spans: ArbiterSpan[],
+    opts: {
+      wavPath: string;
+      language: string;
+      sessionId: string;
+      onProgress?: (done: number, total: number) => void;
+      signal?: AbortSignal;
+    },
+  ): Promise<{ batches: number; calls: number; cacheHits: number }> {
+    const { wavPath, language, sessionId, onProgress, signal } = opts;
+    const stats = { batches: 0, calls: 0, cacheHits: 0 };
+    if (!spans.length) return stats;
+    const ai = await this.getClient();
+    const template = await settingsService.getArbiterPrompt();
+    const note = language === "cs"
+      ? "The speech is Czech (Czech spelling and forms, not Slovak ones); Slovak words appear only when the speaker really switches language. Colloquial Czech forms (obecná čeština, e.g. 'ten' for 'ty', -ej for -ý) count as correct when said."
+      : language === "sk"
+        ? "The speech is Slovak; Czech words appear only when the speaker really switches language."
+        : "";
+    const prompt = template.replaceAll("{{LANGUAGE}}", LANGUAGE_NAMES[language] ?? language).replace("{{LANGUAGE_NOTE}}", note);
+
+    const batches: ArbiterSpan[][] = [];
+    for (let i = 0; i < spans.length; i += BATCH_SIZE) batches.push(spans.slice(i, i + BATCH_SIZE));
+    for (const sp of spans) sp.ftIsA = ftIsSideA(sp, sessionId);
+    stats.batches = batches.length;
+
+    let done = 0;
+    let fatal: Error | null = null;
+    const runBatch = async (batch: ArbiterSpan[], bi: number): Promise<void> => {
+      if (signal?.aborted) throw new Error("Cancelled");
+      if (fatal) return;
+      const sides = batch.map((sp) => (sp.ftIsA ? [sp.ftContext, sp.baseContext] : [sp.baseContext, sp.ftContext]));
+      const hash = createHash("md5")
+        .update(`arbiter_v1:${ARBITER_MODEL}:${language}:${prompt}:` + JSON.stringify(batch.map((sp, i) => [sp.t0, sp.t1, sides[i]])))
+        .digest("hex");
+      let raw = await this.getCachedChunk(sessionId, hash).then((l) => l?.join("\n") ?? null);
+      if (raw !== null) stats.cacheHits++;
+      for (let attempt = 0; raw === null; attempt++) {
+        try {
+          const parts: object[] = [{ text: prompt }];
+          for (let i = 0; i < batch.length; i++) {
+            const wav = await sliceWav(wavPath, batch[i].t0, batch[i].t1);
+            parts.push(
+              { text: `\nItem ${i} audio:` },
+              { inlineData: { mimeType: "audio/wav", data: wav.toString("base64") } },
+              { text: `Item ${i} A: ${sides[i][0]}\nItem ${i} B: ${sides[i][1]}` },
+            );
+          }
+          stats.calls++;
+          const response = await ai.models.generateContent({
+            model: ARBITER_MODEL,
+            contents: [{ role: "user", parts }],
+            config: { abortSignal: signal, responseMimeType: "application/json", responseJsonSchema: ARBITER_SCHEMA },
+          });
+          const text = response.text ?? "";
+          JSON.parse(text); // only cache a well-formed answer
+          raw = text;
+          await this.setCachedChunk(sessionId, hash, [text.replace(/\n/g, " ")]);
+        } catch (err: unknown) {
+          raw = null;
+          if (signal?.aborted) throw new Error("Cancelled");
+          const errObj = err instanceof Error ? err : new Error(String(err));
+          if (isFatalGeminiError(errObj)) { fatal = errObj; return; }
+          if (attempt < ARBITER_RETRIES && isRetryableJsonError(errObj)) {
+            const delay = RETRY_DELAY_MS * 2 ** attempt;
+            console.warn(`[GeminiService] Arbiter batch ${bi} attempt ${attempt + 1} failed (${errObj.message}). Retrying in ${delay / 1000}s...`);
+            await sleep(delay);
+            continue;
+          }
+          console.warn(`[GeminiService] Arbiter batch ${bi} failed, the fine-tune keeps its words: ${errObj.message}`);
+          break;
+        }
+      }
+      if (raw !== null) {
+        const byId = new Map<number, { verdict?: string; said?: string }>();
+        for (const r of (JSON.parse(raw) as { results?: { id: number; verdict?: string; said?: string }[] }).results ?? []) byId.set(r.id, r);
+        batch.forEach((sp, i) => {
+          const r = byId.get(i);
+          sp.judged = true;
+          sp.verdict = verdictFor(r?.verdict, sp.ftIsA!);
+          if (r?.said) sp.said = r.said;
+        });
+      }
+      onProgress?.(++done, batches.length);
+    };
+
+    let next = 0;
+    const worker = async () => {
+      while (next < batches.length && !fatal) {
+        const bi = next++;
+        await runBatch(batches[bi], bi);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(ARBITER_CONCURRENCY, batches.length) }, worker));
+    if (fatal) throw fatal;
+    return stats;
   }
 
   /**

@@ -20,6 +20,11 @@ export interface AppSettings {
   outroEnabled?: boolean;
   /** Also translate the captions to English (an extra SRT). Off unless switched on. */
   translateToEnglish?: boolean;
+  /**
+   * T6: decode with the language's fine-tune and its base model, and let Gemini listen to short audio snippets
+   * wherever they differ and pick one (off by default: audio snippets of the recording go to Gemini).
+   */
+  twoModelArbiter?: boolean;
   captionStyles?: {
     fontSize?: number;
     highlightColor?: string;
@@ -116,6 +121,16 @@ class SettingsService {
   async getFps(): Promise<number> {
     const settings = await this.load();
     return settings.fps ?? MATCH_SOURCE_FPS;
+  }
+
+  async getTwoModelArbiter(): Promise<boolean> {
+    const settings = await this.load();
+    return settings.twoModelArbiter ?? false;
+  }
+
+  /** The arbiter prompt has no user override; `{{LANGUAGE}}` and `{{LANGUAGE_NOTE}}` are filled in by the caller. */
+  async getArbiterPrompt(): Promise<string> {
+    return readFile(join(getClientPublicDir(), "prompts", "arbiter-api.md"), "utf-8");
   }
 
   async getTranslateToEnglish(): Promise<boolean> {
