@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T6 arbiter adjudication</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1c1a; --muted: #6b6760; --line: #e3e0d8;
+    --accent: #2c5fcd; --accent-ink: #ffffff; --soft: #edf1fb;
+    --a: #f3e9d8; --b: #dfeee4;
+    --bad: #b4321f; --good: #2a7a3b; --warn: #a66a00;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: -apple-system, "Inter", "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161614; --panel: #1f1f1c; --ink: #ecebe6; --muted: #a09c93; --line: #33322e;
+      --accent: #6b93f0; --accent-ink: #0d1424; --soft: #22283a; --a: #3a3121; --b: #1f3527;
+      --bad: #ee7a66; --good: #6fc985; --warn: #e3a93a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  body { padding: 0 16px 90px; }
+  main { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 28px 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); }
+  code, .mono { font-family: var(--mono); font-size: 13px; }
+  .player { position: sticky; top: 0; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+            padding: 10px 14px; margin: 16px 0 20px; box-shadow: 0 6px 20px rgba(0,0,0,.08);
+            display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; align-items: center; }
+  .player .now { font-weight: 600; min-height: 22px; }
+  .player .ctl { display: flex; gap: 6px; flex-wrap: wrap; }
+  .player audio { width: 100%; grid-column: 1 / -1; height: 36px; }
+  .player .hint { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; }
+  button { font: inherit; font-size: 13.5px; padding: 5px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.play { font-weight: 600; white-space: nowrap; }
+  button.play::before { content: "▶ "; }
+  button.playing { background: var(--soft); border-color: var(--accent); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; margin: 12px 0; }
+  .card.done { border-color: var(--good); }
+  .card .head { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  .num { display: inline-block; min-width: 28px; height: 26px; border-radius: 13px; background: var(--soft); color: var(--accent); text-align: center; line-height: 26px; font-weight: 700; font-size: 13px; padding: 0 6px; }
+  .card.done .num { background: var(--good); color: #fff; }
+  .where { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .texts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 8px; }
+  .tx { padding: 8px 11px; border-radius: 8px; font-size: 15px; }
+  .tx b.l { display: block; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 2px; }
+  .tx.A { background: var(--a); } .tx.B { background: var(--b); }
+  .tx strong { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  .pick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+  .pick button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .reveal { font-size: 13px; margin-left: 6px; }
+  .reveal.ok { color: var(--good); } .reveal.no { color: var(--bad); }
+  input.note { font: inherit; font-size: 13px; padding: 4px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); flex: 1; min-width: 160px; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--panel); border-top: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 10px; align-items: center; justify-content: center; }
+  .toast { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 13.5px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<main>
+  <h1>T6 arbiter adjudication</h1>
+  <p class="sub">Two Whisper models heard the same audio and differed. Gemini listened and chose one. For each place below, <b>you</b> listen and pick which transcript matches what is said in the underlined words: <b>A</b>, <b>B</b>, <b>same</b> (both equally right) or <b>both wrong</b>. Ignore punctuation and capitals, dropped repeats and fillers, and digits vs number words; colloquial forms as spoken are right. After you pick, the page shows what Gemini chose. Your picks save in this browser; press <b>Export</b> at the end (it downloads <code>t6-adjudication.md</code> to Downloads) and tell Claude "done". Version <span id="ver"></span>, generated <span id="gen"></span>.</p>
+
+  <div class="player">
+    <div class="now" id="now">Nothing playing</div>
+    <div class="ctl">
+      <button id="replay" title="R">↺ Replay</button>
+      <button id="back" title="←">−3 s</button>
+      <button id="fwd" title="→">+3 s</button>
+      <button id="cont" title="C">Continue past end</button>
+      <button id="speed">1×</button>
+    </div>
+    <audio id="audio" controls preload="none"></audio>
+    <div class="hint">Keys: <b>space</b> play/pause · <b>R</b> replay the span · <b>←/→</b> 3 s · <b>C</b> keep playing past the end. The span plays about 6 words either side of the underlined words.</div>
+  </div>
+
+  <div id="list"></div>
+</main>
+
+<div class="bar">
+  <span id="progress" class="sub"></span>
+  <button id="reset">Clear all</button>
+  <button id="export" class="primary">Export</button>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const LS_KEY = "lusk-t6-adjudication-" + DATA.version;
+const PAD_BEFORE = 0.3, PAD_AFTER = 0.3;
+let state = { picks: {}, notes: {} };
+try { const s = localStorage.getItem(LS_KEY); if (s) state = Object.assign(state, JSON.parse(s)); } catch (e) {}
+const save = () => { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} };
+const mmss = t => { t = Math.max(0, Math.round(t)); return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0"); };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const bold = s => esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+const byId = {}; DATA.spans.forEach(s => byId[s.id] = s);
+
+const audio = document.getElementById("audio"), nowEl = document.getElementById("now");
+let cur = { t0: 0, t1: 0, btn: null, stopAt: null }, speeds = [1, 0.8, 1.25], speedIdx = 0;
+function playSpan(s, btn) {
+  const src = DATA.items[s.item].audio, start = Math.max(0, s.t0 - PAD_BEFORE), end = s.t1 + PAD_AFTER;
+  if (cur.btn) cur.btn.classList.remove("playing");
+  cur = { t0: start, t1: end, btn, stopAt: end };
+  if (btn) btn.classList.add("playing");
+  nowEl.textContent = `#${s.n} ${s.item} ${mmss(s.t0)}–${mmss(s.t1)}`;
+  const go = () => { audio.currentTime = start; audio.playbackRate = speeds[speedIdx]; audio.play().catch(() => {}); };
+  if (audio.getAttribute("src") !== src) { audio.setAttribute("src", src); audio.load(); audio.addEventListener("loadedmetadata", go, { once: true }); } else go();
+}
+audio.addEventListener("timeupdate", () => { if (cur.stopAt != null && audio.currentTime >= cur.stopAt) { audio.pause(); cur.stopAt = null; if (cur.btn) cur.btn.classList.remove("playing"); } });
+document.getElementById("replay").onclick = () => { if (!audio.getAttribute("src")) return; cur.stopAt = cur.t1; audio.currentTime = cur.t0; audio.play(); if (cur.btn) cur.btn.classList.add("playing"); };
+document.getElementById("back").onclick = () => { audio.currentTime = Math.max(0, audio.currentTime - 3); };
+document.getElementById("fwd").onclick = () => { audio.currentTime += 3; };
+document.getElementById("cont").onclick = () => { cur.stopAt = null; audio.play(); };
+document.getElementById("speed").onclick = e => { speedIdx = (speedIdx + 1) % speeds.length; audio.playbackRate = speeds[speedIdx]; e.target.textContent = speeds[speedIdx] + "×"; };
+document.addEventListener("keydown", e => {
+  if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
+  if (e.code === "Space") { e.preventDefault(); audio.paused ? audio.play() : audio.pause(); }
+  else if (e.key === "r" || e.key === "R") document.getElementById("replay").click();
+  else if (e.key === "ArrowLeft") document.getElementById("back").click();
+  else if (e.key === "ArrowRight") document.getElementById("fwd").click();
+  else if (e.key === "c" || e.key === "C") document.getElementById("cont").click();
+});
+
+// which of the two transcripts the arbiter's verdict is, as a letter (or null for same / neither / no answer)
+const arbiterLetter = s => s.verdict === "ft" ? (s.ftIsA ? "A" : "B") : s.verdict === "base" ? (s.ftIsA ? "B" : "A") : null;
+function revealHtml(s) {
+  const p = state.picks[s.id];
+  if (!p) return "";
+  const L = arbiterLetter(s);
+  const said = L ? `Gemini chose ${L} (${s.verdict === "base" ? "the base model" : "the fine-tune"})` : `Gemini said "${s.verdict}", so the fine-tune keeps its words`;
+  const agree = L ? p === L : (p === "same" || p === "neither" || p === (s.ftIsA ? "A" : "B"));
+  return `<span class="reveal ${agree ? "ok" : "no"}">${agree ? "agrees" : "differs"}: ${esc(said)}${s.said ? ` · heard "${esc(s.said)}"` : ""}</span>`;
+}
+function render() {
+  document.getElementById("list").innerHTML = DATA.spans.map(s => {
+    const p = state.picks[s.id];
+    const btn = (v, label) => `<button data-id="${esc(s.id)}" data-pick="${v}" class="${p === v ? "on" : ""}">${label}</button>`;
+    return `<section class="card ${p ? "done" : ""}" id="c-${esc(s.id)}">
+      <div class="head"><span class="num">${s.n}</span><span class="where">${esc(s.item)} · ${mmss(s.t0)}–${mmss(s.t1)}</span>
+        <button class="play" data-play="${esc(s.id)}">play</button></div>
+      <div class="texts"><div class="tx A"><b class="l">A</b>${bold(s.A) || "<i>—</i>"}</div><div class="tx B"><b class="l">B</b>${bold(s.B) || "<i>—</i>"}</div></div>
+      <div class="pick">${btn("A", "A is right")}${btn("B", "B is right")}${btn("same", "same")}${btn("neither", "both wrong")}
+        <input class="note" placeholder="note (what is said?)" data-note="${esc(s.id)}" value="${esc(state.notes[s.id] || "")}"><span data-reveal="${esc(s.id)}">${revealHtml(s)}</span></div>
+    </section>`;
+  }).join("");
+  progress();
+}
+function progress() {
+  const n = Object.values(state.picks).filter(Boolean).length;
+  document.getElementById("progress").textContent = `${n} of ${DATA.spans.length} judged`;
+}
+document.addEventListener("click", e => {
+  const pb = e.target.closest("button.play");
+  if (pb) { playSpan(byId[pb.dataset.play], pb); return; }
+  const b = e.target.closest("button[data-pick]");
+  if (b) {
+    const id = b.dataset.id;
+    state.picks[id] = state.picks[id] === b.dataset.pick ? undefined : b.dataset.pick; save();
+    const card = document.getElementById("c-" + id);
+    card.classList.toggle("done", !!state.picks[id]);
+    card.querySelectorAll("button[data-pick]").forEach(x => x.classList.toggle("on", state.picks[id] === x.dataset.pick));
+    card.querySelector("[data-reveal]").innerHTML = revealHtml(byId[id]);
+    progress();
+  }
+});
+document.addEventListener("input", e => { if (e.target.dataset.note) { state.notes[e.target.dataset.note] = e.target.value; save(); } });
+
+function ownerSide(s, p) {
+  if (p === "same" || p === "neither") return p;
+  return (p === "A") === s.ftIsA ? "ft" : "base";
+}
+function buildMarkdown() {
+  const done = DATA.spans.filter(s => state.picks[s.id]);
+  const rows = done.map(s => {
+    const o = ownerSide(s, state.picks[s.id]);
+    return { id: s.id, item: s.item, t0: s.t0, t1: s.t1, ft: s.ft, base: s.base, arbiter: s.verdict, owner: o, note: state.notes[s.id] || "" };
+  });
+  const lines = [`# T6 arbiter adjudication`, `Exported ${new Date().toISOString().slice(0, 16).replace("T", " ")} from t6-adjudication.html (version ${DATA.version}, generated ${DATA.generated}); ${done.length} of ${DATA.spans.length} judged.`, "",
+    "| # | item | time | fine-tune | base model | arbiter | owner | note |", "|---|---|---|---|---|---|---|---|"];
+  DATA.spans.forEach(s => {
+    const p = state.picks[s.id]; if (!p) return;
+    lines.push(`| ${s.n} | ${s.item} | ${mmss(s.t0)} | ${s.ft || "(none)"} | ${s.base || "(none)"} | ${s.verdict} | ${ownerSide(s, p)} | ${(state.notes[s.id] || "").replace(/\|/g, "/")} |`);
+  });
+  lines.push("", "```json", JSON.stringify(rows), "```", "");
+  return lines.join("\n");
+}
+function toast(m) { const t = document.getElementById("toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2400); }
+document.getElementById("export").onclick = async () => {
+  const md = buildMarkdown();
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" })); a.download = "t6-adjudication.md"; a.click();
+  try { await navigator.clipboard.writeText(md); toast("Downloaded t6-adjudication.md and copied to the clipboard"); } catch (e) { toast("Downloaded t6-adjudication.md"); }
+};
+document.getElementById("reset").onclick = () => { if (confirm("Clear every pick and note?")) { state = { picks: {}, notes: {} }; save(); render(); } };
+document.getElementById("gen").textContent = DATA.generated; document.getElementById("ver").textContent = DATA.version;
+render();
+</script>
+</body>
+</html>
