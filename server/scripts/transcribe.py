@@ -6,6 +6,10 @@ runs int8 on the CPU. Word timings still come from WhisperX's wav2vec2 forced al
 exactly as before. Where MLX is unavailable, WhisperX transcribes as it always did.
 
 Writes WhisperX's JSON shape ({"segments": [{start, end, text, words: [...]}]}) to --out.
+Two-model mode (T6): `--both-models` stops after decoding and writes both decodes per VAD chunk (the
+language's fine-tune as `segments`, the base model as `base`, each tagged with its chunk) for the host's
+listening arbiter; `--align --segments <json>` then aligns the text the host chose. Without either flag
+one invocation decodes and aligns, as before.
 Progress for the host app: tqdm bars (`NN%|`) on stderr, and a `PHASE <name>` line on
 stdout when the work moves on to the next stage.
 """
@@ -240,7 +244,7 @@ def chunk_languages(audio, chunks: list[tuple[float, float]], base: str, own: st
     return found
 
 
-def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
+def transcribe_mlx(audio, model: str, language: str, both: bool = False) -> tuple[list[dict], list[dict]] | None:
     """Only the speech is decoded. Fed whole 30 s windows, Whisper read music, silence and
     the outro sting as speech: a window that began in a music bed came back as one
     invented "Ďakujem za pozornosť." and the speech after the music was skipped with it
@@ -259,14 +263,14 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
     turns = speech_turns(audio)
     total = len(audio) / SAMPLE_RATE
 
-    def decode(regions, model=model, language=language, bar=None):
+    def decode(regions, model=model, language=language, bar=None, exact=False):
         """Each chunk is decoded from its own slice of the audio. mlx-whisper's own
         `clip_timestamps` never seeks to a clip's start — every clip is decoded from where
         the previous one ended, the music between them included (E47, E67: sentences after
         a music bed were lost again)."""
         import tqdm
 
-        clips = as_clips(regions, total)
+        clips = [t for r in regions for t in r] if exact else as_clips(regions, total)  # exact: already padded chunks
         spans = list(zip(clips[::2], clips[1::2]))
         segments = []
         # one bar over all chunks, counted in frames like mlx-whisper's own (the host parses it)
@@ -307,7 +311,7 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
                     inside = max(0.0, min(s["end"], length) - max(s["start"], 0.0)) / max(s["end"] - s["start"], 1e-3)
                     if inside >= 0.5 and not is_stock_phrase(s["text"]) and not FOREIGN_SCRIPT.search(s["text"]):
                         segments.append({"start": start + s["start"], "end": min(start + s["end"], end), "text": s["text"],
-                                         "language": language})
+                                         "language": language, "chunk": [round(start, 2), round(end, 2)]})
                 bar.update(round(length * 100))
         finally:
             if own:
@@ -348,7 +352,23 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
     if holes:
         print(f"decoding {len(holes)} uncovered speech stretches again ({sum(b - a for a, b in holes):.0f} s)", file=sys.stderr)
         segments += [s for s in routed(join_turns(holes)) if not already_said(s, segments)]
-    return join_sentences(sorted(segments, key=lambda s: s["start"]))
+    segments = sorted(segments, key=lambda s: s["start"])
+    base_segments: list[dict] = []
+    if both:
+        base_segments = decode_base(decode, segments, model, language)
+    return join_sentences(segments), join_sentences(base_segments)
+
+
+def decode_base(decode, segments: list[dict], model: str, language: str) -> list[dict]:
+    """The second decode of two-model mode: every chunk the language's fine-tune decoded, decoded again by
+    its base model in a whole pass (mlx-whisper keeps one model resident, so alternating per chunk would reload
+    1.6-3 GB each time). Chunks another language's base model decoded have no second opinion."""
+    base = LANGUAGE_MODELS.get(model, (None, None, None))[2]
+    if not base:
+        sys.exit(f"--both-models needs a language fine-tune with a base model, not {model}")
+    chunks = sorted({tuple(s["chunk"]) for s in segments if s["language"] == language and "chunk" in s})
+    phase("transcribe:base")
+    return decode([list(c) for c in chunks], base, language, exact=True)
 
 
 def join_sentences(segments: list[dict]) -> list[dict]:
@@ -394,34 +414,14 @@ def transcribe_whisperx(audio, model: str, language: str) -> list[dict]:
     return result["segments"]
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Transcribe + word-align with WhisperX")
-    parser.add_argument("audio")
-    parser.add_argument("--model", default="large-v3-turbo")
-    parser.add_argument("--language", default="sk")
-    parser.add_argument("--engine", choices=["auto", "mlx", "whisperx"], default="auto")
-    parser.add_argument("--out", required=True)
-    args = parser.parse_args()
-
+def align_and_write(audio, segments: list[dict], language: str, out: str) -> None:
     import whisperx
-
-    audio = whisperx.load_audio(args.audio)
-
-    segments = None
-    if args.engine in ("auto", "mlx"):
-        segments = transcribe_mlx(audio, args.model, args.language)
-        if segments is None:
-            if args.engine == "mlx":
-                sys.exit("mlx-whisper is not installed")
-            print("mlx-whisper unavailable, transcribing with WhisperX", file=sys.stderr)
-    if segments is None:
-        segments = transcribe_whisperx(audio, args.model, args.language)
 
     phase("align")
     try:  # the cached model, without asking the hub (see `cached`)
-        align_model, metadata = whisperx.load_align_model(language_code=args.language, device="cpu", model_cache_only=True)
+        align_model, metadata = whisperx.load_align_model(language_code=language, device="cpu", model_cache_only=True)
     except Exception:
-        align_model, metadata = whisperx.load_align_model(language_code=args.language, device="cpu")
+        align_model, metadata = whisperx.load_align_model(language_code=language, device="cpu")
     aligned = whisperx.align(segments, align_model, metadata, audio, "cpu",
                              return_char_alignments=False, print_progress=True)
 
@@ -429,11 +429,58 @@ def main() -> None:
     # the host leaves speech in another language as it was heard, never "corrected" into this one
     for seg in aligned["segments"]:
         lang = max(segments, key=lambda s: min(s["end"], seg["end"]) - max(s["start"], seg["start"]), default={}).get("language")
-        if lang and lang != args.language:
+        if lang and lang != language:
             seg["language"] = lang
-    with open(args.out, "w", encoding="utf-8") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump({"segments": aligned["segments"]}, f, ensure_ascii=False)
     phase("done")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Transcribe + word-align with WhisperX")
+    parser.add_argument("audio")
+    parser.add_argument("--model", default="large-v3-turbo")
+    parser.add_argument("--language", default="sk")
+    parser.add_argument("--engine", choices=["auto", "mlx", "whisperx"], default="auto")
+    parser.add_argument("--both-models", action="store_true",
+                        help="decode with the language's fine-tune and its base model, write both decodes (no alignment)")
+    parser.add_argument("--align", action="store_true", help="align the segments of --segments instead of transcribing")
+    parser.add_argument("--segments", help="with --align: JSON with the chosen {segments: [{start, end, text, language}]}")
+    parser.add_argument("--out", required=True)
+    args = parser.parse_args()
+    if args.both_models and args.align:
+        parser.error("--both-models and --align are separate invocations")
+    if args.align and not args.segments:
+        parser.error("--align needs --segments")
+
+    import whisperx
+
+    audio = whisperx.load_audio(args.audio)
+
+    if args.align:
+        with open(args.segments, encoding="utf-8") as f:
+            align_and_write(audio, json.load(f)["segments"], args.language, args.out)
+        return
+
+    segments = None
+    if args.engine in ("auto", "mlx") or args.both_models:
+        decoded = transcribe_mlx(audio, args.model, args.language, both=args.both_models)
+        if decoded is None:
+            if args.engine == "mlx" or args.both_models:
+                sys.exit("mlx-whisper is not installed")
+            print("mlx-whisper unavailable, transcribing with WhisperX", file=sys.stderr)
+        else:
+            segments, base_segments = decoded
+            if args.both_models:
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump({"model": args.model, "baseModel": LANGUAGE_MODELS.get(args.model, (None, None, None))[2],
+                               "language": args.language, "segments": segments, "base": base_segments}, f, ensure_ascii=False)
+                phase("done")
+                return
+    if segments is None:
+        segments = transcribe_whisperx(audio, args.model, args.language)
+
+    align_and_write(audio, segments, args.language, args.out)
 
 
 if __name__ == "__main__":
