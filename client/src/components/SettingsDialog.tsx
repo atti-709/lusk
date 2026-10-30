@@ -41,6 +41,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
   const [language, setLanguage] = useState("sk");
   const [fpsValue, setFpsValue] = useState(MATCH_SOURCE_FPS);
   const [translateToEnglish, setTranslateToEnglish] = useState(false);
+  const [twoModelArbiter, setTwoModelArbiter] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -69,6 +70,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
         if (settings.transcriptionLanguage) setLanguage(settings.transcriptionLanguage);
         setFpsValue(settings.fps ?? MATCH_SOURCE_FPS);
         setTranslateToEnglish(settings.translateToEnglish ?? false);
+        setTwoModelArbiter(settings.twoModelArbiter ?? false);
         setPrompts({
           correctionPrompt: settings.correctionPrompt ?? null,
           viralClipsPrompt: settings.viralClipsPrompt ?? null,
@@ -91,6 +93,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
         transcriptionLanguage: language,
         fps: fpsValue,
         translateToEnglish,
+        twoModelArbiter,
       };
       if (apiKey.trim()) body.geminiApiKey = apiKey;
       // Send prompts: null means reset to default, string means custom
@@ -116,7 +119,7 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
     } finally {
       setSaving(false);
     }
-  }, [apiKey, language, fpsValue, translateToEnglish, prompts, appSettings]);
+  }, [apiKey, language, fpsValue, translateToEnglish, twoModelArbiter, prompts, appSettings]);
 
   if (!open) return null;
 
@@ -166,6 +169,22 @@ export function SettingsDialog({ open, onClose, onKeySet }: SettingsDialogProps)
           </label>
           <p className="settings-hint">
             Captions always stay in the spoken language. When on, a project also gets an English subtitle file (SRT) after processing; projects that already have one keep it
+          </p>
+        </div>
+
+        <div className="settings-field">
+          <label htmlFor="settings-arbiter">
+            <input
+              id="settings-arbiter"
+              data-testid="settings-arbiter"
+              type="checkbox"
+              checked={twoModelArbiter}
+              onChange={(e) => setTwoModelArbiter(e.target.checked)}
+            />{" "}
+            Check uncertain words by listening (experimental)
+          </label>
+          <p className="settings-hint">
+            Transcribes twice (about 15 % longer) and lets Gemini listen to short audio snippets, a few seconds each, wherever the two transcripts differ, to pick the better one. Needs a Gemini key. Only these audio snippets leave your Mac, never the video. Off by default
           </p>
         </div>
 
