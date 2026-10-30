@@ -75,4 +75,9 @@ describe("proofread punctuation-tolerant find", () => {
     expect(run(line, [{ find: "domov", replace: "doma" }]).r.rejected).toHaveLength(1);
     expect(run("Šli sme domov a potom domov, spať.", [{ find: "domov", replace: "doma" }]).text).toBe("Šli sme doma a potom domov, spať.");
   });
+
+  it("keeps the punctuation of a deleted last word that find left out", () => {
+    expect(run("Prišiel som, som.", [{ find: "som som", replace: "som" }]).text).toBe("Prišiel som.");
+    expect(run("povedal som som, že to je.", [{ find: "som som", replace: "som" }]).text).toBe("povedal som, že to je.");
+  });
 });

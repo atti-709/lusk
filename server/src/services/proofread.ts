@@ -151,7 +151,8 @@ function keepLinePunctuation(old: string[], find: string[], replace: string[]): 
   const middleEnd = replace.length - q;
   if (middleEnd === p && p > 0 && p < find.length) {
     // words deleted after a kept word: the kept word's own punctuation went with the deleted ones
-    out[p - 1] = replace[p - 1];
+    const d = find.length - q - 1; // the last deleted word: its punctuation, if `find` left it out, stays
+    out[p - 1] = replace[p - 1] + (lost(d) && trailingPunct(replace[p - 1]) === "" ? trailingPunct(old[d]) : "");
   } else if (find.length === replace.length) {
     // one word for one word: each changed word keeps the punctuation `find` left out
     for (let i = p; i < replace.length - q; i++) {
