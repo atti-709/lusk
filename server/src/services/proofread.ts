@@ -94,17 +94,80 @@ function isRewrite(find: string[], replace: string[]): boolean {
   return editDistance(a, b) > MAX_REWRITE_RATIO * Math.max(a.length, b.length);
 }
 
-/** Position of `needle` as a contiguous run inside `haystack`, skipping taken positions. */
+/** A token with the commas and full stops attached to it removed — what a `find` may omit. */
+function looseKey(token: string): string {
+  return token.normalize("NFC").replace(/[,.]/g, "");
+}
+
+/** The punctuation a token ends in ("zhromáždění," → ","), quotes and brackets included. */
+function trailingPunct(token: string): string {
+  return token.match(/[^\p{L}\p{N}]+$/u)?.[0] ?? "";
+}
+
+/**
+ * Position of `needle` as a contiguous run inside `haystack`, skipping taken positions.
+ * A run that matches verbatim wins; failing that, one that matches once the commas and
+ * full stops attached to words are ignored (Gemini often quotes "zhromáždění," as
+ * "zhromáždění").
+ */
 function findRun(haystack: string[], needle: string[], taken: Set<number>, offset: number): number {
-  const eq = (a: string, b: string) => a.normalize("NFC") === b.normalize("NFC");
-  for (let i = 0; i + needle.length <= haystack.length; i++) {
-    let ok = true;
-    for (let k = 0; k < needle.length && ok; k++) {
-      ok = !taken.has(offset + i + k) && eq(haystack[i + k], needle[k]);
+  const exact = (a: string, b: string) => a.normalize("NFC") === b.normalize("NFC");
+  const loose = (a: string, b: string) => looseKey(a) === looseKey(b);
+  const matches = (eq: (a: string, b: string) => boolean): number[] => {
+    const at: number[] = [];
+    for (let i = 0; i + needle.length <= haystack.length; i++) {
+      let ok = true;
+      for (let k = 0; k < needle.length && ok; k++) {
+        ok = !taken.has(offset + i + k) && eq(haystack[i + k], needle[k]);
+      }
+      if (ok) at.push(i);
     }
-    if (ok) return i;
-  }
+    return at;
+  };
+  const verbatim = matches(exact);
+  if (verbatim.length) return verbatim[0];
+  // which of several loose matches Gemini meant is unknown: only an unambiguous one is taken
+  const fuzzy = matches(loose);
+  if (fuzzy.length === 1) return fuzzy[0];
   return -1;
+}
+
+/**
+ * The words an edit puts in, with the line's own punctuation kept wherever the edit did not
+ * speak of it: tokens `find` and `replace` share at either end stay as written on the line,
+ * and a changed last word that carries no punctuation of its own gets the one the replaced
+ * word ended in — unless `find` quoted that punctuation, which makes dropping it deliberate.
+ */
+function keepLinePunctuation(old: string[], find: string[], replace: string[]): string[] {
+  const out = [...replace];
+  const same = (a: string, b: string) => a.normalize("NFC") === b.normalize("NFC");
+  let p = 0;
+  while (p < find.length && p < replace.length && same(find[p], replace[p])) p++;
+  let q = 0;
+  while (q < find.length - p && q < replace.length - p && same(find[find.length - 1 - q], replace[replace.length - 1 - q])) q++;
+  for (let i = 0; i < p; i++) out[i] = old[i];
+  for (let i = 0; i < q; i++) out[out.length - 1 - i] = old[old.length - 1 - i];
+  const lost = (i: number) => trailingPunct(find[i]) !== trailingPunct(old[i]); // `find` left old[i]'s punctuation out
+  const middleEnd = replace.length - q;
+  if (middleEnd === p && p > 0 && p < find.length) {
+    // words deleted after a kept word: the kept word's own punctuation went with the deleted ones
+    const d = find.length - q - 1; // the last deleted word: its punctuation, if `find` left it out, stays
+    out[p - 1] = replace[p - 1] + (lost(d) && trailingPunct(replace[p - 1]) === "" ? trailingPunct(old[d]) : "");
+  } else if (find.length === replace.length) {
+    // one word for one word: each changed word keeps the punctuation `find` left out
+    for (let i = p; i < replace.length - q; i++) {
+      if (lost(i) && trailingPunct(replace[i]) === "") out[i] = replace[i] + trailingPunct(old[i]);
+    }
+  } else if (q === 0 && lost(find.length - 1)) {
+    // the replaced span's last word carried punctuation `find` left out: it moves to the new last word
+    const orig = trailingPunct(old[old.length - 1]);
+    const last = out.length - 1;
+    if (p === find.length && last >= p) out[p - 1] = old[p - 1].slice(0, old[p - 1].length - orig.length);
+    if (last >= p && trailingPunct(replace[last]) === "") {
+      out[last] = (p === replace.length ? out[last].slice(0, out[last].length - trailingPunct(out[last]).length) : replace[last]) + orig;
+    }
+  }
+  return out;
 }
 
 /** Split [fromMs, toMs) between `texts` in proportion to their length. */
@@ -182,9 +245,21 @@ export function applyProofreadEdits(
       rejected.push(edit);
       continue;
     }
+    const oldLast = lineTokens[at + find.length - 1];
+    // a deletion would take the line's sentence end or comma with it; `find` didn't quote it
+    if (replace.length === 0 && trailingPunct(oldLast) !== trailingPunct(find[find.length - 1])) {
+      rejected.push(edit);
+      continue;
+    }
     const start = line.words[at];
+    const oldTexts = lineTokens.slice(at, at + find.length);
+    const final = keepLinePunctuation(oldTexts, find, replace);
+    if (final.join(" ") === oldTexts.join(" ")) {
+      rejected.push(edit); // nothing left to change once the line's punctuation is kept
+      continue;
+    }
     for (let k = 0; k < find.length; k++) taken.add(start + k);
-    accepted.push({ start, end: start + find.length, replacement: replace, edit });
+    accepted.push({ start, end: start + find.length, replacement: final, edit });
   }
 
   accepted.sort((a, b) => a.start - b.start);
@@ -194,10 +269,12 @@ export function applyProofreadEdits(
   for (const { start, end, replacement, edit } of accepted) {
     out.push(...words.slice(cursor, start));
     const old = words.slice(start, end);
-    out.push(...retime(old, replacement));
+    const oldTexts = old.map((w) => w.word);
+    const final = replacement;
+    out.push(...retime(old, final));
     applied.push({
-      from: old.map((w) => w.word).join(" "),
-      to: replacement.join(" "),
+      from: oldTexts.join(" "),
+      to: final.join(" "),
       atMs: old[0].startMs,
       reason: edit.reason,
     });

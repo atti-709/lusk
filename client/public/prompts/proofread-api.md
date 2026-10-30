@@ -36,7 +36,7 @@ Speech recognition makes characteristic mistakes. Fix these:
 Return JSON with an `edits` array. One entry per fix:
 
 - `line` — the number of the line the words are on.
-- `find` — the wrong word or words, **copied exactly** as they appear on that line (same spelling, same punctuation), contiguous, as few words as needed to make the fix unambiguous (usually 1-3).
+- `find` — the wrong word or words, **copied exactly** as they appear on that line (same spelling, and the same commas, full stops and other punctuation attached to the words), contiguous, as few words as needed to make the fix unambiguous (usually 1-3).
 - `replace` — the corrected word or words. It may have more words than `find` (to split a word or restore a dropped one) or be an empty string (to delete a hallucinated repeat).
 - `reason` — a few words naming the error type.
 
