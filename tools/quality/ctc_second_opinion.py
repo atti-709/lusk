@@ -53,9 +53,15 @@ def main():
     ap.add_argument("run_dir")
     ap.add_argument("--items")
     ap.add_argument("--out")
+    ap.add_argument("--only", help="an adjudication export (t6-adjudication.md): score just the spans in it")
     args = ap.parse_args()
     run_dir = os.path.expanduser(args.run_dir)
     items = args.items.split(",") if args.items else sorted(i for i in os.listdir(run_dir) if os.path.exists(os.path.join(run_dir, i, "arbiter.json")))
+    only = None
+    if args.only:
+        import re
+        only = {r["id"] for r in json.loads(re.search(r"```json\n(.*?)\n```", open(os.path.expanduser(args.only)).read(), re.S).group(1))}
+        items = sorted({i.split(":", 1)[0] for i in only})
     out = {}
     for item in items:
         doc = json.load(open(os.path.join(run_dir, item, "arbiter.json")))
@@ -63,7 +69,7 @@ def main():
         audio = whisperx.load_audio(audio_path(item))
         n = 0
         for sp in doc["spans"]:
-            if sp.get("skipped") or not sp.get("judged"):
+            if sp.get("skipped") or not sp.get("judged") or (only is not None and f"{item}:{sp['id']}" not in only):
                 continue
             lf = loss(model, meta, audio, sp["t0"], sp["t1"], sp["ftContext"])
             lb = loss(model, meta, audio, sp["t0"], sp["t1"], sp["baseContext"])
