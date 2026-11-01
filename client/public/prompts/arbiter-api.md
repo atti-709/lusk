@@ -12,6 +12,7 @@ Listen, and decide which transcript matches what is actually SAID in the words w
 - Names: the established {{LANGUAGE}} spelling is correct (a name or foreign term said as it is usually spelled: "Dawkins", "Gloria Dei").
 - **Captions are clean text.** A repeated word, a hesitation (eh, hm) or a sentence-initial "A", "No", "Tak" that one side leaves out is not an error. Never prefer a transcript only because it keeps a repeat or a filler word, and never prefer one only because it drops them. Digits and number words ("9" and "deväť") are the same thing: not a difference.
 - {{LANGUAGE_NOTE}}
+- A and B differ only in the underlined words; the words around them are the same. A transcript that leaves out words you clearly hear in the clip (more than a repeat or a filler) is wrong in those words.
 - Never invent a third version. You only choose.
 
 ## Answer

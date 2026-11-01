@@ -28,6 +28,14 @@ export interface BothDecodes {
   base: DecodedSegment[];
 }
 
+/** A run of this many fine-tune words with no counterpart in the base model's words keeps the fine-tune. */
+export const MIN_OMITTED_RUN = 3;
+
+/** Whether `other` has no counterpart for a run of at least `n` consecutive words of `words`. */
+export function omitsRun(words: string[], other: string[], n: number): boolean {
+  return diffWords(words, other).some((op) => op.tag !== "equal" && op.i2 - op.i1 - (op.j2 - op.j1) >= n);
+}
+
 /** Differences closer together than this many words are one span. */
 export const MERGE_GAP_WORDS = 3;
 /** Words of context on each side of a span. */
@@ -43,7 +51,7 @@ const SNIPPET_MAX_S = 25;
 
 export type Verdict = "ft" | "base" | "same" | "neither" | "none";
 
-export type SkipReason = "repeat" | "filler" | "number" | "crossSegment" | "tooLong" | "formOnly";
+export type SkipReason = "omission" | "repeat" | "filler" | "number" | "crossSegment" | "tooLong" | "formOnly";
 
 export interface ArbiterSpan {
   id: string;
@@ -186,6 +194,9 @@ function clean(words: string[]): string[] {
  */
 export function skipReason(ft: string[], base: string[], ftBefore: string[], ftAfter: string[], baseBefore: string[], baseAfter: string[]): SkipReason | null {
   if (ft.length > MAX_SPAN_WORDS || base.length > MAX_SPAN_WORDS) return "tooLong";
+  // the base model leaves out a run of 3+ spoken words the fine-tune has: choosing it would lose speech
+  // (Lr0U 57:55: "áno, podľa mňa tá otázka smeruje k tomu, že" against "smeruje k tomu,", the owner kept the fine-tune)
+  if (omitsRun(ft, base, MIN_OMITTED_RUN)) return "omission";
   const onlyFillers = (w: string[]) => w.every((x) => FILLERS.has(x));
   const onlyStarters = (w: string[]) => w.every((x) => FILLERS.has(x) || SENTENCE_STARTERS.has(x));
   if ((ft.length === 0 && onlyFillers(base)) || (base.length === 0 && onlyFillers(ft))) return "filler";
@@ -249,7 +260,6 @@ export function findSpans(segments: DecodedSegment[], base: DecodedSegment[]): F
       const segOf = new Set(ftCore.map((w) => w.seg));
       const text = (ws: ChunkWord[]) => ws.map((w) => w.raw).join(" ");
       const c0 = Math.max(0, sp.i1 - CONTEXT_WORDS), c1 = Math.min(ftWords.length, sp.i2 + CONTEXT_WORDS);
-      const d0 = Math.max(0, sp.j1 - CONTEXT_WORDS), d1 = Math.min(bWords.length, sp.j2 + CONTEXT_WORDS);
       const ctxWords = ftWords.slice(c0, c1);
       const t0 = Math.max(0, (ctxWords[0]?.start ?? anchor.start) - SNIPPET_PAD_S);
       let t1 = (ctxWords.at(-1)?.end ?? anchor.end) + SNIPPET_PAD_S;
@@ -264,7 +274,9 @@ export function findSpans(segments: DecodedSegment[], base: DecodedSegment[]): F
         ft: text(ftCore),
         base: text(baseCore),
         ftContext: text(ftWords.slice(c0, c1)),
-        baseContext: text(bWords.slice(d0, d1)),
+        // the same context on both sides, only the differing words change: with the base model's own neighbours a
+        // second difference next to the span (Lr0U 35:45 "stavebné prvky" / "proky") made the judge call both wrong
+        baseContext: text([...ftWords.slice(c0, sp.i1), ...baseCore, ...ftWords.slice(sp.i2, c1)]),
         t0: Math.round(t0 * 100) / 100,
         t1: Math.round(t1 * 100) / 100,
       };

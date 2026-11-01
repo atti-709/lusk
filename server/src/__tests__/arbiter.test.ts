@@ -149,13 +149,13 @@ describe("applyVerdicts", () => {
   });
 
   it("applies an insertion and a deletion", () => {
-    const f = [seg("Poznáme tohto človeka veľmi dobre všetci spolu dnes večer tu a potom pôjdeme domov, ale hneď.")];
-    const b = [seg("Poznáme tohto človeka veľmi dobre Boh všetci spolu dnes večer tu a potom pôjdeme.", 0, 10)];
+    const f = [seg("Poznáme tohto človeka veľmi dobre všetci spolu dnes večer tu a potom pôjdeme domov hneď.")];
+    const b = [seg("Poznáme tohto človeka veľmi dobre Boh všetci spolu dnes večer tu a potom pôjdeme domov.", 0, 10)];
     const spans = findSpans(f, b).spans;
     spans.forEach((s) => { s.verdict = "base"; s.judged = true; });
     const out = applyVerdicts(f, spans)[0].text;
     expect(out).toContain("dobre Boh všetci");
-    expect(out.endsWith("pôjdeme.")).toBe(true); // the deleted tail's full stop moves to the word before
+    expect(out.endsWith("pôjdeme domov.")).toBe(true); // the deleted tail's full stop moves to the word before
   });
 
   it("never brings the base model's repeats or hesitations in with a real difference", () => {
@@ -166,6 +166,25 @@ describe("applyVerdicts", () => {
     const out = applyVerdicts(f, spans)[0].text;
     expect(out).toContain("dobré");
     expect(out).not.toMatch(/to to|ehm/);
+  });
+
+  it("keeps the fine-tune when the base model leaves out a run of spoken words (Lr0U 57:55)", () => {
+    const f = [seg("Povedal internet, hej. Podľa mňa tá otázka, áno, podľa mňa tá otázka smeruje k tomu, že či s tým môžeme niečo urobiť, hovoril.")];
+    const b = [seg("Povedal cez internet. Podľa mňa tá otázka smeruje k tomu, či s tým môžeme niečo urobiť, hovoril.")];
+    const spans = findSpans(f, b).spans;
+    expect(spans.some((s) => s.skipped === "omission")).toBe(true);
+    expect(spans.filter((s) => !s.skipped).every((s) => s.base.split(" ").length >= s.ft.split(" ").length - 2)).toBe(true);
+    expect(skipReason(["a", "b", "c", "d"], ["a"], [], [], [], [])).toBe("omission");
+    expect(skipReason(["a", "b", "c"], ["a"], [], [], [], [])).toBeNull();
+    expect(skipReason(["a"], ["a", "b", "c", "d"], [], [], [], [])).toBeNull(); // the fine-tune lacking words is what the arbiter is for
+  });
+
+  it("gives both sides the same context: a second difference next to the span is not in it (Lr0U 35:45)", () => {
+    const f = [seg("že organická chémia, že to je veta, ktorá skúma základné stavebné prvky života, hovoril.")];
+    const b = [seg("že organická chémia, že to je veda, ktorá skúma základné stavebné proky života, hovoril.")];
+    const [s] = findSpans(f, b).spans;
+    expect(s.ftContext.replace("veta", "veda")).toBe(s.baseContext);
+    expect(s.baseContext).toContain("stavebné prvky");
   });
 
   it("summarises what was sent and chosen", () => {
