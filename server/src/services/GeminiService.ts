@@ -44,8 +44,8 @@ const REASONING_MODEL = "gemini-3.8-flash";
  */
 const ARBITER_MODEL = process.env.LUSK_ARBITER_MODEL || REASONING_MODEL;
 const ARBITER_RETRIES = 4;
-/** Arbiter requests in flight at once (each carries ~2 minutes of audio snippets). */
-const ARBITER_CONCURRENCY = 3;
+/** Arbiter requests in flight at once (each carries ~2 minutes of audio snippets; E71's 159 spans took 250 s at 3, 137 s at 6, 134 s at 10). */
+const ARBITER_CONCURRENCY = Number(process.env.LUSK_ARBITER_CONCURRENCY) || 6;
 const CHUNK_SIZE = 250;   // lines per API call
 const OVERLAP = 30;       // lines of overlap from previous chunk
 const MAX_RETRIES = 3;    // retries per chunk on transient API error
