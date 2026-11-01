@@ -274,6 +274,8 @@ function votesJson() {
 }
 async function copyVotes() {
   const text = votesJson();
+  // also a file (the browser saves it in Downloads): where the owner's export goes, next to the clipboard copy
+  try { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "application/json" })); a.download = "abtest-votes.json"; a.click(); } catch {}
   try { await navigator.clipboard.writeText(text); status(L().copied); return; } catch {}
   const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select();
   try { document.execCommand("copy"); status(L().copied); } catch { window.prompt(L().copy, text); }
