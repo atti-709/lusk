@@ -52,7 +52,9 @@ MAX_SNIPPET_S = 25.0      # audio per item
 AUDIT_WINDOWS = 30
 AUDIT_SECONDS = 8.0
 BACKOFF_TOTAL_S = 300     # give up on 429/503 after this long
-JUDGE_PROMPT_VERSION = 2
+JUDGE_PROMPT_VERSION = 4
+# Which "same" rules produced a report (shown in its header): prompt wording plus the span filter (clean_diff). Bump with either.
+JUDGE_RULES_VERSION = "clean-text-2"
 AUDIT_PROMPT_VERSION = 2
 ERROR_TYPES = ["mishearing", "dropped word", "inserted word", "ending", "name", "number", "punctuation", "other"]
 LOST_MIN_S = 1.0          # a speech hole this long counts
@@ -152,12 +154,15 @@ def cue_words(cues):
     return [w for w in abtest.cue_words(cues) if abtest.norm(w[0]) not in FILLERS]
 
 
-def spans(old_words, new_words, merge_gap=abtest.MERGE_GAP, context=abtest.CONTEXT):
+def spans(old_words, new_words, merge_gap=abtest.MERGE_GAP, context=abtest.CONTEXT, ignore=None):
     """Spans where the word lists differ (abtest's norm: NFC, lower case, no punctuation, diacritics kept; differences up to
     `merge_gap` words apart merge). Each: t0/t1 (the time both sides cover), dt (where the first differing word is), old / new
-    (context words), old_diff / new_diff (the differing words)."""
+    (context words), old_diff / new_diff (the differing words). `ignore(old_words, new_words, op)` drops an opcode that needs no
+    judging (clean_diff)."""
     ko, kn = [abtest.norm(w[0]) for w in old_words], [abtest.norm(w[0]) for w in new_words]
     ops = [o for o in difflib.SequenceMatcher(None, ko, kn, autojunk=False).get_opcodes() if o[0] != "equal"]
+    if ignore:
+        ops = [o for o in ops if not ignore(old_words, new_words, o)]
     merged = []
     for o in ops:
         if merged and o[1] - merged[-1][2] <= merge_gap and o[3] - merged[-1][4] <= merge_gap:
@@ -177,6 +182,77 @@ def spans(old_words, new_words, merge_gap=abtest.MERGE_GAP, context=abtest.CONTE
                     "old": " ".join(w[0] for w in old_words[ci1:ci2]), "new": " ".join(w[0] for w in new_words[cj1:cj2]),
                     "old_diff": " ".join(w[0] for w in old_words[i1:i2]), "new_diff": " ".join(w[0] for w in new_words[j1:j2])})
     return out
+
+
+# ------------------------------------------------------------------------------------------------------ clean-text differences
+# Owner decisions of the Wave 1 gate (2026-10-29): the captions are clean text, so a dropped stutter / repeat, a dropped or kept
+# sentence-initial A / No / Tak, and a numeral written as a number word (or the reverse) are no differences. Punctuation and
+# capitalisation never are (abtest.norm). Colloquial Czech forms (kterej, druhýho) are NOT covered here: they stay spans.
+OPENERS = {"a", "no", "tak", "noo"}
+# Stems of Slovak / Czech cardinals, diacritics folded, with their value. A case ending follows the stem; words glue together
+# (dvadsaťpäť, dvestodvadsať), so a number is read by the longest stem at each position.
+NUMBER_STEMS = {
+    "nula": 0, "jeden": 1, "jedn": 1, "dva": 2, "dve": 2, "dvoj": 2, "dvou": 2, "dvem": 2, "tri": 3, "troj": 3, "trem": 3,
+    "styri": 4, "styr": 4, "ctyr": 4, "pat": 5, "pet": 5, "sest": 6, "sedem": 7, "sedm": 7, "osem": 8, "osm": 8,
+    "devat": 9, "devit": 9, "desat": 10, "deset": 10, "desiat": 10, "jedenast": 11, "jedenact": 11, "dvanast": 12, "dvanact": 12,
+    "trinast": 13, "trinact": 13, "strnast": 14, "ctrnact": 14, "patnast": 15, "patnact": 15, "sestnast": 16, "sestnact": 16,
+    "sedemnast": 17, "sedmnact": 17, "osemnast": 18, "osmnact": 18, "devatnast": 19, "devatenact": 19, "dvadsat": 20, "dvacet": 20,
+    "tridsat": 30, "tricet": 30, "styridsat": 40, "ctyricet": 40, "patdesiat": 50, "padesat": 50, "sestdesiat": 60, "sedesat": 60,
+    "sedemdesiat": 70, "sedmdesat": 70, "osemdesiat": 80, "osmdesat": 80, "devatdesiat": 90, "devadesat": 90,
+    "sto": 100, "sta": 100, "set": 100, "stov": 100, "tisic": 1000, "milion": 10 ** 6,
+}
+STEMS_LONGEST_FIRST = sorted(NUMBER_STEMS, key=len, reverse=True)
+
+
+def fold(w):
+    return "".join(c for c in unicodedata.normalize("NFD", abtest.norm(w)) if not unicodedata.combining(c))
+
+
+def number_value(words):
+    """The integer a run of Slovak / Czech number words says ("dvadsať jeden", "dvetisíc dvadsať"), None if they are not
+    (only) a number."""
+    s = "".join(f for f in (fold(w) for w in words) if f not in ("a", "i"))
+    total = cur = 0
+    seen = False
+    while s:
+        st = next((x for x in STEMS_LONGEST_FIRST if s.startswith(x)), None)
+        if st is None:
+            return None
+        v = NUMBER_STEMS[st]
+        s, seen = s[len(st):], True
+        if v >= 1000:
+            total, cur = total + max(cur, 1) * v, 0
+        elif v == 100:
+            cur = cur * 100 if 0 < cur < 10 else cur + 100
+        else:
+            cur += v
+        if s and not any(s.startswith(x) for x in STEMS_LONGEST_FIRST) and len(s) <= 3:
+            s = ""   # a case ending
+    return total + cur if seen else None
+
+
+def clean_diff(old_words, new_words, op):
+    """True when the opcode (tag, i1, i2, j1, j2 over the two word lists) differs only by something the owner counts as the same."""
+    _, i1, i2, j1, j2 = op
+    o, n = old_words[i1:i2], new_words[j1:j2]
+    if bool(o) != bool(n):
+        words, lst, a, b = (o, old_words, i1, i2) if o else (n, new_words, j1, j2)
+        keys = [abtest.norm(w[0]) for w in lst]
+        k = keys[a:b]
+        L = len(k)
+        # a stutter / repeat: the words repeat the ones just before or after them ("už už", "to je to je")
+        if (a >= L and keys[a - L:a] == k) or keys[b:b + L] == k or (len(set(k)) == 1 and k[0] in keys[b:b + 1] + keys[a - 1:a]):
+            return True
+        # a sentence-initial opener: A / No / Tak (also "no tak"), at the start or after . ? ! ...
+        if L <= 3 and all(x in OPENERS for x in k) and (a == 0 or re.search(r"[.?!\u2026:]['\")\u00bb\u201d]*$", lst[a - 1][0])):
+            return True
+        return False
+    if o and n:   # a numeral against the same number in words
+        for dig, wrd in ((o, n), (n, o)):
+            toks = [w[0].strip(".,") for w in dig]
+            if all(t.isdecimal() for t in toks) and number_value([w[0] for w in wrd]) == int("".join(toks)):
+                return True
+    return False
 
 
 def snippet_range(sp):
@@ -330,6 +406,7 @@ def ask(parts, key, n, **kw):
 # ------------------------------------------------------------------------------------------------------ A/B judge
 
 JUDGE_PROMPT = """You are checking {lang} subtitles of a recording against the AUDIO. For each item you get an audio clip and two transcripts (A and B) of roughly that clip; they differ in a few words. Listen and decide which transcript matches what is actually SAID (the words, their forms and endings; ignore punctuation and capitalisation and ignore filler sounds (eh, e, hm: leaving them out is correct); spoken colloquial and dialect forms count as correct, do not "correct" them toward the standard language). Names: the established {lang} spelling is correct. {extra}
+The captions are CLEAN TEXT. These are NOT differences; treat them as the same and never prefer a transcript for them: (1) a stutter, repeat or filler dropped or kept ("už už už" vs "už", "to je to je" vs "to je"); (2) a sentence-initial "A", "No" or "Tak" dropped or kept; (3) a numeral against the same number written in words ("21" vs "dvadsaťjeden", "3" vs "tri"); (4) punctuation, capitalisation, hyphens. Only a different WORD (another word, another form or ending, a name, a different number) is a difference. Word forms as spoken, colloquial Czech forms included (kterej, druhýho), ARE real differences: the transcript that writes what is said wins, even when the other is the standard form. If, with the differences above ignored, both say the same, answer "same".
 Answer per item: "A" or "B" if one matches better, "same" if both are equally right or wrong in the differing words, "neither" if both get the differing words wrong; then give what is said there in "said".
 Return a JSON array: [{{"id": N, "verdict": "A"|"B"|"same"|"neither", "said": "<the differing words as spoken>"}}]."""
 LANG_EXTRA = {
@@ -340,7 +417,8 @@ LANG_EXTRA = {
 
 def judge_item(item, lang, wav, old_words, new_words, key, ck, max_spans, batch, kw):
     """-> {spans: [... with verdict new / old / same / neither / ? (unjudged)], total, sampled}."""
-    all_sp = spans(old_words, new_words)
+    all_sp = spans(old_words, new_words, ignore=clean_diff)
+    auto = len(spans(old_words, new_words)) - len(all_sp)   # spans the clean-text rules settled without a call
     sp, sampled = all_sp, False
     if max_spans and len(sp) > max_spans:
         pick = sorted(random.Random(f"judge:{item}").sample(range(len(sp)), max_spans))
@@ -372,7 +450,7 @@ def judge_item(item, lang, wav, old_words, new_words, key, ck, max_spans, batch,
             s["verdict"] = {"A": "old" if flipped else "new", "B": "new" if flipped else "old"}.get(v, v if v in ("same", "neither") else "?")
             s["said"] = r.get("said", "")
             s["sideA"] = "old" if flipped else "new"
-    return {"spans": sp, "total": len(all_sp), "sampled": sampled}
+    return {"spans": sp, "total": len(all_sp), "sampled": sampled, "auto": max(0, auto)}
 
 
 def judge_counts(sp):
@@ -912,7 +990,7 @@ def render(R):
     L = [f"# Quality report: {R['name']}\n"]
     g = R["gemini"]
     L.append(f"Generated {R['generatedAt']}. Version `{R['version']}`" + (f" against `{R['vs']}`" if R["vs"] else "")
-             + f". Judge and audit model `{MODEL}`; {g['calls']} Gemini calls in this report's checkpoint ({g['sessionCalls']} this run, "
+             + f". Judge and audit model `{MODEL}`, judge rules `{JUDGE_RULES_VERSION}` (prompt v{JUDGE_PROMPT_VERSION}: repeats, fillers, sentence-initial A/No/Tak, numerals vs words, punctuation = same); {g['calls']} Gemini calls in this report's checkpoint ({g['sessionCalls']} this run, "
              f"about {g['audioSeconds'] / 60:.0f} min of audio sent).\n")
     L.append(md_table(["item", "language", "set", "commit", "Whisper", "audio"],
                       [[i, d["language"], d["set"], (d.get("commit") or "")[:7], d.get("whisper") or "?",
@@ -938,11 +1016,11 @@ def render(R):
                 rows.append([i, "-", "-", "-", "-", "-", "-", "refused (see 1)" if d["guard"] else "not run"])
                 continue
             c = j["counts"]
-            nspans += len(j["spans"])
+            nspans += len(j["spans"]) + j.get("auto", 0)
             for k in tot:
                 tot[k] += c[k]
-            note = f"net {c['new'] - c['old']:+d}" + (f"; sampled {len(j['spans'])} of {j['total']} spans" if j["sampled"] else "")
-            rows.append([i, len(j["spans"]), c["new"], c["old"], c["same"], c["neither"], c["?"], note])
+            note = f"net {c['new'] - c['old']:+d}" + (f"; {j['auto']} 'same' settled by the clean-text rules without a call" if j.get("auto") else "") + (f"; sampled {len(j['spans'])} of {j['total']} spans" if j["sampled"] else "")
+            rows.append([i, len(j["spans"]) + j.get("auto", 0), c["new"], c["old"], c["same"], c["neither"], c["?"], note])
         if len(rows) > 1:
             rows.append(["**all**", nspans, tot["new"], tot["old"], tot["same"], tot["neither"], tot["?"], f"net {tot['new'] - tot['old']:+d}"])
         L.append(md_table(["item", "spans", "new better", "old better", "same", "both wrong", "unjudged", "note"], rows))
@@ -1153,6 +1231,7 @@ def main(argv=None):
                 old_words = cue_words(yt_cues if vs_youtube else B["cues"])
                 j = judge_item(item, lang, c["wav"], old_words, cue_words(A["cues"]), key, ck, args.max_spans, args.batch, kw)
                 j["counts"] = judge_counts(j["spans"])
+                j["counts"]["same"] += j["auto"]
                 d["judge"] = j
                 contested += [{"item": item, "t0": s["t0"], "t1": s["t1"], "verdict": "worse" if s["verdict"] == "old" else "both wrong",
                                "new": s["new_diff"], "old": s["old_diff"], "said": s["said"]} for s in j["spans"] if s["verdict"] in ("old", "neither")]
