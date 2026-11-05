@@ -135,18 +135,34 @@ def spell_numerals(text: str, language: str) -> str:
 def restore_numerals(aligned: list[dict], spelled: list[dict], segments: list[dict]) -> None:
     """Puts the numerals back into aligned segments that were given `spelled` text. whisperx splits a
     segment into its sentences, so the words are walked in order against every token of the originals
-    (a plain "jeden" before a "1" stays "jeden"); a word whisperx left out is skipped, not matched twice."""
-    tokens = [pair for sp, s in zip(spelled, segments) for pair in zip(sp["text"].split(), s["text"].split())]
+    (a plain "jeden" before a "1" stays "jeden"). whisperx keeps every word of a segment it aligned (unaligned
+    ones without times) but returns a segment it could not align at all with no words: a word not found
+    within a few tokens is looked for again from the start of each following segment, so one dropped
+    segment never leaves the rest of the file spelled out."""
+    tokens, starts = [], []
+    for sp, s in zip(spelled, segments):
+        starts.append(len(tokens))
+        tokens += zip(sp["text"].split(), s["text"].split())
+    starts.append(len(tokens))
+
+    def find(word: str, i: int) -> int:
+        while i < len(tokens):
+            for j in range(i, min(i + 4, len(tokens))):
+                if tokens[j][0] == word:
+                    return j
+            i = next(b for b in starts if b > i)
+        return -1
+
     i = 0
     for seg in aligned:
         changed = False
         for word in seg.get("words", []):
-            for j in range(i, min(i + 4, len(tokens))):
-                if tokens[j][0] == word["word"]:
-                    i = j + 1
-                    if tokens[j][1] != word["word"]:
-                        word["word"], changed = tokens[j][1], True
-                    break
+            j = find(word["word"], i)
+            if j < 0:
+                continue
+            i = j + 1
+            if tokens[j][1] != word["word"]:
+                word["word"], changed = tokens[j][1], True
         if changed:
             seg["text"] = " ".join(w["word"] for w in seg["words"])
 
