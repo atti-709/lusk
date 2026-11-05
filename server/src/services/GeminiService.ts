@@ -46,6 +46,48 @@ type ProgressCallback = (percent: number, message: string) => void;
 
 const LANGUAGE_NAMES: Record<string, string> = { sk: "Slovak", cs: "Czech", en: "English" };
 
+/**
+ * The language-specific parts of the proofread prompt (`proofread-api.md` placeholders). Slovak is the
+ * original wording; Czech must not pull colloquial speech toward the standard language (owner decision
+ * 2026-10-29: "kterej", "druhýho" are written as spoken). Languages without a block use Slovak's.
+ */
+export const PROOFREAD_LANGUAGE_RULES: Record<string, Record<"FOREIGN_RULE" | "NAMES_RULE" | "WRITTEN_FORMS_RULE" | "SPOKEN_FORMS_NOTE", string>> = {
+  sk: {
+    FOREIGN_RULE:
+      'for Slovak, Czech forms that slip in ("protože" → "pretože", "který" → "ktorý", "poprvé"/"podruhé" → "po prvé"/"po druhé"), and "ó" where Slovak writes "ô" ("komórke" → "komôrke"). Only a single Czech form inside a Slovak sentence: a passage spoken in Czech (several Czech forms together, like a guest\'s or a sponsor\'s appeal: "pokud se rozhodnete pro finanční dar") stays in Czech — never translate it.',
+    NAMES_RULE:
+      'characters, places and people in their established Slovak spelling (the Slovak release or common usage: "Rafiki", "Scar", "Elsa", "Arendelle"), even where the script spells them differently.',
+    WRITTEN_FORMS_RULE:
+      'the transcriber sometimes writes what was said in words as a numeral or an abbreviation: an enumeration ("1.", "(1)", "2.)" for "Po prvé", "Po druhé") or an abbreviation said in full ("tzv." for "takzvanú", "resp." for "respektíve", "napr." for "napríklad"). Write them out as they were said, in the form the sentence needs.',
+    SPOKEN_FORMS_NOTE: "",
+  },
+  cs: {
+    FOREIGN_RULE:
+      'for Czech, a single Slovak form that slips into a Czech sentence ("pretože" → "protože", "ktorý" → "který", "po prvé" → "poprvé", "ô" in a Czech word). Only a single Slovak form inside a Czech sentence: a passage spoken in Slovak (several Slovak forms together, like a guest\'s appeal) stays in Slovak — never translate it. Colloquial Czech is NOT a foreign spelling: never replace a spoken colloquial form with the standard one.',
+    NAMES_RULE:
+      'people, places and Bible books in their established Czech spelling (common usage: "Ježíš", "Jeruzalém", "Pavel"), even where the script spells them differently.',
+    WRITTEN_FORMS_RULE:
+      'the transcriber sometimes writes what was said in words as a numeral or an abbreviation: an enumeration ("1.", "(1)", "2.)" for "Za prvé", "Za druhé") or an abbreviation said in full ("tzv." for "takzvaný", "resp." for "respektive", "např." for "například"). Write them out as they were said, in the form the sentence needs.',
+    SPOKEN_FORMS_NOTE:
+      ' **Spoken (common) Czech is correct as spoken and must never be changed to the standard form**: "kterej", "zajištěnej", "druhýho", "malej", "v tom zhromáždění" (not "shromáždění"), "bysme", "-ej" for "-ý" and "-ý" for "-é" in endings ("nový" for "nové"), "v" before a vowel ("vokno") and the like. If the speaker said it that way, it stays.',
+  },
+};
+
+/** The proofread prompt for `language`: the template with its language block, `{{LANGUAGE}}` and the script note filled in. */
+export function renderProofreadPrompt(template: string, language: string, scriptText: string | null): string {
+  const rules = PROOFREAD_LANGUAGE_RULES[language] ?? PROOFREAD_LANGUAGE_RULES.sk;
+  let out = template;
+  for (const [key, text] of Object.entries(rules)) out = out.replaceAll(`{{${key}}}`, () => text);
+  return out
+    .replaceAll("{{LANGUAGE}}", LANGUAGE_NAMES[language] ?? language)
+    .replace(
+      "{{SCRIPT_NOTE}}",
+      scriptText
+        ? "## Reference script\n\nThe speaker worked from the reference script below (often written without diacritics). Use it to resolve names, terms, quotations and what a garbled word was meant to be. But the transcript records what was actually said: where the speaker deviated from the script, keep the spoken words."
+        : "",
+    );
+}
+
 /** Sentences per proofread request — small enough that every line gets real attention. */
 const PROOFREAD_CHUNK_LINES = 120;
 
@@ -623,14 +665,7 @@ export class GeminiService {
     const ai = await this.getClient();
     if (scriptText) scriptText = stripEmbeddedImages(scriptText);
     const template = await settingsService.getProofreadPrompt();
-    const prompt = template
-      .replaceAll("{{LANGUAGE}}", LANGUAGE_NAMES[language] ?? language)
-      .replace(
-        "{{SCRIPT_NOTE}}",
-        scriptText
-          ? "## Reference script\n\nThe speaker worked from the reference script below (often written without diacritics). Use it to resolve names, terms, quotations and what a garbled word was meant to be. But the transcript records what was actually said: where the speaker deviated from the script, keep the spoken words."
-          : "",
-      );
+    const prompt = renderProofreadPrompt(template, language, scriptText);
     const lines = buildProofreadLines(words);
     const chunks: ProofreadLine[][] = [];
     for (let i = 0; i < lines.length; i += PROOFREAD_CHUNK_LINES) {

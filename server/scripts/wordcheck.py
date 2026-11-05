@@ -1,7 +1,7 @@
 """Which words are real words of a language, by its Hunspell dictionary.
 
 Reads a JSON list of words on stdin, writes a JSON list of booleans to stdout. The dictionary
-(sk-spell's Slovak Hunspell dictionary, GPL 2 / LGPL 2.1 / MPL 1.1 — used unmodified, its README
+(sk-spell's Slovak and LibreOffice's Czech Hunspell dictionaries, GPL 2 / LGPL 2.1 / MPL 1.1 (sk) — used unmodified, its README
 with the license is kept beside it) is downloaded once from a pinned LibreOffice commit and
 checked against its hash.
 """
@@ -20,6 +20,12 @@ DICTIONARIES = {
         "sk_SK/sk_SK.aff": "af67bbe8ea9dea74968ec01acd266b3f74177ca087ee6eb7898c576e0aef7a3d",
         "sk_SK/sk_SK.dic": "3e3dbd5c6af8431a3a47652c69692f3f86d0cd82deb4418e49a057a33ef56063",
         "sk_SK/README_sk.txt": None,
+    },
+    # the Czech dictionary of the same commit (LGPL 2.1 / GPL; its README names the licence), used unmodified
+    "cs": {
+        "cs_CZ/cs_CZ.aff": "7ecb20620ecd46ebd9c36f3f33e69dd4eda385cba5b2bb4e6bc396d910e297f7",
+        "cs_CZ/cs_CZ.dic": "d8e8c88c006fdae72dac8c85df11b0c99a773e05a4ab0fcbe92244876668ca74",
+        "cs_CZ/README_cs.txt": None,
     },
 }
 

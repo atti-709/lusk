@@ -50,12 +50,22 @@ MAX_CHARS_PER_S = 30  # fast Slovak speech is ~15-20; a segment denser than this
 # What Whisper writes over music, silence or a window's end: the sign-off of the videos it
 # was trained on. Never once spoken in the show's 79 episodes (each case checked against
 # the audio on 2026-10-10), so a segment that is nothing but one of these is dropped.
+# Per language (the language the segment was decoded in); a language without a set uses Slovak's.
 STOCK_PHRASES = {
-    "dakujem za pozornost", "dakujeme za pozornost", "dakujem za pozretie",
-    "dakujem za sledovanie", "dakujeme za sledovanie", "thank you for watching",
-    "thank you for your attention",
-    # the Czech fine-tune (T9) writes this over the quiet end of a talk (w6O75HIIRh0 33:42, four times)
-    "titulky vytvoril johnyx",
+    "sk": {
+        "dakujem za pozornost", "dakujeme za pozornost", "dakujem za pozretie",
+        "dakujem za sledovanie", "dakujeme za sledovanie", "thank you for watching",
+        "thank you for your attention",
+        # the Czech fine-tune (T9) writes this over the quiet end of a talk (w6O75HIIRh0 33:42, four times)
+        "titulky vytvoril johnyx",
+    },
+    "cs": {
+        "dekuji za pozornost", "dekujeme za pozornost", "dekuji za sledovani", "dekujeme za sledovani",
+        "thank you for watching", "thank you for your attention",
+        "titulky vytvoril johnyx",
+        # w6O75HIIRh0 26:36 "Konec." (the owner heard speech there, T23: dropped, so that stretch is decoded again on its own)
+        "konec",
+    },
 }
 
 
@@ -76,10 +86,10 @@ def is_loop(text: str) -> bool:
     return False
 
 
-def is_stock_phrase(text: str) -> bool:
+def is_stock_phrase(text: str, language: str = "sk") -> bool:
     words = plain_words(text)
     # one phrase, or the same one over and over ("Ďakujem za pozornosť. Ďakujem za pozornosť.")
-    for phrase in STOCK_PHRASES:
+    for phrase in STOCK_PHRASES.get(language, STOCK_PHRASES["sk"]):
         n = len(phrase.split())
         if words and len(words) % n == 0 and words == phrase.split() * (len(words) // n):
             return True
@@ -305,7 +315,7 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
                     # "hears" there is invented (E42: "Zdravíte!" stretched over the 30 s after a
                     # chunk that ended in music): keep a segment only if most of it is real audio.
                     inside = max(0.0, min(s["end"], length) - max(s["start"], 0.0)) / max(s["end"] - s["start"], 1e-3)
-                    if inside >= 0.5 and not is_stock_phrase(s["text"]) and not FOREIGN_SCRIPT.search(s["text"]):
+                    if inside >= 0.5 and not is_stock_phrase(s["text"], language) and not FOREIGN_SCRIPT.search(s["text"]):
                         segments.append({"start": start + s["start"], "end": min(start + s["end"], end), "text": s["text"],
                                          "language": language})
                 bar.update(round(length * 100))
@@ -348,10 +358,10 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
     if holes:
         print(f"decoding {len(holes)} uncovered speech stretches again ({sum(b - a for a, b in holes):.0f} s)", file=sys.stderr)
         segments += [s for s in routed(join_turns(holes)) if not already_said(s, segments)]
-    return join_sentences(sorted(segments, key=lambda s: s["start"]))
+    return join_sentences(sorted(segments, key=lambda s: s["start"]), language)
 
 
-def join_sentences(segments: list[dict]) -> list[dict]:
+def join_sentences(segments: list[dict], language: str = "sk") -> list[dict]:
     """Each chunk is decoded alone, so Whisper ends it with a full stop even where the speaker only
     paused mid-sentence; it starts the next chunk in lower case when it hears the sentence go on
     (E00, a conversation: "prvý rozhovor. z ...", "okolo seba. politikov"). That stop is dropped."""
@@ -359,14 +369,17 @@ def join_sentences(segments: list[dict]) -> list[dict]:
         text, following = seg["text"].rstrip(), nxt["text"].lstrip()
         last = text.split()[-1].lower() if text.split() else ""
         # an ordinal ("v 20." storočí) or an abbreviation ("napr.") needs its dot
-        if last[:-1].isdigit() or last[:-1] in ABBREVIATIONS:
+        if last[:-1].isdigit() or last[:-1] in ABBREVIATIONS.get(language, ABBREVIATIONS["sk"]):
             continue
         if text.endswith(".") and not text.endswith("..") and following[:1].islower():
             seg["text"] = text[:-1]
     return segments
 
 
-ABBREVIATIONS = {"napr", "tzv", "atď", "resp", "tj", "sv", "str", "č", "kap", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"}
+ABBREVIATIONS = {
+    "sk": {"napr", "tzv", "atď", "resp", "tj", "sv", "str", "č", "kap", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"},
+    "cs": {"např", "tzv", "atd", "tzn", "apod", "resp", "tj", "sv", "kap", "př", "mj", "str", "č", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"},
+}
 
 
 def plain_words(text: str) -> list[str]:
