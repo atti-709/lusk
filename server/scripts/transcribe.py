@@ -325,6 +325,25 @@ def _mlx_model(name: str) -> str:
     return str(out)
 
 
+def release_models(keep: str | None = None) -> None:
+    """Drop the MLX model mlx-whisper keeps resident (its ModelHolder) and the buffers it left in
+    MLX's cache, unless it is `keep`. mlx-whisper loads the next model before it lets go of the
+    old one, so two ~3 GB models were resident at every switch (language ID with large-v3 -> the
+    fine-tune), and the last one stayed in memory through the alignment, where torch's wav2vec2
+    adds ~2.5 GB on a long recording (JEokdLimPV8 peaked at 7.5 GB). T22."""
+    import gc
+
+    import mlx.core as mx
+    from mlx_whisper.transcribe import ModelHolder
+
+    if ModelHolder.model is None or ModelHolder.model_path == keep:
+        return
+    ModelHolder.model = None
+    ModelHolder.model_path = None
+    gc.collect()
+    mx.clear_cache()
+
+
 def chunk_languages(audio, chunks: list[tuple[float, float]], base: str, own: str) -> list[str]:
     """The language of each chunk (or segment), as the base model identifies it: `own` unless
     another language is clearly more likely."""
@@ -333,6 +352,7 @@ def chunk_languages(audio, chunks: list[tuple[float, float]], base: str, own: st
     from mlx_whisper.transcribe import ModelHolder
     from whisperx.audio import SAMPLE_RATE
 
+    release_models(keep=mlx_model(base))
     model = ModelHolder.get_model(mlx_model(base), mx.float16)
     found = []
     for start, end in chunks:
@@ -380,6 +400,7 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
         try:
             for start, end in spans:
                 clip = audio[round(start * SAMPLE_RATE):round(end * SAMPLE_RATE)]
+                release_models(keep=mlx_model(model))  # the previous model is gone before this one loads
                 mx.clear_cache()
                 result = mlx_whisper.transcribe(
                     clip,
@@ -395,6 +416,7 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
                 if base and any(is_loop(s["text"]) for s in result["segments"]):
                     # a fine-tuned model stuck in a loop: the chunk is decoded by the base model instead
                     print(f"repetition loop at {start:.0f} s: base model", file=sys.stderr)
+                    release_models(keep=mlx_model(base))
                     result = mlx_whisper.transcribe(clip, path_or_hf_repo=mlx_model(base), language=language,
                                                     condition_on_previous_text=False, verbose=None)
                 found = result["segments"]
@@ -459,6 +481,7 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
     if holes:
         print(f"decoding {len(holes)} uncovered speech stretches again ({sum(b - a for a, b in holes):.0f} s)", file=sys.stderr)
         segments += [s for s in routed(join_turns(holes)) if not already_said(s, segments)]
+    release_models()  # the alignment needs the memory, not the model
     return join_sentences(sorted(segments, key=lambda s: s["start"]), language)
 
 
