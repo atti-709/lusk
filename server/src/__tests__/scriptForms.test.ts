@@ -119,6 +119,15 @@ describe("names the proofread proposes (E00 / E64 lines, punctuation attached)",
   });
 });
 
+describe("an edit that carries the script's dash", () => {
+  it("E64: a lone dash in replace is not a word, so a one-edit name + Latin fix is no rewrite", () => {
+    const ws = words("ako by povedal Irénysleonu: Gloria de jihomovivens Božia sláva je ľudská");
+    const r = applyProofreadEdits(ws, buildProofreadLines(ws), [{ line: 1, find: "Irénysleonu: Gloria de jihomovivens", replace: "Irenej z Lionu: Gloria Dei homo vivens –" }]);
+    expect(r.rejected).toHaveLength(0);
+    expect(text(r.words)).toContain("Irenej z Lionu: Gloria Dei homo vivens");
+  });
+});
+
 describe("the proofread prompt", () => {
   const template = "10. **Names** — {{NAMES_RULE}}\n{{SCRIPT_NOTE}}";
   it("sends the glossary hint with a script only", () => {

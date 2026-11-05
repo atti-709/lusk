@@ -87,7 +87,9 @@ function editDistance(a: string, b: string): number {
 
 /** True when an edit reads as a rewrite rather than a correction. */
 function isRewrite(find: string[], replace: string[]): boolean {
-  if (replace.length > find.length + 3) return true;
+  // a lone dash or bullet in `replace` (the script's own "–") is no word
+  const wordCount = (t: string[]) => t.filter((x) => /[\p{L}\p{N}]/u.test(x)).length;
+  if (wordCount(replace) > wordCount(find) + 3) return true;
   if (find.length < 3) return false; // a single mishearing may change the whole word
   const a = normalize(find.join(" "));
   const b = normalize(replace.join(" "));
