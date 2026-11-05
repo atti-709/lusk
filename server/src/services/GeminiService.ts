@@ -5,6 +5,7 @@ import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
 import { tempManager } from "./TempManager.js";
+import { scriptGlossary } from "./scriptForms.js";
 import { alignCorrectedRows, keepHeardScript, misplacedBreaks } from "./alignCorrection.js";
 import {
   applyProofreadEdits,
@@ -83,7 +84,7 @@ export function renderProofreadPrompt(template: string, language: string, script
     .replace(
       "{{SCRIPT_NOTE}}",
       scriptText
-        ? "## Reference script\n\nThe speaker worked from the reference script below (often written without diacritics). Use it to resolve names, terms, quotations and what a garbled word was meant to be. But the transcript records what was actually said: where the speaker deviated from the script, keep the spoken words."
+        ? "## Reference script\n\nThe speaker worked from the reference script below (often written without diacritics). Use it to resolve names, terms, quotations and what a garbled word was meant to be. But the transcript records what was actually said: where the speaker deviated from the script, keep the spoken words. The names and special terms the script contains are listed after it: a group of transcript words that sounds like one of them but is garbled (\"Kirk Gor\" for \"Kierkegaard\") is that name, so replace it with the listed spelling, unless the established Slovak or Czech spelling of the name differs."
         : "",
     );
 }
@@ -667,6 +668,7 @@ export class GeminiService {
     const template = await settingsService.getProofreadPrompt();
     const prompt = renderProofreadPrompt(template, language, scriptText);
     const lines = buildProofreadLines(words);
+    const glossary = scriptText ? scriptGlossary(scriptText, words.map((w) => w.word)) : [];
     const chunks: ProofreadLine[][] = [];
     for (let i = 0; i < lines.length; i += PROOFREAD_CHUNK_LINES) {
       chunks.push(lines.slice(i, i + PROOFREAD_CHUNK_LINES));
@@ -683,6 +685,7 @@ export class GeminiService {
       const userMessage = [
         prompt,
         ...(scriptText ? ["", "## Reference Script:", "", scriptText] : []),
+        ...(glossary.length ? ["", "## Names and terms in the script:", "", glossary.join("; ")] : []),
         "",
         "## Transcript:",
         "",
