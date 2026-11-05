@@ -72,6 +72,31 @@ describe("transcribe.py model for a chunk in another language (T11)", () => {
   });
 });
 
+describe("transcribe.py frees the resident MLX model (T22)", () => {
+  // stand-ins for mlx.core and mlx_whisper's ModelHolder: the real ones need the Python env
+  const fake = `
+import types
+cleared = []
+mx = types.ModuleType('mlx.core'); mx.clear_cache = lambda: cleared.append(1)
+holder = types.SimpleNamespace(model='weights', model_path='/m/large-v3')
+tr = types.ModuleType('mlx_whisper.transcribe'); tr.ModelHolder = holder
+for name, mod in [('mlx', types.ModuleType('mlx')), ('mlx.core', mx), ('mlx_whisper', types.ModuleType('mlx_whisper')), ('mlx_whisper.transcribe', tr)]:
+    sys.modules[name] = mod
+`;
+
+  it("drops the holder's model and clears the cache", () => {
+    expect(py(fake + "T.release_models(); print(json.dumps([holder.model, holder.model_path, len(cleared)]))")).toEqual([null, null, 1]);
+  });
+
+  it("keeps the model that is about to be used", () => {
+    expect(py(fake + "T.release_models(keep='/m/large-v3'); print(json.dumps([holder.model, len(cleared)]))")).toEqual(["weights", 0]);
+  });
+
+  it("does nothing when nothing is resident", () => {
+    expect(py(fake + "holder.model = None; T.release_models(); print(json.dumps(len(cleared)))")).toEqual(0);
+  });
+});
+
 describe("transcribe.py spells numerals for forced alignment (T23)", () => {
   it("spells Slovak and Czech cardinals as one token and keeps punctuation", () => {
     expect(py("print(json.dumps([T.spell_number(n, 'sk') for n in [0, 4, 13, 22, 73, 77, 100, 142, 1000, 2025]]))")).toEqual([
