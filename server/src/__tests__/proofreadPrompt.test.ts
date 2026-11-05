@@ -43,10 +43,24 @@ describe("renderProofreadPrompt", () => {
     expect(cs).not.toContain('"ô" where Slovak');
   });
 
-  it("an unknown language falls back to the Slovak block, as the prompt did before", () => {
+  it("the English block has no Czech-forms rule and keeps spelling variants, contractions and the written-forms rule", () => {
     const en = renderProofreadPrompt(template, "en", null);
-    expect(en).toContain("for Slovak, Czech forms that slip in");
     expect(en).toContain("a recording spoken in English");
+    expect(en).toContain("4. **Foreign spellings** — for English, a single word of another language");
+    expect(en).not.toContain("Czech forms");
+    expect(en).not.toContain("established Slovak spelling");
+    expect(en).not.toContain('"ô"');
+    expect(en).toContain('"colour"');
+    expect(en).toContain("established English spelling");
+    expect(en).toContain('"e.g." for "for example"');
+    expect(en).toContain("gonna");
+    expect(Object.keys(PROOFREAD_LANGUAGE_RULES.en)).toEqual(Object.keys(PROOFREAD_LANGUAGE_RULES.sk));
+  });
+
+  it("a language without a block still falls back to the Slovak block", () => {
+    const de = renderProofreadPrompt(template, "de", null);
+    expect(de).toContain("for Slovak, Czech forms that slip in");
+    expect(de).toContain("a recording spoken in de");
   });
 
   it("fills the script note", () => {

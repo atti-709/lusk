@@ -79,6 +79,15 @@ STOCK_PHRASES = {
         # stretch is decoded again on its own, and the Czech fine-tune writes "Děkujeme." over it instead
         "konec",
     },
+    # English: the sign-offs Whisper writes over music, silence or a talk's end (video sign-offs it was trained on).
+    # Not a bare "Thank you." or "Bye.": a speaker really says those between songs and prayers.
+    "en": {
+        "thank you for watching", "thanks for watching", "thank you very much for watching",
+        "thank you for listening", "thanks for listening", "thank you for your attention",
+        "please subscribe", "please subscribe to my channel", "subscribe to my channel",
+        "like and subscribe", "please like and subscribe", "dont forget to subscribe",
+        "subtitles by the amaraorg community",
+    },
 }
 
 
@@ -92,7 +101,7 @@ FOREIGN_SCRIPT = re.compile("[\u0400-\u04FF\u0590-\u06FF\u3040-\u30FF\u4E00-\u9F
 # 3:07-3:16) are not covered by any word, and the words after them were stamped over that audio: "kde on
 # veľmi rezonuje" showed at 188.8 s, six seconds before it is said, leaving a 6.2 s hole (T23). The
 # alignment is therefore given the numerals spelled out, one token per numeral so the words map back 1:1
-# (inflection is irrelevant: CTC only needs about the right amount of sound). Slovak and Czech only.
+# (inflection is irrelevant: CTC only needs about the right amount of sound). Slovak, Czech and English.
 _NUMBERS = {
     "sk": ("nula jeden dva tri štyri päť šesť sedem osem deväť desať jedenásť dvanásť trinásť štrnásť pätnásť "
            "šestnásť sedemnásť osemnásť devätnásť".split(),
@@ -102,6 +111,13 @@ _NUMBERS = {
            "šestnáct sedmnáct osmnáct devatenáct".split(),
            "dvacet třicet čtyřicet padesát šedesát sedmdesát osmdesát devadesát".split(),
            "sto dvěstě třista čtyřista pětset šestset sedmset osmset devětset".split(), "tisíc"),
+    # English has the same problem (T25: "Psalm 13, 22, 73, 10, 8, 77, 42 and 4" were squeezed into 1.3 s
+    # of a 6 s read-out and the next sentence stamped 4 s early); one run of letters per numeral, no hyphens
+    "en": ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+           "sixteen seventeen eighteen nineteen".split(),
+           "twenty thirty forty fifty sixty seventy eighty ninety".split(),
+           "onehundred twohundred threehundred fourhundred fivehundred sixhundred sevenhundred eighthundred ninehundred".split(),
+           "thousand"),
 }
 NUMERAL = re.compile(r"\d{1,4}")
 
@@ -503,6 +519,8 @@ def join_sentences(segments: list[dict], language: str = "sk") -> list[dict]:
 ABBREVIATIONS = {
     "sk": {"napr", "tzv", "atď", "resp", "tj", "sv", "str", "č", "kap", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"},
     "cs": {"např", "tzv", "atd", "tzn", "apod", "resp", "tj", "sv", "kap", "př", "mj", "str", "č", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"},
+    # "e.g." / "i.e." keep their inner dots (`last[:-1]` is what is looked up); "v."/"vv." are verses
+    "en": {"e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "rev", "ch", "v", "vv", "cf", "approx", "fig"},
 }
 
 

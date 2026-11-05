@@ -36,7 +36,23 @@ describe("transcribe.py per-language stock phrases and abbreviations", () => {
   });
 
   it("an unknown language uses the Slovak lists", () => {
-    expect(py("print(json.dumps([T.is_stock_phrase('Ďakujem za pozornosť.', 'en'), T.is_stock_phrase('Konec.', 'en')]))")).toEqual([true, false]);
+    expect(py("print(json.dumps([T.is_stock_phrase('Ďakujem za pozornosť.', 'de'), T.is_stock_phrase('Konec.', 'de')]))")).toEqual([true, false]);
+  });
+
+  it("English drops the sign-offs Whisper invents but not a spoken 'Thank you.'", () => {
+    expect(py("print(json.dumps([T.is_stock_phrase(t, 'en') for t in ['Thank you for watching.', 'Thanks for watching!', 'Please subscribe to my channel.', 'Subtitles by the Amara.org community', 'Thank you for watching. Thank you for watching.', 'Thank you.', 'Thank you for watching the video with me today.', 'Ďakujem za pozornosť.']]))"))
+      .toEqual([true, true, true, true, true, false, false, false]);
+  });
+
+  it("English keeps the dot of e.g./i.e./etc./Dr. before a lower-case word", () => {
+    const code = `
+segs = lambda a, b: [{"text": a}, {"text": b}]
+out = {a: T.join_sentences(segs("He said " + a, "something else"), "en")[0]["text"] for a in ["e.g.", "i.e.", "etc.", "vs.", "Dr.", "St.", "Mr.", "v."]}
+out["stop"] = T.join_sentences(segs("He said that.", "something else"), "en")[0]["text"]
+print(json.dumps(out))`;
+    const out = py(code) as Record<string, string>;
+    for (const a of ["e.g.", "i.e.", "etc.", "vs.", "Dr.", "St.", "Mr.", "v."]) expect(out[a]).toBe(`He said ${a}`);
+    expect(out.stop).toBe("He said that");
   });
 
   it("keeps the dot of a Czech abbreviation before a lower-case word, and drops a mid-sentence stop", () => {
@@ -107,6 +123,13 @@ describe("transcribe.py spells numerals for forced alignment (T23)", () => {
     );
   });
 
+  it("spells English cardinals as one token too (T25: a Psalm read-out was squeezed into 1.3 s)", () => {
+    expect(py("print(json.dumps([T.spell_number(n, 'en') for n in [0, 4, 13, 22, 73, 100, 142, 1000, 2025]]))")).toEqual([
+      "zero", "four", "thirteen", "twentytwo", "seventythree", "onehundred", "onehundredfortytwo", "thousand", "twothousandtwentyfive",
+    ]);
+    expect(py("print(json.dumps(T.spell_numerals('Psalm 13, 22 and 4. John 3:16', 'en')))")).toEqual("Psalm thirteen, twentytwo and four. John three:sixteen");
+  });
+
   it("puts numerals back when whisperx has split the segment into sentences", () => {
     const code = `
 segs = [{"text": "Mal 3,5 roka. Potom 13, 22 a 4"}]
@@ -144,7 +167,16 @@ print(json.dumps([[w["word"] for w in s["words"]] for s in aligned]))`;
   });
 
   it("each numeral stays one whitespace token; other languages and plain text are untouched", () => {
-    expect(py("t = 'v Žalmoch 13, 22, 73, 10, 8, 77, 42 a 4, kde'; print(json.dumps([len(T.spell_numerals(t, 'sk').split()) == len(t.split()), T.spell_numerals(t, 'en') == t, T.spell_numerals('bez čísel', 'sk')]))"))
+    expect(py("t = 'v Žalmoch 13, 22, 73, 10, 8, 77, 42 a 4, kde'; print(json.dumps([len(T.spell_numerals(t, 'sk').split()) == len(t.split()), T.spell_numerals(t, 'de') == t, T.spell_numerals('bez čísel', 'sk')]))"))
       .toEqual([true, true, "bez čísel"]);
+  });
+});
+
+describe("wordcheck.py dictionaries (T25)", () => {
+  it("has sk, cs and en, each with pinned .aff/.dic hashes and its licence README kept", () => {
+    const code = "import sys, json; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); import wordcheck as W\nprint(json.dumps({k: {n: (d is not None) for n, d in v.items()} for k, v in W.DICTIONARIES.items()}))";
+    const out = JSON.parse(execFileSync("python3", ["-I", "-c", code, scripts], { encoding: "utf-8" })) as Record<string, Record<string, boolean>>;
+    expect(Object.keys(out).sort()).toEqual(["cs", "en", "sk"]);
+    expect(out.en).toEqual({ "en/en_US.aff": true, "en/en_US.dic": true, "en/README_en_US.txt": false });
   });
 });
