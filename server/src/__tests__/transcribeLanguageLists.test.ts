@@ -44,6 +44,11 @@ describe("transcribe.py per-language stock phrases and abbreviations", () => {
       .toEqual([true, true, true, true, true, false, false, false]);
   });
 
+  it("English heard inside a Slovak or Czech project keeps that project's stock list (output unchanged)", () => {
+    expect(py("print(json.dumps([T.is_stock_phrase('Thanks for listening.', 'en', 'sk'), T.is_stock_phrase('Please subscribe.', 'en', 'cs'), T.is_stock_phrase('Thank you for watching.', 'en', 'sk'), T.is_stock_phrase('Thanks for listening.', 'en', 'en')]))"))
+      .toEqual([false, false, true, true]);
+  });
+
   it("English keeps the dot of e.g./i.e./etc./Dr. before a lower-case word", () => {
     const code = `
 segs = lambda a, b: [{"text": a}, {"text": b}]

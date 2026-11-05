@@ -196,7 +196,9 @@ def is_loop(text: str) -> bool:
     return False
 
 
-def is_stock_phrase(text: str, language: str = "sk") -> bool:
+def is_stock_phrase(text: str, language: str = "sk", project: str | None = None) -> bool:
+    if language == "en" and project not in (None, "en"):
+        language = "sk"  # English heard inside a Slovak/Czech project keeps those projects' lists (T25: output unchanged)
     words = plain_words(text)
     # one phrase, or the same one over and over ("Ďakujem za pozornosť. Ďakujem za pozornosť.")
     for phrase in STOCK_PHRASES.get(language, STOCK_PHRASES["sk"]):
@@ -399,6 +401,8 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
     turns = speech_turns(audio)
     total = len(audio) / SAMPLE_RATE
 
+    project = language
+
     def decode(regions, model=model, language=language, bar=None):
         """Each chunk is decoded from its own slice of the audio. mlx-whisper's own
         `clip_timestamps` never seeks to a clip's start — every clip is decoded from where
@@ -447,7 +451,7 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
                     # "hears" there is invented (E42: "Zdravíte!" stretched over the 30 s after a
                     # chunk that ended in music): keep a segment only if most of it is real audio.
                     inside = max(0.0, min(s["end"], length) - max(s["start"], 0.0)) / max(s["end"] - s["start"], 1e-3)
-                    if inside >= 0.5 and not is_stock_phrase(s["text"], language) and not FOREIGN_SCRIPT.search(s["text"]):
+                    if inside >= 0.5 and not is_stock_phrase(s["text"], language, project) and not FOREIGN_SCRIPT.search(s["text"]):
                         segments.append({"start": start + s["start"], "end": min(start + s["end"], end), "text": s["text"],
                                          "language": language})
                 bar.update(round(length * 100))
@@ -520,7 +524,7 @@ ABBREVIATIONS = {
     "sk": {"napr", "tzv", "atď", "resp", "tj", "sv", "str", "č", "kap", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"},
     "cs": {"např", "tzv", "atd", "tzn", "apod", "resp", "tj", "sv", "kap", "př", "mj", "str", "č", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"},
     # "e.g." / "i.e." keep their inner dots (`last[:-1]` is what is looked up); "v."/"vv." are verses
-    "en": {"e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "rev", "ch", "v", "vv", "cf", "approx", "fig"},
+    "en": {"e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "rev", "ch", "v", "vv", "cf", "approx", "fig", "a.m", "p.m"},
 }
 
 
@@ -578,7 +582,9 @@ def main() -> None:
     except Exception:
         align_model, metadata = whisperx.load_align_model(language_code=args.language, device="cpu")
     # numerals are aligned spelled out (see `spell_numerals`) and put back afterwards
-    spelled = [{**s, "text": spell_numerals(s["text"], s.get("language", args.language))} for s in segments]
+    # English heard inside a Slovak/Czech project is aligned by that project's model and left as it was (T25)
+    seg_lang = lambda s: s.get("language", args.language) if s.get("language", args.language) != "en" or args.language == "en" else "xx"
+    spelled = [{**s, "text": spell_numerals(s["text"], seg_lang(s))} for s in segments]
     aligned = whisperx.align(spelled, align_model, metadata, audio, "cpu",
                              return_char_alignments=False, print_progress=True)
     restore_numerals(aligned["segments"], spelled, segments)
