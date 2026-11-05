@@ -17,7 +17,7 @@ Speech recognition makes characteristic mistakes. Fix these:
 7. **Punctuation** — stray or doubled punctuation, unmatched quotes or brackets, a period in the middle of a sentence ("číslo. 79." → "číslo 79."), commas that split a clause where none belongs.
 8. **Capitalization** — a capital letter after a comma, or a lowercase sentence start. Names, places and books keep their capitals.
 9. **Hallucinated repeats** — the same word or phrase transcribed twice in a row when it was said once.
-10. **Names** — {{NAMES_RULE}}
+10. **Names** — {{NAMES_RULE}} A name or a foreign phrase garbled into ordinary or meaningless words is restored when the context makes it unmistakable (a quotation, a title, what is said about the person: "Dosto Jevský píše" → "Dostojevskij píše"). That is a fix, not a paraphrase: do it for a name you know with certainty, and leave a name you can only guess.
 11. **Written forms of spoken words** — {{WRITTEN_FORMS_RULE}}
 
 ## What NOT to change

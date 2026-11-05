@@ -3,10 +3,11 @@ import { orchestrator } from "../services/Orchestrator.js";
 import { whisperService } from "../services/WhisperService.js";
 import { tempManager } from "../services/TempManager.js";
 import { settingsService } from "../services/SettingsService.js";
-import { geminiService, wordsToTsv, msToTimestamp } from "../services/GeminiService.js";
+import { geminiService, wordsToTsv, msToTimestamp, stripEmbeddedImages } from "../services/GeminiService.js";
 import { parseTsv, wordsToCaptions, groupCaptionBlocks, geminiClipsToViralClips } from "./align.js";
 import { dropStrayStops, keepForeignSpeech } from "../services/alignCorrection.js";
 import { guardSpokenForms } from "../services/spokenForms.js";
+import { restoreScriptDiacritics } from "../services/scriptForms.js";
 import { DEFAULT_PROJECT_LANGUAGE } from "@lusk/shared";
 import type { TranscribeRequest, ErrorResponse, ViralClip, TranscriptWord, TranslatedBlock } from "@lusk/shared";
 
@@ -105,6 +106,7 @@ export async function runGeminiAutomation(
     // 2. Proofread: a sparse word-level pass that catches what the row-for-row
     //    correction misses (and is the only correction a script-less project gets)
     words = dropStrayStops(await proofread(sessionId, words, session.scriptText ?? null, signal));
+    words = restoreScriptDiacritics(words, session.scriptText ? stripEmbeddedImages(session.scriptText) : null);
     words = keepForeignSpeech(rawTranscript.words, words);
     words = await guardSpokenForms(rawTranscript.words, words, session.language);
 

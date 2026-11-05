@@ -87,16 +87,22 @@ function editDistance(a: string, b: string): number {
 
 /** True when an edit reads as a rewrite rather than a correction. */
 function isRewrite(find: string[], replace: string[]): boolean {
-  if (replace.length > find.length + 3) return true;
+  // a lone dash or bullet in `replace` (the script's own "–") is no word
+  const wordCount = (t: string[]) => t.filter((x) => /[\p{L}\p{N}]/u.test(x)).length;
+  if (wordCount(replace) > wordCount(find) + 3) return true;
   if (find.length < 3) return false; // a single mishearing may change the whole word
   const a = normalize(find.join(" "));
   const b = normalize(replace.join(" "));
   return editDistance(a, b) > MAX_REWRITE_RATIO * Math.max(a.length, b.length);
 }
 
-/** A token with the commas and full stops attached to it removed — what a `find` may omit. */
+/**
+ * A token with the punctuation attached to its end removed — what a `find` may omit (a comma, a
+ * full stop, a colon: "Irénysleonu:" quoted as "Irénysleonu", E64). Commas and full stops inside the
+ * token ("1.5", "a.m.") are dropped too, as before.
+ */
 function looseKey(token: string): string {
-  return token.normalize("NFC").replace(/[,.]/g, "");
+  return token.normalize("NFC").replace(/[^\p{L}\p{N}]+$/u, "").replace(/[,.]/g, "");
 }
 
 /** The punctuation a token ends in ("zhromáždění," → ","), quotes and brackets included. */
