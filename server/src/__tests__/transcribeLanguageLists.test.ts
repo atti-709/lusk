@@ -72,6 +72,14 @@ describe("transcribe.py model for a chunk in another language (T11)", () => {
   });
 });
 
+describe("transcribe.py Czech stock phrases (T23)", () => {
+  it("drops a segment that is only a lone Děkujeme., not one that thanks for something", () => {
+    expect(py("print(json.dumps([T.is_stock_phrase(t, 'cs') for t in ['Děkujeme.', 'Konec.', 'Děkujeme za pozornost.', 'Děkujeme ti za to.', 'Děkuji.']]))"))
+      .toEqual([true, true, true, false, false]);
+    expect(py("print(json.dumps([T.is_stock_phrase(t, 'sk') for t in ['Ďakujeme.', 'Ďakujem za pozornosť.']]))")).toEqual([false, true]);
+  });
+});
+
 describe("transcribe.py frees the resident MLX model (T22)", () => {
   // stand-ins for mlx.core and mlx_whisper's ModelHolder: the real ones need the Python env
   const fake = `
