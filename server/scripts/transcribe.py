@@ -35,6 +35,18 @@ LANGUAGE_MODELS = {
 OTHER_LANGUAGE_MIN_P = 0.6
 
 
+def model_for_language(model: str, language: str) -> str:
+    """The model that decodes a chunk in `language` inside speech `model` is the fine-tune for. Slovak and
+    Czech each have a fine-tune (T9, T11), so a Czech passage in a Slovak talk (E55's psalm, the Czech
+    church of yeAh-T1A2Gg) goes to `large-v3-cs` and a Slovak passage in a Czech talk to
+    `large-v3-turbo-sk`. Every other language (English...) stays with the project model's base model.
+    MLX holds one model at a time (ModelHolder), so this swaps models and adds no resident one."""
+    for name, (_, lang, _base) in LANGUAGE_MODELS.items():
+        if lang == language and name != model:
+            return name
+    return LANGUAGE_MODELS[model][2]
+
+
 def phase(name: str) -> None:
     print(f"PHASE {name}", flush=True)
 
@@ -325,7 +337,9 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
         return segments
 
     def routed(chunks):
-        """A fine-tuned model decodes its own language; the base model every chunk in another one."""
+        """A fine-tuned model decodes its own language; a chunk in another one goes to that language's
+        fine-tune if there is one (sk <-> cs), else to the base model. The base model judges the language;
+        the 0.6 threshold stays (T11: no chunk of either probe sat between the languages)."""
         if model not in LANGUAGE_MODELS or language != LANGUAGE_MODELS[model][1]:
             return decode(chunks)
         import tqdm
@@ -334,13 +348,18 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
         langs = chunk_languages(audio, chunks, base, language)
         others = sorted({l for l in langs if l != language})
         if others:
-            print(f"{sum(l != language for l in langs)} of {len(chunks)} chunks in {', '.join(others)}: base model", file=sys.stderr)
+            print(f"{sum(l != language for l in langs)} of {len(chunks)} chunks in {', '.join(others)}: {', '.join(model_for_language(model, o) for o in others)}", file=sys.stderr)
         clips = as_clips(chunks, total)
         with tqdm.tqdm(total=round(sum(b - a for a, b in zip(clips[::2], clips[1::2])) * 100), unit="frames") as bar:
             segments = decode([c for c, l in zip(chunks, langs) if l == language], bar=bar)
             foreign = []
             for other in others:
-                foreign += decode([c for c, l in zip(chunks, langs) if l == other], base, other, bar=bar)
+                mine = [c for c, l in zip(chunks, langs) if l == other]
+                try:
+                    foreign += decode(mine, model_for_language(model, other), other, bar=bar)
+                except Exception as e:  # the other fine-tune can't be fetched or converted (offline, disk): as before, the base model
+                    print(f"{model_for_language(model, other)} unavailable ({e}): base model", file=sys.stderr)
+                    foreign += decode(mine, base, other, bar=bar)
         # a chunk is up to 30 s: a sentence of the own language inside a foreign chunk (the line before
         # E35's Czech appeal, "A jediné miesto…", came back as Czech "město") is decoded again by the fine-tune
         if foreign:
