@@ -44,10 +44,26 @@ describe("restoreScriptDiacritics (E71 evanjelia)", () => {
     expect(text(restoreScriptDiacritics(words("kde evanjelia nikdy"), script))).toBe("kde evanjelia nikdy");
   });
 
+  it("needs both neighbouring pairs, not one, when the three-word context is not in the script", () => {
+    const heard = words("posolstvo evanjelia a listov");
+    expect(text(restoreScriptDiacritics(heard, E71_SCRIPT))).toBe("posolstvo evanjelia a listov");
+    expect(text(restoreScriptDiacritics(words("nie samotné evanjelia a listy"), E71_SCRIPT))).toBe("nie samotné evanjeliá a listy");
+  });
+
   it("keeps timings", () => {
     const heard = words("že evanjelia boli napísané");
     const out = restoreScriptDiacritics(heard, E71_SCRIPT);
     expect(out.map((w) => [w.startMs, w.endMs])).toEqual(heard.map((w) => [w.startMs, w.endMs]));
+  });
+});
+
+describe("an opening quote in front of a proposed name", () => {
+  it("is not matched loosely (the quote would be lost), the edit must quote it", () => {
+    const ws = words("tvrdí „Crap Groeschel, že");
+    const r = applyProofreadEdits(ws, buildProofreadLines(ws), [{ line: 1, find: "Crap Groeschel", replace: "Craig Groeschel" }]);
+    expect(r.rejected).toHaveLength(1);
+    const ok = applyProofreadEdits(ws, buildProofreadLines(ws), [{ line: 1, find: "„Crap Groeschel,", replace: "„Craig Groeschel," }]);
+    expect(text(ok.words)).toBe("tvrdí „Craig Groeschel, že");
   });
 });
 

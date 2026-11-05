@@ -85,11 +85,17 @@ export function restoreScriptDiacritics<T extends Word>(words: T[], script: stri
       found = true;
       f.forEach((_, form) => forms.add(form));
     };
-    if (prev && next) take(tri, `${prev} ${hp} ${next}`);
-    if (!found) {
-      if (prev) take(left, `${prev} ${hp}`);
-      if (next) take(right, `${hp} ${next}`);
-    }
+    if (prev && next) {
+      take(tri, `${prev} ${hp} ${next}`);
+      // without the three-word context, both neighbouring pairs must be in the script and agree:
+      // one matching neighbour is not enough ("posolstvo evanjelia a listov" is a genitive)
+      if (!found) {
+        const l = left.get(`${prev} ${hp}`);
+        const r = right.get(`${hp} ${next}`);
+        if (l && r) { found = true; [...l.keys(), ...r.keys()].forEach((f) => forms.add(f)); }
+      }
+    } else if (prev) take(left, `${prev} ${hp}`);
+    else if (next) take(right, `${hp} ${next}`);
     if (!found || forms.size !== 1) continue;
     const [form] = forms;
     if (!addsDiacritics(h, form)) continue;

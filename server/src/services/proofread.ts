@@ -95,12 +95,12 @@ function isRewrite(find: string[], replace: string[]): boolean {
 }
 
 /**
- * A token with the punctuation attached to its ends removed — what a `find` may omit (a comma, a
+ * A token with the punctuation attached to its end removed — what a `find` may omit (a comma, a
  * full stop, a colon: "Irénysleonu:" quoted as "Irénysleonu", E64). Commas and full stops inside the
  * token ("1.5", "a.m.") are dropped too, as before.
  */
 function looseKey(token: string): string {
-  return token.normalize("NFC").replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").replace(/[,.]/g, "");
+  return token.normalize("NFC").replace(/[^\p{L}\p{N}]+$/u, "").replace(/[,.]/g, "");
 }
 
 /** The punctuation a token ends in ("zhromáždění," → ","), quotes and brackets included. */
