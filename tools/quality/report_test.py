@@ -249,6 +249,38 @@ def test_heavy_check_and_lock():
         rp.acquire_lock(path=p)()  # a dead holder's lock is stale and taken over
 
 
+def clean_spans(a, b):
+    return rp.spans(W(a), W(b), ignore=rp.clean_diff)
+
+
+def test_clean_text_filter():
+    base = "ale vieme že to je pravda a veríme tomu"
+    # a stutter or repeat dropped (either side), also a repeated phrase
+    assert clean_spans("ale vieme že že to je pravda a veríme tomu", base) == []
+    assert clean_spans(base, "ale vieme že že to je pravda a veríme tomu") == []
+    assert clean_spans("to je to je pravda a veríme tomu", "to je pravda a veríme tomu") == []
+    # a sentence-initial A / No / Tak dropped or kept; mid-sentence it is a real word
+    assert clean_spans("Povedal to. A ona prišla domov dnes", "Povedal to. Ona prišla domov dnes") == []
+    assert clean_spans("No tak prišla domov dnes ráno", "Tak prišla domov dnes ráno") == []
+    assert clean_spans("Ona prišla domov dnes ráno", "A ona prišla domov dnes ráno") == [], "at the start of the text"
+    assert len(clean_spans("videl som ho a ona prišla domov dnes", "videl som ho ona prišla domov dnes")) == 1
+    assert clean_spans("už už už to je pravda dnes", "už to je pravda dnes") == []
+    # a numeral against the number in words, both ways; a different number is a real difference
+    assert clean_spans("bolo ich 21 v miestnosti dnes", "bolo ich dvadsaťjeden v miestnosti dnes") == []
+    assert clean_spans("bolo ich dvadsať jeden v miestnosti dnes", "bolo ich 21 v miestnosti dnes") == []
+    assert clean_spans("je ich 3 tu dnes", "je ich tri tu dnes") == []
+    assert clean_spans("v roku 2020 sa stalo", "v roku dve tisíc dvadsať sa stalo") == []
+    assert len(clean_spans("je ich 3 tu dnes", "je ich štyri tu dnes")) == 1
+    assert len(clean_spans("je ich 3 tu dnes", "je ich druhí tu dnes")) == 1
+    # real word differences, and colloquial Czech forms, stay spans
+    assert len(clean_spans("ten člověk který přišel", "ten člověk kterej přišel")) == 1
+    assert len(clean_spans("to bolo v shromáždění dnes", "to bolo v zhromáždění dnes")) == 1
+    assert len(clean_spans("poďme tam hneď teraz", "poďme sem hneď teraz")) == 1
+    assert len(clean_spans("poďme tam hneď teraz", "poďme hneď teraz")) == 1, "a dropped content word is real"
+    # judge_item counts what the rules settled
+    assert "clean-text" in rp.JUDGE_RULES_VERSION and "CLEAN TEXT" in rp.JUDGE_PROMPT
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
