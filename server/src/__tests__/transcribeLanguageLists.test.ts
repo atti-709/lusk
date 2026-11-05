@@ -71,3 +71,43 @@ describe("transcribe.py model for a chunk in another language (T11)", () => {
       .toEqual(["large-v3-turbo", "large-v3"]);
   });
 });
+
+describe("transcribe.py spells numerals for forced alignment (T23)", () => {
+  it("spells Slovak and Czech cardinals as one token and keeps punctuation", () => {
+    expect(py("print(json.dumps([T.spell_number(n, 'sk') for n in [0, 4, 13, 22, 73, 77, 100, 142, 1000, 2025]]))")).toEqual([
+      "nula", "štyri", "trinásť", "dvadsaťdva", "sedemdesiattri", "sedemdesiatsedem", "sto", "stoštyridsaťdva", "tisíc", "dvatisícdvadsaťpäť",
+    ]);
+    expect(py("print(json.dumps(T.spell_numerals('v Žalmoch 13, 42 a 4. Jn 3:16', 'cs')))")).toEqual(
+      "v Žalmoch třináct, čtyřicetdva a čtyři. Jn tři:šestnáct",
+    );
+  });
+
+  it("puts numerals back when whisperx has split the segment into sentences", () => {
+    const code = `
+segs = [{"text": "Mal 3,5 roka. Potom 13, 22 a 4"}]
+spelled = [{"text": T.spell_numerals(segs[0]["text"], "sk")}]
+aligned = [{"text": "Mal tri,päť roka.", "words": [{"word": "Mal"}, {"word": "tri,päť"}, {"word": "roka."}]},
+           {"text": "Potom trinásť, dvadsaťdva a štyri", "words": [{"word": "Potom"}, {"word": "trinásť,"}, {"word": "dvadsaťdva"}, {"word": "a"}, {"word": "štyri"}]}]
+T.restore_numerals(aligned, spelled, segs)
+print(json.dumps([[w["word"] for s in aligned for w in s["words"]], [s["text"] for s in aligned]]))`;
+    expect(py(code)).toEqual([
+      ["Mal", "3,5", "roka.", "Potom", "13,", "22", "a", "4"],
+      ["Mal 3,5 roka.", "Potom 13, 22 a 4"],
+    ]);
+  });
+
+  it("a plain word equal to a spelled numeral keeps its place", () => {
+    const code = `
+segs = [{"text": "Ešte jeden verš, Žalm 1"}]
+spelled = [{"text": T.spell_numerals(segs[0]["text"], "sk")}]
+aligned = [{"text": spelled[0]["text"], "words": [{"word": w} for w in spelled[0]["text"].split()]}]
+T.restore_numerals(aligned, spelled, segs)
+print(json.dumps([w["word"] for w in aligned[0]["words"]]))`;
+    expect(py(code)).toEqual(["Ešte", "jeden", "verš,", "Žalm", "1"]);
+  });
+
+  it("each numeral stays one whitespace token; other languages and plain text are untouched", () => {
+    expect(py("t = 'v Žalmoch 13, 22, 73, 10, 8, 77, 42 a 4, kde'; print(json.dumps([len(T.spell_numerals(t, 'sk').split()) == len(t.split()), T.spell_numerals(t, 'en') == t, T.spell_numerals('bez čísel', 'sk')]))"))
+      .toEqual([true, true, "bez čísel"]);
+  });
+});

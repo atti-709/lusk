@@ -86,6 +86,71 @@ STOCK_PHRASES = {
 FOREIGN_SCRIPT = re.compile("[\u0400-\u04FF\u0590-\u06FF\u3040-\u30FF\u4E00-\u9FFF]")
 
 
+# Forced alignment (wav2vec2) cannot place a digit: each one is a wildcard that takes a single frame, so
+# the seconds a speaker spends reading numbers out ("v Žalmoch 13, 22, 73, 10, 8, 77, 42 a 4", rtCpPRtYADU
+# 3:07-3:16) are not covered by any word, and the words after them were stamped over that audio: "kde on
+# veľmi rezonuje" showed at 188.8 s, six seconds before it is said, leaving a 6.2 s hole (T23). The
+# alignment is therefore given the numerals spelled out, one token per numeral so the words map back 1:1
+# (inflection is irrelevant: CTC only needs about the right amount of sound). Slovak and Czech only.
+_NUMBERS = {
+    "sk": ("nula jeden dva tri štyri päť šesť sedem osem deväť desať jedenásť dvanásť trinásť štrnásť pätnásť "
+           "šestnásť sedemnásť osemnásť devätnásť".split(),
+           "dvadsať tridsať štyridsať päťdesiat šesťdesiat sedemdesiat osemdesiat deväťdesiat".split(),
+           "sto dvesto tristo štyristo päťsto šesťsto sedemsto osemsto deväťsto".split(), "tisíc"),
+    "cs": ("nula jedna dva tři čtyři pět šest sedm osm devět deset jedenáct dvanáct třináct čtrnáct patnáct "
+           "šestnáct sedmnáct osmnáct devatenáct".split(),
+           "dvacet třicet čtyřicet padesát šedesát sedmdesát osmdesát devadesát".split(),
+           "sto dvěstě třista čtyřista pětset šestset sedmset osmset devětset".split(), "tisíc"),
+}
+NUMERAL = re.compile(r"\d{1,4}")
+
+
+def spell_number(n: int, language: str) -> str:
+    """A cardinal 0-9999 as one run of letters (no spaces), in Slovak or Czech."""
+    low, tens, hundreds, thousand = _NUMBERS[language]
+    out = ""
+    if n >= 1000:
+        out += ("" if n // 1000 == 1 else low[n // 1000]) + thousand
+        n %= 1000
+    if n >= 100:
+        out += hundreds[n // 100 - 1]
+        n %= 100
+    if n >= 20:
+        out += tens[n // 10 - 2]
+        n %= 10
+        if n:
+            out += low[n]
+    elif n or not out:
+        out += low[n]
+    return out
+
+
+def spell_numerals(text: str, language: str) -> str:
+    """`text` with every digit run spelled out for alignment; a token keeps its place and its punctuation."""
+    if language not in _NUMBERS:
+        return text
+    return NUMERAL.sub(lambda m: spell_number(int(m.group()), language), text)
+
+
+def restore_numerals(aligned: list[dict], spelled: list[dict], segments: list[dict]) -> None:
+    """Puts the numerals back into aligned segments that were given `spelled` text. whisperx splits a
+    segment into its sentences, so the words are walked in order against every token of the originals
+    (a plain "jeden" before a "1" stays "jeden"); a word whisperx left out is skipped, not matched twice."""
+    tokens = [pair for sp, s in zip(spelled, segments) for pair in zip(sp["text"].split(), s["text"].split())]
+    i = 0
+    for seg in aligned:
+        changed = False
+        for word in seg.get("words", []):
+            for j in range(i, min(i + 4, len(tokens))):
+                if tokens[j][0] == word["word"]:
+                    i = j + 1
+                    if tokens[j][1] != word["word"]:
+                        word["word"], changed = tokens[j][1], True
+                    break
+        if changed:
+            seg["text"] = " ".join(w["word"] for w in seg["words"])
+
+
 def is_loop(text: str) -> bool:
     """Whisper stuck repeating itself: a unit of 1-4 words five times or more in a row (the Slovak
     model, E00 37:10: "Tak," 24 times over speech turbo heard as "No, tak bude vedieť...")."""
@@ -454,8 +519,11 @@ def main() -> None:
         align_model, metadata = whisperx.load_align_model(language_code=args.language, device="cpu", model_cache_only=True)
     except Exception:
         align_model, metadata = whisperx.load_align_model(language_code=args.language, device="cpu")
-    aligned = whisperx.align(segments, align_model, metadata, audio, "cpu",
+    # numerals are aligned spelled out (see `spell_numerals`) and put back afterwards
+    spelled = [{**s, "text": spell_numerals(s["text"], s.get("language", args.language))} for s in segments]
+    aligned = whisperx.align(spelled, align_model, metadata, audio, "cpu",
                              return_char_alignments=False, print_progress=True)
+    restore_numerals(aligned["segments"], spelled, segments)
 
     # each aligned segment keeps the language it was decoded in (by overlap with the decoded ones):
     # the host leaves speech in another language as it was heard, never "corrected" into this one
