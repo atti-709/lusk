@@ -76,8 +76,9 @@ STOCK_PHRASES = {
         "thank you for watching", "thank you for your attention",
         "titulky vytvoril johnyx",
         # w6O75HIIRh0 26:36 "Konec." over a 2 s pause (-60 dBFS RMS, speech there is -35; T23): dropped, the
-        # stretch is decoded again on its own, and the Czech fine-tune writes "Děkujeme." over it instead
-        "konec",
+        # stretch is decoded again on its own, and the Czech fine-tune writes "Děkujeme." over it instead;
+        # the owner confirmed the pause by ear (2026-11-05), so a lone "Děkujeme." goes too
+        "konec", "dekujeme",
     },
 }
 
