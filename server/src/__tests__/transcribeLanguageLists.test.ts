@@ -59,3 +59,15 @@ print(json.dumps([T.join_sentences(segs("Povedal napr.", "niečo"))[0]["text"], 
     expect(py(code)).toEqual(["Povedal napr.", "Povedal např"]);
   });
 });
+
+describe("transcribe.py model for a chunk in another language (T11)", () => {
+  it("decodes Czech in a Slovak talk with the Czech fine-tune and Slovak in a Czech talk with the Slovak one", () => {
+    expect(py("print(json.dumps([T.model_for_language('large-v3-turbo-sk', 'cs'), T.model_for_language('large-v3-cs', 'sk')]))"))
+      .toEqual(["large-v3-cs", "large-v3-turbo-sk"]);
+  });
+
+  it("leaves every other language with the project model's base model", () => {
+    expect(py("print(json.dumps([T.model_for_language('large-v3-turbo-sk', 'en'), T.model_for_language('large-v3-cs', 'en')]))"))
+      .toEqual(["large-v3-turbo", "large-v3"]);
+  });
+});
