@@ -96,3 +96,30 @@ export async function guardSpokenForms<T extends Word>(heard: Word[], words: T[]
   if (kept) console.log(`[spoken forms] kept ${kept} heard ending${kept === 1 ? "" : "s"} the correction had changed`);
   return guarded;
 }
+
+const marks = (w: string) => [...w.normalize("NFC")].filter((c) => plain(c) !== c.toLowerCase()).length;
+
+/**
+ * The heard word where the correction only stripped its diacritics ("poznať" → "poznat", E52: the
+ * script is partly typed without them). Same letters once diacritics are removed, fewer diacritics
+ * than the heard word; the corrected word's case, punctuation and quotes stay. A correction that
+ * adds or changes a diacritic is not touched (`restoreScriptDiacritics` and the passes own those).
+ */
+export function keepHeardDiacritics<T extends Word>(heard: Word[], words: T[]): T[] {
+  const byTime = new Map(heard.map((h) => [`${h.startMs}-${h.endMs}`, core(h.word).normalize("NFC")]));
+  let kept = 0;
+  const out = words.map((w) => {
+    const h = byTime.get(`${w.startMs}-${w.endMs}`);
+    const c = core(w.word).normalize("NFC");
+    if (!h || !c || h === c || h.length !== c.length || !/^\p{L}+$/u.test(h) || !/^\p{L}+$/u.test(c)) return w;
+    if (plain(h) !== plain(c) || marks(c) >= marks(h)) return w;
+    // every char of the correction is the heard char or its plain letter
+    const chars = [...h];
+    if (![...c].every((ch, i) => ch.toLowerCase() === chars[i].toLowerCase() || plain(chars[i]) === ch.toLowerCase())) return w;
+    const restored = [...c].map((ch, i) => (ch !== ch.toLowerCase() ? chars[i].toUpperCase() : chars[i].toLowerCase())).join("");
+    kept++;
+    return { ...w, word: w.word.normalize("NFC").replace(c, restored) };
+  });
+  if (kept) console.log(`[script forms] kept ${kept} heard diacritic${kept === 1 ? "" : "s"} the correction had stripped`);
+  return kept ? out : words;
+}

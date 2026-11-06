@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { keepSpokenForms } from "../services/spokenForms.js";
+import { keepSpokenForms, keepHeardDiacritics } from "../services/spokenForms.js";
 
 const at = (words: string[]) => words.map((word, i) => ({ word, startMs: i * 300, endMs: i * 300 + 250 }));
 const REAL = new Set(["neverím", "neveríme", "kameň", "kameňom", "nebol", "Vedieť", "Vedec", "ale", "alebo", "rôzni", "rôzny", "hľadajú", "hľadaj"]);

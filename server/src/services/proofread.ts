@@ -130,12 +130,18 @@ function legitimateDeletion(lineTokens: string[], at: number, find: string[], re
 }
 
 /**
- * A token with the punctuation attached to its end removed — what a `find` may omit (a comma, a
- * full stop, a colon: "Irénysleonu:" quoted as "Irénysleonu", E64). Commas and full stops inside the
+ * A token with the punctuation attached to its end and start removed — what a `find` may omit (a
+ * comma, a full stop, a colon: "Irénysleonu:" quoted as "Irénysleonu", E64; an opening quote the
+ * correction added: „strom quoted as strom, E52). Commas and full stops inside the
  * token ("1.5", "a.m.") are dropped too, as before.
  */
 function looseKey(token: string): string {
-  return token.normalize("NFC").replace(/[^\p{L}\p{N}]+$/u, "").replace(/[,.]/g, "");
+  return token.normalize("NFC").replace(/^[^\p{L}\p{N}]+/u, "").replace(/[^\p{L}\p{N}]+$/u, "").replace(/[,.]/g, "");
+}
+
+/** The punctuation a token starts with ("„strom" → "„"), quotes and brackets included. */
+function leadingPunct(token: string): string {
+  return token.match(/^[^\p{L}\p{N}]+/u)?.[0] ?? "";
 }
 
 /** The punctuation a token ends in ("zhromáždění," → ","), quotes and brackets included. */
@@ -186,6 +192,10 @@ function keepLinePunctuation(old: string[], find: string[], replace: string[]): 
   while (q < find.length - p && q < replace.length - p && same(find[find.length - 1 - q], replace[replace.length - 1 - q])) q++;
   for (let i = 0; i < p; i++) out[i] = old[i];
   for (let i = 0; i < q; i++) out[out.length - 1 - i] = old[old.length - 1 - i];
+  // the first changed word keeps the opening quote or bracket `find` left out
+  if (p < find.length - q && p < replace.length - q && leadingPunct(find[p]) !== leadingPunct(old[p]) && leadingPunct(replace[p]) === "") {
+    out[p] = leadingPunct(old[p]) + replace[p];
+  }
   const lost = (i: number) => trailingPunct(find[i]) !== trailingPunct(old[i]); // `find` left old[i]'s punctuation out
   const middleEnd = replace.length - q;
   if (middleEnd === p && p > 0 && p < find.length) {
@@ -195,7 +205,7 @@ function keepLinePunctuation(old: string[], find: string[], replace: string[]): 
   } else if (find.length === replace.length) {
     // one word for one word: each changed word keeps the punctuation `find` left out
     for (let i = p; i < replace.length - q; i++) {
-      if (lost(i) && trailingPunct(replace[i]) === "") out[i] = replace[i] + trailingPunct(old[i]);
+      if (lost(i) && trailingPunct(replace[i]) === "") out[i] = out[i] + trailingPunct(old[i]);
     }
   } else if (q === 0 && lost(find.length - 1)) {
     // the replaced span's last word carried punctuation `find` left out: it moves to the new last word
