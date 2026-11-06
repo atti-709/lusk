@@ -151,7 +151,7 @@ Claude has full testing control over the Electron app via Playwright (`electron/
 * **Headless:** `launchLusk({ headless: true })` (`LUSK_HEADLESS=1`) runs the engine with no window, no Dock icon and no focus; `window` is `null`, drive the app through `api()`. Batch and quality runs (`batch-episodes.ts`) use it so no window opens on the owner's desktop. `npx tsx e2e/headless-run.ts <video> [dev|packaged]` runs transcribe → render headless.
 * **Ad hoc:** write a throwaway script that imports the harness by absolute path, run it with `npx tsx` from `electron/`, and take `window.screenshot()` to inspect the UI visually.
 * **Fixtures:** `sampleVideo()` (`electron/e2e/fixtures.ts`) generates a 5s synthetic clip via ffmpeg (no speech — use a real podcast clip to exercise transcription).
-* **Main-process env overrides** (`electron/src/main.ts`): `LUSK_PORT` (preferred port, default 3000 — the app falls back to the next port free on both IPv4 and IPv6), `LUSK_USER_DATA_DIR`, `LUSK_PYTHON_ENV_DIR`, `LUSK_DISABLE_AUTO_UPDATE=1`, `LUSK_HEADLESS=1` (no window, no Dock icon, keeps running without windows; errors go to stderr and the exit code is 1 instead of dialogs; a Python env that isn't ready exits with a message instead of showing the setup window).
+* **Main-process env overrides** (`electron/src/main.ts`): `LUSK_PORT` (preferred port, default 3000 — the app falls back to the next port free on 127.0.0.1), `LUSK_USER_DATA_DIR`, `LUSK_PYTHON_ENV_DIR`, `LUSK_DISABLE_AUTO_UPDATE=1`, `LUSK_HEADLESS=1` (no window, no Dock icon, keeps running without windows; errors go to stderr and the exit code is 1 instead of dialogs; a Python env that isn't ready exits with a message instead of showing the setup window).
 
 ## **Distribution (Electron)**
 
@@ -202,6 +202,15 @@ The DMG build has a different runtime environment than `npm run dev`. Common iss
 * **No npm workspace symlinks:** The `@lusk/shared` workspace package isn't linked in the bundle. `bundle.ts` must copy `shared/` into `client/node_modules/@lusk/shared` so Remotion's webpack bundler can resolve it at render time.
 * **Child processes:** long-running Python helpers run in their own process groups (`ChildProcesses.ts`) so cancel kills everything they started; the server stops all jobs on SIGTERM, and Electron spawns the server detached and signals its whole group on quit — otherwise quitting mid-job orphaned WhisperX / headless Chrome.
 * **Fastify empty body rejection:** `POST` requests with `Content-Type: application/json` and no body cause a 400 error. Don't set the JSON content-type header on requests that send no body.
+
+### Security (local server)
+
+* **Bind:** the server listens on `127.0.0.1` only (never `0.0.0.0`); the app, harness and Remotion all use `http://127.0.0.1:{port}` (not `localhost`, so cookies and origins agree). The Host header must be `127.0.0.1:{port}` or `localhost:{port}` (DNS rebinding).
+* **Token:** Electron makes a random `LUSK_TOKEN` per launch (`main.ts`) and passes it to the server; `server/src/auth.ts` rejects every request (API, `/static`, SSE, the SPA) without it (401). The server refuses to start without `LUSK_TOKEN` unless `LUSK_AUTH_DISABLED=1`.
+* **How it travels:** the window opens `/?lusk_token=…`, the server answers with an HttpOnly `SameSite=Strict` cookie `lusk_token_{port}` (port in the name so two instances don't share it) and redirects to the clean URL, so `fetch`, `EventSource`, `<video>` and the Remotion Player need no client code. Scripts send the `x-lusk-token` header (`lusk.fetch()` / `lusk.api()` in the harness, which reads the token from the main process). Remotion's headless Chrome and compositor cannot send headers or cookies: `RenderService` puts `?lusk_token=` on the segment and outro URLs it hands them (`withToken`).
+* **CORS:** only the app's own origins (plus `LUSK_ALLOWED_ORIGINS`), or a request carrying a valid query token (Remotion's browser).
+* **Dev (`npm run dev`):** the server script defaults `LUSK_TOKEN=lusk-dev-token` and allows the Vite origin; Vite's proxy (`client/vite.config.ts`) adds the header. Override both with the same `LUSK_TOKEN` env var if wanted.
+* **New route or media URL:** nothing to do for routes (the hook is global); a URL that a non-browser or headless process fetches must go through `withToken`.
 
 ### Python Environment (Managed via uv)
 

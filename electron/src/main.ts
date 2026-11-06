@@ -3,9 +3,17 @@ import { autoUpdater } from "electron-updater";
 import { spawn, execSync, ChildProcess } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 
 const PREFERRED_PORT = parseInt(process.env.LUSK_PORT ?? "3000", 10);
+/**
+ * Random per launch. The server only answers requests that carry it: the window gets it as
+ * a cookie (set by the server when the page is opened with ?lusk_token=), API calls from this
+ * process send it as a header, Remotion's browser gets it on its media URLs.
+ */
+const TOKEN = randomBytes(32).toString("hex");
+const AUTH_HEADERS = { "x-lusk-token": TOKEN };
 /** Resolved in app.whenReady() — falls back past ports held by other apps. */
 let PORT = PREFERRED_PORT;
 let serverProcess: ChildProcess | null = null;
@@ -78,9 +86,9 @@ app.on("open-file", (event, filePath) => {
 
 async function openLuskFile(filePath: string): Promise<void> {
   try {
-    const res = await fetch(`http://localhost:${PORT}/api/projects/open`, {
+    const res = await fetch(`http://127.0.0.1:${PORT}/api/projects/open`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...AUTH_HEADERS },
       body: JSON.stringify({ projectPath: filePath }),
     });
 
@@ -137,13 +145,15 @@ function canListen(port: number, host: string): Promise<boolean> {
 }
 
 /**
- * First port from `preferred` that is free on both IPv4 and IPv6. Checking
- * IPv6 matters: `localhost` resolves to ::1 first, so another app on [::]:3000
- * would answer our requests even though the server's 0.0.0.0 bind succeeds.
+ * First port from `preferred` that is free on 127.0.0.1 (the only address the server binds
+ * and this app talks to) and on IPv6. `exclusive` makes the probe fail if any other process
+ * (an older Lusk, another app on 0.0.0.0) holds the port, so two instances never collide.
+ * IPv6 is still checked so a dev server on [::]:3000 is left alone, whatever `localhost`
+ * resolves to in the user's browser or tools.
  */
 async function findFreePort(preferred: number, attempts = 50): Promise<number> {
   for (let port = preferred; port < preferred + attempts; port++) {
-    if ((await canListen(port, "0.0.0.0")) && (await canListen(port, "::"))) return port;
+    if ((await canListen(port, "127.0.0.1")) && (await canListen(port, "::"))) return port;
   }
   throw new Error(`No free port in ${preferred}-${preferred + attempts - 1}`);
 }
@@ -151,7 +161,7 @@ async function findFreePort(preferred: number, attempts = 50): Promise<number> {
 async function waitForServer(retries = 30, delayMs = 500): Promise<void> {
   for (let i = 0; i < retries; i++) {
     try {
-      const res = await fetch(`http://localhost:${PORT}/api/health`);
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/health`, { headers: AUTH_HEADERS });
       if (res.ok) return;
     } catch {
       // Server not ready yet
@@ -185,12 +195,13 @@ async function startServer(): Promise<void> {
     HOME: app.getPath("home"), // Finder-launched apps may have HOME=/ which breaks Remotion's ~/.remotion cache
     NODE_ENV: app.isPackaged ? "production" : "development",
     LUSK_PORT: String(PORT),
+    LUSK_TOKEN: TOKEN,
     LUSK_TEMP_DIR: tempDir,
     LUSK_REGISTRY_DIR: path.join(app.getPath("userData")),
     LUSK_CLIENT_DIST: clientDist,
     LUSK_PUBLIC_DIR: publicDir,
     LUSK_REMOTION_ENTRY: remotionEntry,
-    LUSK_SERVER_ORIGIN: `http://localhost:${PORT}`,
+    LUSK_SERVER_ORIGIN: `http://127.0.0.1:${PORT}`,
     LUSK_PYTHON_ENV_DIR:
       process.env.LUSK_PYTHON_ENV_DIR ?? path.join(app.getPath("userData"), "python-env"),
   };
@@ -333,7 +344,7 @@ document.getElementById("skipBtn").addEventListener("click",()=>ipcRenderer.send
 async function ensurePythonEnv(): Promise<void> {
   // Check if Python env is already set up
   try {
-    const statusRes = await fetch(`http://localhost:${PORT}/api/python-env/status`);
+    const statusRes = await fetch(`http://127.0.0.1:${PORT}/api/python-env/status`, { headers: AUTH_HEADERS });
     const status = (await statusRes.json()) as { ready: boolean };
     if (status.ready) return;
   } catch {
@@ -380,7 +391,7 @@ async function ensurePythonEnv(): Promise<void> {
     };
 
     const runSetup = () => {
-      fetch(`http://localhost:${PORT}/api/python-env/setup`, { method: "POST" })
+      fetch(`http://127.0.0.1:${PORT}/api/python-env/setup`, { method: "POST", headers: AUTH_HEADERS })
         .then(async (res) => {
           if (!res.body) throw new Error("No response body");
           const reader = res.body.getReader();
@@ -456,7 +467,8 @@ function createWindow(): void {
     },
   });
 
-  mainWindow.loadURL(`http://localhost:${PORT}`);
+  // The server swaps the token for a cookie and redirects to the clean URL
+  mainWindow.loadURL(`http://127.0.0.1:${PORT}/?lusk_token=${TOKEN}`);
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -476,7 +488,8 @@ app.whenReady().then(async () => {
   }
 
   // Lets the e2e harness find the port without a window (Playwright app.evaluate)
-  (globalThis as { __luskPort?: number }).__luskPort = PORT;
+  (globalThis as { __luskPort?: number; __luskToken?: string }).__luskPort = PORT;
+  (globalThis as { __luskToken?: string }).__luskToken = TOKEN;
 
   await ensurePythonEnv();
   if (HEADLESS) {

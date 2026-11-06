@@ -239,7 +239,7 @@ async function runItem(item: RunItem, versionDir: string, useVideo: boolean, cor
     peakKb = rss.stop();
 
     // Language is per project now, but export right after READY anyway: nothing later can change it
-    const res = await fetch(`${lusk.baseUrl}/api/projects/${projectId}/captions.srt`);
+    const res = await lusk.fetch(`/api/projects/${projectId}/captions.srt`);
     if (!res.ok) throw new Error(`captions.srt unavailable (${res.status})`);
     fs.writeFileSync(path.join(outDir, `captions_${item.language}.srt`), await res.text());
     fs.writeFileSync(path.join(outDir, 'transcript.json'), JSON.stringify(s.transcript, null, 1));

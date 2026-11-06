@@ -56,13 +56,17 @@ interface LuskBase {
   stubSaveDialog(filePath: string | null): Promise<void>;
   /** Make the next native open dialog(s) return this path (null = cancel). */
   stubOpenDialog(filePath: string | null): Promise<void>;
+  /** The per-launch API token (sent as `x-lusk-token`). */
+  token: string;
+  /** Like fetch(), against the app's server, with the token header added. */
+  fetch(urlPath: string, init?: RequestInit): Promise<Response>;
   /** Fetch JSON from the app's server. */
   api<T = unknown>(urlPath: string, init?: RequestInit): Promise<T>;
   close(): Promise<void>;
 }
 
 export interface Lusk extends LuskBase {
-  /** The main window (http://localhost:{port}). */
+  /** The main window (http://127.0.0.1:{port}). */
   window: Page;
 }
 
@@ -196,7 +200,7 @@ export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk | Headl
     // The Python setup window may come first; wait for the main window.
     // Server startup + Python env check can take a while on a cold start.
     // The app may fall back to another port if the requested one got taken.
-    const isMain = (p: Page) => p.url().startsWith("http://localhost:");
+    const isMain = (p: Page) => p.url().startsWith("http://127.0.0.1:");
     window = app.windows().find(isMain) ?? null;
     const deadline = Date.now() + 90_000;
     while (!window) {
@@ -211,7 +215,19 @@ export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk | Headl
     await window.waitForLoadState("domcontentloaded");
     port = Number(new URL(window.url()).port);
   }
-  const baseUrl = `http://localhost:${port}`;
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const token = await app
+    .evaluate(() => (globalThis as { __luskToken?: string }).__luskToken ?? "")
+    .catch(() => "");
+  if (!token) {
+    await app.close().catch(() => {});
+    throw new Error("App did not publish its API token (build predates the token requirement)");
+  }
+  const authFetch = (urlPath: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set("x-lusk-token", token);
+    return fetch(`${baseUrl}${urlPath}`, { ...init, headers });
+  };
 
   const stubDialog = (kind: "save" | "open") => (filePath: string | null) =>
     app.evaluate(
@@ -236,12 +252,14 @@ export async function launchLusk(opts: LaunchOptions = {}): Promise<Lusk | Headl
     window: window as Page,
     port,
     baseUrl,
+    token,
+    fetch: authFetch,
     userDataDir,
     logs,
     stubSaveDialog: stubDialog("save"),
     stubOpenDialog: stubDialog("open"),
     async api<T>(urlPath: string, init?: RequestInit) {
-      const res = await fetch(`${baseUrl}${urlPath}`, init);
+      const res = await authFetch(urlPath, init);
       if (!res.ok) throw new Error(`${init?.method ?? "GET"} ${urlPath} → ${res.status}: ${await res.text()}`);
       return (await res.json()) as T;
     },
