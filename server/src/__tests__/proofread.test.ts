@@ -89,3 +89,58 @@ describe("applyProofreadEdits", () => {
     expect(r.words.map((w) => w.word).join(" ")).toBe("a voči a voči");
   });
 });
+
+describe("applyProofreadEdits: omissions (T26)", () => {
+  it("keeps a name's initials on one line, so 'S. Lewis' can become 'C. S. Lewis'", () => {
+    const r = apply("hovorí S. Lewis, že to je. Potom", [{ line: 1, find: "S. Lewis,", replace: "C. S. Lewis," }]);
+    expect(r.words.map((w) => w.word).slice(0, 5)).toEqual(["hovorí", "C.", "S.", "Lewis,", "že"]);
+  });
+
+  it("keeps a spoken word that only looks like a repeat (E64 14:15)", () => {
+    const r = apply("milovať skutočných ľudí, nie ideálnych ľudí.", [
+      { line: 1, find: "nie ideálnych ľudí.", replace: "nie ideálnych." },
+    ]);
+    expect(r.words.map((w) => w.word).join(" ")).toBe("milovať skutočných ľudí, nie ideálnych ľudí.");
+    expect(r.applied).toHaveLength(0);
+    expect(r.rejected).toHaveLength(1);
+    expect(r.rejected[0].why).toBe("not adjacent");
+  });
+
+  it("still drops a word that repeats its neighbour, before or after it", () => {
+    expect(apply("to je je ono", [{ line: 1, find: "je je", replace: "je" }]).words.map((w) => w.word)).toEqual(["to", "je", "ono"]);
+    expect(apply("to je je ono", [{ line: 1, find: "to je je", replace: "to je" }]).words.map((w) => w.word)).toEqual(["to", "je", "ono"]);
+  });
+
+  it("allows merging two words into one", () => {
+    const r = apply("dal som to pre to", [{ line: 1, find: "pre to", replace: "preto" }]);
+    expect(r.words.map((w) => w.word)).toEqual(["dal", "som", "to", "preto"]);
+  });
+
+  it("allows a misheard two-word name to become one word", () => {
+    const r = apply("to je kasi Modlo. Potom", [{ line: 1, find: "kasi Modlo.", replace: "Quasimodo." }]);
+    expect(r.words.map((w) => w.word)).toEqual(["to", "je", "Quasimodo.", "Potom"]);
+  });
+
+  it("allows a misheard name to become one word however far its spelling (E64 Notre-Dame)", () => {
+    const r = apply("pri katedrále northern Dám, v Paríži", [{ line: 1, find: "northern Dám,", replace: "Notre-Dame," }]);
+    expect(r.words.map((w) => w.word)).toEqual(["pri", "katedrále", "Notre-Dame,", "v", "Paríži"]);
+  });
+
+  it("rejects a deletion that also changes the case of the word it keeps", () => {
+    const r = apply("C. S. Lewis vás povedal, že", [{ line: 1, find: "vás povedal,", replace: "Povedal," }]);
+    expect(r.applied).toHaveLength(0);
+    expect(r.rejected[0].why).toBe("not adjacent");
+  });
+
+  it("rejects dropping an unrelated word", () => {
+    const r = apply("to je ten Boh a on", [{ line: 1, find: "je ten Boh", replace: "je Boh" }]);
+    expect(r.applied).toHaveLength(0);
+    expect(r.rejected[0].why).toBe("not adjacent");
+  });
+
+  it("names a find that straddles a joined token", () => {
+    const words = [{ word: "hovorí", startMs: 0, endMs: 300 }, { word: "S. Lewis,", startMs: 400, endMs: 700 }, { word: "že", startMs: 800, endMs: 1100 }];
+    const r = applyProofreadEdits(words, buildProofreadLines(words), [{ line: 1, find: "S. Lewis,", replace: "C. S. Lewis," }]);
+    expect(r.rejected[0].why).toBe("joined token");
+  });
+});

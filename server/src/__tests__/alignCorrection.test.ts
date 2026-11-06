@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { parseTsv } from "../routes/align.js";
+import { applyProofreadEdits, buildProofreadLines } from "../services/proofread.js";
 import { alignCorrectedRows, dropStrayStops, keepForeignSpeech, keepHeardScript, misplacedBreaks } from "../services/alignCorrection.js";
 
 const tsv = (words: string[]) => words.map((w, i) => `00:00:${String(i).padStart(2, "0")}.000\t${w}`);
@@ -109,5 +111,25 @@ describe("dropStrayStops per language (T25)", () => {
   it("the default (Slovak) behaviour is unchanged: an English abbreviation is not special", () => {
     expect(dropStrayStops(w("e.g.", "love")).map((x) => x.word)).toEqual(["e.g", "love"]);
     expect(dropStrayStops(w("napr.", "love"), "cs").map((x) => x.word)).toEqual(["napr.", "love"]);
+  });
+});
+
+describe("a joined row never becomes a multi-word token (T26)", () => {
+  it("splits 'Siezvis,' to 'C. S. Lewis,' into one word each inside the heard span, so the proofread can edit it", () => {
+    const heard = tsv(["hovorí", "Siezvis,", "že"]);
+    const aligned = alignCorrectedRows(heard, tsv(["hovorí", "S.", "Lewis,", "že"]));
+    const words = parseTsv(aligned.join("\n"), 3000, [
+      { word: "hovorí", startMs: 0, endMs: 900 },
+      { word: "Siezvis,", startMs: 1000, endMs: 1900 },
+      { word: "že", startMs: 2000, endMs: 2900 },
+    ]);
+    expect(words.map((w) => w.word)).toEqual(["hovorí", "S.", "Lewis,", "že"]);
+    expect(words.every((w) => !/\s/.test(w.word))).toBe(true);
+    expect(words[1].startMs).toBe(1000);
+    expect(words[2].endMs).toBe(1900);
+    for (let i = 1; i < words.length; i++) expect(words[i].startMs).toBeGreaterThanOrEqual(words[i - 1].endMs - 1);
+    for (const w of words) expect(w.endMs).toBeGreaterThan(w.startMs);
+    const fixed = applyProofreadEdits(words, buildProofreadLines(words), [{ line: 1, find: "S. Lewis,", replace: "C. S. Lewis," }]);
+    expect(fixed.words.map((w) => w.word)).toEqual(["hovorí", "C.", "S.", "Lewis,", "že"]);
   });
 });
