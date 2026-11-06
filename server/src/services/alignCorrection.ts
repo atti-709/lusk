@@ -167,6 +167,8 @@ export function alignCorrectedRows(inputLines: string[], outputLines: string[]):
 }
 
 const ABBREVIATIONS = new Set(["napr", "tzv", "atď", "resp", "tj", "sv", "str", "č", "kap", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"]);
+/** English project: the abbreviations that keep their dot before a lower-case word (mirrors transcribe.py). */
+const ABBREVIATIONS_EN = new Set(["e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "rev", "ch", "v", "vv", "cf", "approx", "fig", "a.m", "p.m"]);
 
 /**
  * Sentence ends followed by a lower-case word: a correction that moved full stops onto the
@@ -183,11 +185,11 @@ export function misplacedBreaks(lines: string[]): number {
 }
 
 /** `word` ends a sentence with one of `marks`, yet `next` carries on in lower case. */
-function endsBeforeLowercase(word: string, next: string, marks: RegExp): boolean {
+function endsBeforeLowercase(word: string, next: string, marks: RegExp, abbreviations: Set<string> = ABBREVIATIONS): boolean {
   const m = /^(.*?)(\.\.\.|…|[.!?])["'“”»]?$/.exec(word);
   if (!m || m[2].length > 1 || m[2] === "…" || !marks.test(m[2])) return false;
   // an ordinal ("v 20. storočí", "Pavla III. už") or an abbreviation ("napr.") keeps its dot
-  if (/^\d+$/.test(m[1]) || /^[IVXLC]+$/.test(m[1]) || ABBREVIATIONS.has(m[1].toLowerCase())) return false;
+  if (/^\d+$/.test(m[1]) || /^[IVXLC]+$/.test(m[1]) || abbreviations.has(m[1].toLowerCase())) return false;
   const first = next.replace(/^["'„“»(]+/, "")[0];
   return !!first && first !== first.toUpperCase();
 }
@@ -198,10 +200,11 @@ function endsBeforeLowercase(word: string, next: string, marks: RegExp): boolean
  * "im. dáva mená" — 1 in Whisper's transcript, 6 after them). The sentence goes on, so the
  * stop goes. A question or an exclamation is left alone ("Dobre? ale…" may be a real one).
  */
-export function dropStrayStops<T extends { word: string }>(words: T[]): T[] {
+export function dropStrayStops<T extends { word: string }>(words: T[], language = "sk"): T[] {
+  const abbreviations = language === "en" ? ABBREVIATIONS_EN : ABBREVIATIONS;
   return words.map((w, i) => {
     const next = words[i + 1];
-    if (!next || !endsBeforeLowercase(w.word, next.word, /\./)) return w;
+    if (!next || !endsBeforeLowercase(w.word, next.word, /\./, abbreviations)) return w;
     return { ...w, word: w.word.replace(/\.(["'“”»]?)$/, "$1") };
   });
 }

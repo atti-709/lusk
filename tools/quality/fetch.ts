@@ -169,7 +169,7 @@ async function fetchItem(it: CorpusItem, dir: string, phase: 'audio' | 'video', 
       const tmpDir = fs.mkdtempSync(path.join(dir, '.subs-'));
       try {
         await run(YT_DLP, [
-          '--no-playlist', '--skip-download', '--write-auto-subs', '--sub-format', 'json3', '--sub-langs', 'sk-orig,cs-orig',
+          '--no-playlist', '--skip-download', '--write-auto-subs', '--sub-format', 'json3', '--sub-langs', 'sk-orig,cs-orig,en-orig',
           '-o', path.join(tmpDir, 'youtube_auto.%(ext)s'), url,
         ]);
         const found = fs.readdirSync(tmpDir).filter((f) => f.endsWith('.json3'));
@@ -181,7 +181,7 @@ async function fetchItem(it: CorpusItem, dir: string, phase: 'audio' | 'video', 
           meta.captions = { lang: pick.split('.')[1], words, cues: cues.length };
         } else {
           meta.captions = null;
-          console.warn(`${it.id}: no sk-orig/cs-orig auto-captions`);
+          console.warn(`${it.id}: no sk-orig/cs-orig/en-orig auto-captions`);
         }
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });

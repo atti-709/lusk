@@ -46,7 +46,7 @@ MANAGED_PYTHON = next((p for p in (os.path.expanduser("~/Library/Application Sup
 SCRIPTS = os.path.join(REPO, "server", "scripts")
 MODEL = "gemini-3.8-flash"
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
-LANGUAGES = {"sk": "Slovak", "cs": "Czech"}
+LANGUAGES = {"sk": "Slovak", "cs": "Czech", "en": "English"}
 BATCH = 15                # items per Gemini call
 MAX_SNIPPET_S = 25.0      # audio per item
 AUDIT_WINDOWS = 30
@@ -876,7 +876,8 @@ def ref_lags(words, cues, ref):
 # ------------------------------------------------------------------------------------------------------ layout
 
 ABBREV = {"cs": {"např", "tzv", "atd", "tzn", "apod", "resp", "tj", "sv", "kap", "př", "mj", "cca", "str", "tel", "č", "t", "j", "p", "n", "l", "o", "mr", "dr", "st"},
-          "sk": {"tzv", "napr", "atď", "resp", "tj", "t", "j", "p", "sv", "str", "č", "kap", "porov", "pozn", "mr", "dr", "st", "zák", "kr", "n", "l", "o"}}
+          "sk": {"tzv", "napr", "atď", "resp", "tj", "t", "j", "p", "sv", "str", "č", "kap", "porov", "pozn", "mr", "dr", "st", "zák", "kr", "n", "l", "o"},
+          "en": {"e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "rev", "ch", "v", "vv", "cf", "approx", "fig", "a.m", "p.m"}}
 STOP = re.compile(r"(\S+)\.\s+(?=(\S+))")
 QUESTION = re.compile(r"\?\s+(\S+)")
 

@@ -286,6 +286,42 @@
       ],
       "minutes": 28,
       "video": "audio only"
+    },
+    {
+      "id": "W6NjAG4qp4M",
+      "title": "What to Do When Your Spirits Sink",
+      "channel": "Desiring God",
+      "language": "en",
+      "set": "dev",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 43,
+      "video": "audio only"
+    },
+    {
+      "id": "gtXwk4tSfV8",
+      "title": "Our Power: Spirit-Filled Living – Timothy Keller [Sermon]",
+      "channel": "Gospel in Life",
+      "language": "en",
+      "set": "dev",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 39,
+      "video": "audio only"
+    },
+    {
+      "id": "u-ZyyUGDRtU",
+      "title": "Staying Mentally Strong",
+      "channel": "Life.Church",
+      "language": "en",
+      "set": "dev",
+      "type": [
+        "sermon"
+      ],
+      "minutes": 35,
+      "video": "audio only"
     }
   ]
 }

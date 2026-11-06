@@ -80,6 +80,15 @@ STOCK_PHRASES = {
         # the owner confirmed the pause by ear (2026-11-05), so a lone "Děkujeme." goes too
         "konec", "dekujeme",
     },
+    # English: the sign-offs Whisper writes over music, silence or a talk's end (video sign-offs it was trained on).
+    # Not a bare "Thank you." or "Bye.": a speaker really says those between songs and prayers.
+    "en": {
+        "thank you for watching", "thanks for watching", "thank you very much for watching",
+        "thank you for listening", "thanks for listening", "thank you for your attention",
+        "please subscribe", "please subscribe to my channel", "subscribe to my channel",
+        "like and subscribe", "please like and subscribe", "dont forget to subscribe",
+        "subtitles by the amaraorg community",
+    },
 }
 
 
@@ -93,7 +102,7 @@ FOREIGN_SCRIPT = re.compile("[\u0400-\u04FF\u0590-\u06FF\u3040-\u30FF\u4E00-\u9F
 # 3:07-3:16) are not covered by any word, and the words after them were stamped over that audio: "kde on
 # veľmi rezonuje" showed at 188.8 s, six seconds before it is said, leaving a 6.2 s hole (T23). The
 # alignment is therefore given the numerals spelled out, one token per numeral so the words map back 1:1
-# (inflection is irrelevant: CTC only needs about the right amount of sound). Slovak and Czech only.
+# (inflection is irrelevant: CTC only needs about the right amount of sound). Slovak, Czech and English.
 _NUMBERS = {
     "sk": ("nula jeden dva tri štyri päť šesť sedem osem deväť desať jedenásť dvanásť trinásť štrnásť pätnásť "
            "šestnásť sedemnásť osemnásť devätnásť".split(),
@@ -103,6 +112,13 @@ _NUMBERS = {
            "šestnáct sedmnáct osmnáct devatenáct".split(),
            "dvacet třicet čtyřicet padesát šedesát sedmdesát osmdesát devadesát".split(),
            "sto dvěstě třista čtyřista pětset šestset sedmset osmset devětset".split(), "tisíc"),
+    # English has the same problem (T25: "Psalm 13, 22, 73, 10, 8, 77, 42 and 4" were squeezed into 1.3 s
+    # of a 6 s read-out and the next sentence stamped 4 s early); one run of letters per numeral, no hyphens
+    "en": ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+           "sixteen seventeen eighteen nineteen".split(),
+           "twenty thirty forty fifty sixty seventy eighty ninety".split(),
+           "onehundred twohundred threehundred fourhundred fivehundred sixhundred sevenhundred eighthundred ninehundred".split(),
+           "thousand"),
 }
 NUMERAL = re.compile(r"\d{1,4}")
 
@@ -181,7 +197,9 @@ def is_loop(text: str) -> bool:
     return False
 
 
-def is_stock_phrase(text: str, language: str = "sk") -> bool:
+def is_stock_phrase(text: str, language: str = "sk", project: str | None = None) -> bool:
+    if language == "en" and project not in (None, "en"):
+        language = "sk"  # English heard inside a Slovak/Czech project keeps those projects' lists (T25: output unchanged)
     words = plain_words(text)
     # one phrase, or the same one over and over ("Ďakujem za pozornosť. Ďakujem za pozornosť.")
     for phrase in STOCK_PHRASES.get(language, STOCK_PHRASES["sk"]):
@@ -384,6 +402,8 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
     turns = speech_turns(audio)
     total = len(audio) / SAMPLE_RATE
 
+    project = language
+
     def decode(regions, model=model, language=language, bar=None):
         """Each chunk is decoded from its own slice of the audio. mlx-whisper's own
         `clip_timestamps` never seeks to a clip's start — every clip is decoded from where
@@ -432,7 +452,7 @@ def transcribe_mlx(audio, model: str, language: str) -> list[dict] | None:
                     # "hears" there is invented (E42: "Zdravíte!" stretched over the 30 s after a
                     # chunk that ended in music): keep a segment only if most of it is real audio.
                     inside = max(0.0, min(s["end"], length) - max(s["start"], 0.0)) / max(s["end"] - s["start"], 1e-3)
-                    if inside >= 0.5 and not is_stock_phrase(s["text"], language) and not FOREIGN_SCRIPT.search(s["text"]):
+                    if inside >= 0.5 and not is_stock_phrase(s["text"], language, project) and not FOREIGN_SCRIPT.search(s["text"]):
                         segments.append({"start": start + s["start"], "end": min(start + s["end"], end), "text": s["text"],
                                          "language": language})
                 bar.update(round(length * 100))
@@ -504,6 +524,8 @@ def join_sentences(segments: list[dict], language: str = "sk") -> list[dict]:
 ABBREVIATIONS = {
     "sk": {"napr", "tzv", "atď", "resp", "tj", "sv", "str", "č", "kap", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"},
     "cs": {"např", "tzv", "atd", "tzn", "apod", "resp", "tj", "sv", "kap", "př", "mj", "str", "č", "porov", "pozn", "dr", "mr", "st", "kr", "pr", "vs"},
+    # "e.g." / "i.e." keep their inner dots (`last[:-1]` is what is looked up); "v."/"vv." are verses
+    "en": {"e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "rev", "ch", "v", "vv", "cf", "approx", "fig", "a.m", "p.m"},
 }
 
 
@@ -561,7 +583,9 @@ def main() -> None:
     except Exception:
         align_model, metadata = whisperx.load_align_model(language_code=args.language, device="cpu")
     # numerals are aligned spelled out (see `spell_numerals`) and put back afterwards
-    spelled = [{**s, "text": spell_numerals(s["text"], s.get("language", args.language))} for s in segments]
+    # English heard inside a Slovak/Czech project is aligned by that project's model and left as it was (T25)
+    seg_lang = lambda s: s.get("language", args.language) if s.get("language", args.language) != "en" or args.language == "en" else "xx"
+    spelled = [{**s, "text": spell_numerals(s["text"], seg_lang(s))} for s in segments]
     aligned = whisperx.align(spelled, align_model, metadata, audio, "cpu",
                              return_char_alignments=False, print_progress=True)
     restore_numerals(aligned["segments"], spelled, segments)

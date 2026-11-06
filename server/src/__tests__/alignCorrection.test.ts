@@ -99,3 +99,15 @@ describe("keepForeignSpeech", () => {
   });
 });
 
+
+describe("dropStrayStops per language (T25)", () => {
+  const w = (...words: string[]) => words.map((word) => ({ word }));
+  it("an English project keeps the dot of e.g./i.e./etc. before a lower-case word and still drops a stray stop", () => {
+    const out = dropStrayStops(w("things", "e.g.", "love", "that.", "is", "etc.", "and"), "en").map((x) => x.word);
+    expect(out).toEqual(["things", "e.g.", "love", "that", "is", "etc.", "and"]);
+  });
+  it("the default (Slovak) behaviour is unchanged: an English abbreviation is not special", () => {
+    expect(dropStrayStops(w("e.g.", "love")).map((x) => x.word)).toEqual(["e.g", "love"]);
+    expect(dropStrayStops(w("napr.", "love"), "cs").map((x) => x.word)).toEqual(["napr.", "love"]);
+  });
+});

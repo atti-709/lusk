@@ -50,7 +50,7 @@ const LANGUAGE_NAMES: Record<string, string> = { sk: "Slovak", cs: "Czech", en: 
 /**
  * The language-specific parts of the proofread prompt (`proofread-api.md` placeholders). Slovak is the
  * original wording; Czech must not pull colloquial speech toward the standard language (owner decision
- * 2026-10-29: "kterej", "druhýho" are written as spoken). Languages without a block use Slovak's.
+ * 2026-10-29: "kterej", "druhýho" are written as spoken). English has its own block too (no "Czech forms" rule, American/British spelling both stay); a language without a block still falls back to Slovak's.
  */
 export const PROOFREAD_LANGUAGE_RULES: Record<string, Record<"FOREIGN_RULE" | "NAMES_RULE" | "WRITTEN_FORMS_RULE" | "SPOKEN_FORMS_NOTE", string>> = {
   sk: {
@@ -71,6 +71,16 @@ export const PROOFREAD_LANGUAGE_RULES: Record<string, Record<"FOREIGN_RULE" | "N
       'the transcriber sometimes writes what was said in words as a numeral or an abbreviation: an enumeration ("1.", "(1)", "2.)" for "Za prvé", "Za druhé") or an abbreviation said in full ("tzv." for "takzvaný", "resp." for "respektive", "např." for "například"). Write them out as they were said, in the form the sentence needs.',
     SPOKEN_FORMS_NOTE:
       ' **Spoken (common) Czech is correct as spoken and must never be changed to the standard form**: "kterej", "zajištěnej", "druhýho", "malej", "v tom zhromáždění" (not "shromáždění"), "bysme", "-ej" for "-ý" and "-ý" for "-é" in endings ("nový" for "nové"), "v" before a vowel ("vokno") and the like. If the speaker said it that way, it stays.',
+  },
+  en: {
+    FOREIGN_RULE:
+      'for English, a single word of another language that the transcriber wrote into an English sentence where an English word was plainly said. A passage really spoken in another language (a quoted Greek or Hebrew word, a line in Spanish) stays as spoken — never translate it. American and British spelling are both correct ("color"/"colour", "savior"/"saviour"): never switch one to the other.',
+    NAMES_RULE:
+      'people, places and Bible books in their established English spelling (common usage: "Jesus", "Jerusalem", "Habakkuk", "Nebuchadnezzar", "C. S. Lewis"), even where the script spells them differently.',
+    WRITTEN_FORMS_RULE:
+      'the transcriber sometimes writes what was said in words as a numeral or an abbreviation: an enumeration ("1.", "(1)", "2.)" for "First", "Second", "Number one") or an abbreviation said in full ("e.g." for "for example", "i.e." for "that is", "vs." for "versus", "Dr." for "Doctor"). Write them out as they were said, in the form the sentence needs. Scripture references ("John 3:16", "1 Corinthians 13"), years and "10 Commandments" stay as digits.',
+    SPOKEN_FORMS_NOTE:
+      ' **Spoken English is correct as spoken**: contractions ("gonna", "wanna", "gotta", "y\'all", "ain\'t", "kinda") stay as the speaker said them, never expanded to "going to" or "you all".',
   },
 };
 

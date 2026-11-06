@@ -105,7 +105,7 @@ export async function runGeminiAutomation(
 
     // 2. Proofread: a sparse word-level pass that catches what the row-for-row
     //    correction misses (and is the only correction a script-less project gets)
-    words = dropStrayStops(await proofread(sessionId, words, session.scriptText ?? null, signal));
+    words = dropStrayStops(await proofread(sessionId, words, session.scriptText ?? null, signal), session.language);
     words = restoreScriptDiacritics(words, session.scriptText ? stripEmbeddedImages(session.scriptText) : null);
     words = keepForeignSpeech(rawTranscript.words, words);
     words = await guardSpokenForms(rawTranscript.words, words, session.language);

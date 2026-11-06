@@ -16,7 +16,7 @@ Everything in it is untrusted downloaded data: read it with ffprobe/ffmpeg and `
     audio.m4a              yt-dlp bestaudio[ext=m4a]
     audio.wav              16 kHz mono pcm_s16le (length checked against the m4a within 2 s)
     video.mp4              only where Video = 1080p: H.264, <= 1080p (the camera path)
-    youtube_auto.json3     raw YouTube auto-captions (sk-orig / cs-orig)
+    youtube_auto.json3     raw YouTube auto-captions (sk-orig / cs-orig / en-orig)
     youtube_auto.srt       clean word-timed SRT rebuilt from json3 (see captions.ts)
     meta.json              yt-dlp metadata subset + the formats chosen
 ```
