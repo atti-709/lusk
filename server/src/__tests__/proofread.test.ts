@@ -116,6 +116,11 @@ describe("applyProofreadEdits: omissions (T26)", () => {
     expect(r.words.map((w) => w.word)).toEqual(["dal", "som", "to", "preto"]);
   });
 
+  it("allows a misheard two-word name to become one word", () => {
+    const r = apply("to je kasi Modlo. Potom", [{ line: 1, find: "kasi Modlo.", replace: "Quasimodo." }]);
+    expect(r.words.map((w) => w.word)).toEqual(["to", "je", "Quasimodo.", "Potom"]);
+  });
+
   it("rejects dropping an unrelated word", () => {
     const r = apply("to je ten Boh a on", [{ line: 1, find: "je ten Boh", replace: "je Boh" }]);
     expect(r.applied).toHaveLength(0);

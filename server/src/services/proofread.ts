@@ -123,7 +123,7 @@ function legitimateDeletion(lineTokens: string[], at: number, find: string[], re
   if (newMid.some(isWord)) {
     const a = normalize(oldMid.join(""));
     const b = normalize(newMid.join(""));
-    return editDistance(a, b) <= 0.3 * Math.max(a.length, b.length);
+    return editDistance(a, b) <= MAX_REWRITE_RATIO * Math.max(a.length, b.length);
   }
   const drop = oldMid.map(normalize).filter(Boolean);
   const from = at + p;
