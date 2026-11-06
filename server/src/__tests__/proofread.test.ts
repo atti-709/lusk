@@ -121,6 +121,17 @@ describe("applyProofreadEdits: omissions (T26)", () => {
     expect(r.words.map((w) => w.word)).toEqual(["to", "je", "Quasimodo.", "Potom"]);
   });
 
+  it("allows a misheard name to become one word however far its spelling (E64 Notre-Dame)", () => {
+    const r = apply("pri katedrále northern Dám, v Paríži", [{ line: 1, find: "northern Dám,", replace: "Notre-Dame," }]);
+    expect(r.words.map((w) => w.word)).toEqual(["pri", "katedrále", "Notre-Dame,", "v", "Paríži"]);
+  });
+
+  it("rejects a deletion that also changes the case of the word it keeps", () => {
+    const r = apply("C. S. Lewis vás povedal, že", [{ line: 1, find: "vás povedal,", replace: "Povedal," }]);
+    expect(r.applied).toHaveLength(0);
+    expect(r.rejected[0].why).toBe("not adjacent");
+  });
+
   it("rejects dropping an unrelated word", () => {
     const r = apply("to je ten Boh a on", [{ line: 1, find: "je ten Boh", replace: "je Boh" }]);
     expect(r.applied).toHaveLength(0);

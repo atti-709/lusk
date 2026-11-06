@@ -106,11 +106,12 @@ function isRewrite(find: string[], replace: string[]): boolean {
 const isWord = (t: string) => /[\p{L}\p{N}]/u.test(t);
 
 /**
- * Whether an edit that puts in fewer words than it takes out is a legitimate one. Two kinds are:
- * the dropped words repeat the words right beside them on the line ("je je" → "je"), or the
- * missing words went into a similar one ("pre to" → "preto", a merge). Any other deletion is a
- * word that was said ("nie ideálnych ľudí." → "nie ideálnych.", E64 14:15: the second "ľudí" was
- * spoken, the first was no twin of it).
+ * Whether an edit that puts in fewer words than it takes out is a legitimate one. When the changed
+ * part puts in a new word, it is a substitution or a merge ("pre to" → "preto", "northern Dám," →
+ * "Notre-Dame,"), already bounded by `isRewrite`. When it only takes words out, they must repeat the
+ * words right beside them on the line ("je je" → "je"); any other pure deletion is a word that was
+ * said ("nie ideálnych ľudí." → "nie ideálnych.", E64 14:15: the second "ľudí" was spoken, the first
+ * was no twin of it).
  */
 function legitimateDeletion(lineTokens: string[], at: number, find: string[], replace: string[]): boolean {
   if (replace.filter(isWord).length >= find.filter(isWord).length) return true;
@@ -120,11 +121,7 @@ function legitimateDeletion(lineTokens: string[], at: number, find: string[], re
   while (q < find.length - p && q < replace.length - p && normalize(find[find.length - 1 - q]) === normalize(replace[replace.length - 1 - q])) q++;
   const oldMid = find.slice(p, find.length - q);
   const newMid = replace.slice(p, replace.length - q);
-  if (newMid.some(isWord)) {
-    const a = normalize(oldMid.join(""));
-    const b = normalize(newMid.join(""));
-    return editDistance(a, b) <= MAX_REWRITE_RATIO * Math.max(a.length, b.length);
-  }
+  if (newMid.some(isWord)) return true;
   const drop = oldMid.map(normalize).filter(Boolean);
   const from = at + p;
   const same = (run: string[]) => run.length === drop.length && run.every((t, i) => normalize(t) === drop[i]);
