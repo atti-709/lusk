@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "LUSK_TOKEN=${LUSK_TOKEN:-lusk-dev-token} LUSK_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 tsx watch src/index.ts",
+    "dev": "LUSK_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest run",

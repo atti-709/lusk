@@ -39,7 +39,7 @@ const PORT = parseInt(process.env.LUSK_PORT ?? "3000", 10);
 // refuses to start, unless auth is switched off explicitly (never the default).
 const TOKEN = process.env.LUSK_TOKEN;
 if (!TOKEN && process.env.LUSK_AUTH_DISABLED !== "1") {
-  console.error("LUSK_TOKEN is not set. Set it (dev: LUSK_TOKEN=lusk-dev-token) or LUSK_AUTH_DISABLED=1.");
+  console.error("LUSK_TOKEN is not set. Start dev with `npm run dev` from the repo root (it makes a random one per start), or set LUSK_TOKEN yourself.");
   process.exit(1);
 }
 if (TOKEN) {
