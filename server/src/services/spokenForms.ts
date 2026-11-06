@@ -99,27 +99,53 @@ export async function guardSpokenForms<T extends Word>(heard: Word[], words: T[]
 
 const marks = (w: string) => [...w.normalize("NFC")].filter((c) => plain(c) !== c.toLowerCase()).length;
 
-/**
- * The heard word where the correction only stripped its diacritics ("poznať" → "poznat", E52: the
- * script is partly typed without them). Same letters once diacritics are removed, fewer diacritics
- * than the heard word; the corrected word's case, punctuation and quotes stay. A correction that
- * adds or changes a diacritic is not touched (`restoreScriptDiacritics` and the passes own those).
- */
-export function keepHeardDiacritics<T extends Word>(heard: Word[], words: T[]): T[] {
+/** Heard and corrected cores where the correction only stripped diacritics, by word index. */
+function strippedPairs<T extends Word>(heard: Word[], words: T[]): Map<number, [string, string]> {
   const byTime = new Map(heard.map((h) => [`${h.startMs}-${h.endMs}`, core(h.word).normalize("NFC")]));
-  let kept = 0;
-  const out = words.map((w) => {
+  const out = new Map<number, [string, string]>();
+  words.forEach((w, i) => {
     const h = byTime.get(`${w.startMs}-${w.endMs}`);
     const c = core(w.word).normalize("NFC");
-    if (!h || !c || h === c || h.length !== c.length || !/^\p{L}+$/u.test(h) || !/^\p{L}+$/u.test(c)) return w;
-    if (plain(h) !== plain(c) || marks(c) >= marks(h)) return w;
+    if (!h || !c || h === c || h.length !== c.length || !/^\p{L}+$/u.test(h) || !/^\p{L}+$/u.test(c)) return;
+    if (plain(h) !== plain(c) || marks(c) >= marks(h)) return;
     // every char of the correction is the heard char or its plain letter
     const chars = [...h];
-    if (![...c].every((ch, i) => ch.toLowerCase() === chars[i].toLowerCase() || plain(chars[i]) === ch.toLowerCase())) return w;
-    const restored = [...c].map((ch, i) => (ch !== ch.toLowerCase() ? chars[i].toUpperCase() : chars[i].toLowerCase())).join("");
-    kept++;
+    if (![...c].every((ch, k) => ch.toLowerCase() === chars[k].toLowerCase() || plain(chars[k]) === ch.toLowerCase())) return;
+    out.set(i, [h, c]);
+  });
+  return out;
+}
+
+/**
+ * The heard word where the correction only stripped its diacritics and so made a non-word
+ * ("poznať" → "poznat", "keď" → "ked": E52/E19, scripts partly typed without them). Same letters
+ * once diacritics are removed, fewer of them, the heard word real and the corrected one not; the
+ * corrected word's case, punctuation and quotes stay. Stripping a length mark Whisper added is
+ * often a real fix ("samotá" → "samota", "obráz" → "obraz"): the corrected word is real there, so
+ * it stays, and so does a change where both are real words ("skúseností" → "skúsenosti"). A
+ * correction that adds or changes a diacritic is not touched (`restoreScriptDiacritics` owns those).
+ */
+export function keepHeardDiacritics<T extends Word>(heard: Word[], words: T[], isWord: (w: string) => boolean): T[] {
+  const pairs = strippedPairs(heard, words);
+  if (!pairs.size) return words;
+  return words.map((w, i) => {
+    const pair = pairs.get(i);
+    if (!pair || !isWord(pair[0]) || isWord(pair[1])) return w;
+    const [h, c] = pair;
+    const chars = [...h];
+    const restored = [...c].map((ch, k) => (ch !== ch.toLowerCase() ? chars[k].toUpperCase() : chars[k].toLowerCase())).join("");
     return { ...w, word: w.word.normalize("NFC").replace(c, restored) };
   });
-  if (kept) console.log(`[script forms] kept ${kept} heard diacritic${kept === 1 ? "" : "s"} the correction had stripped`);
-  return kept ? out : words;
+}
+
+/** `keepHeardDiacritics` with the language's dictionary; the words unchanged if there is none. */
+export async function guardHeardDiacritics<T extends Word>(heard: Word[], words: T[], lang: string): Promise<T[]> {
+  const pairs = strippedPairs(heard, words);
+  if (!pairs.size) return words;
+  const real = await realWords([...new Set([...pairs.values()].flat())], lang);
+  if (!real) return words;
+  const guarded = keepHeardDiacritics(heard, words, (w) => real.has(w));
+  const kept = guarded.filter((w, i) => w !== words[i]).length;
+  if (kept) console.log(`[script forms] kept ${kept} heard diacritic${kept === 1 ? "" : "s"} the correction had stripped into a non-word`);
+  return guarded;
 }
