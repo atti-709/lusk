@@ -9,6 +9,8 @@ import { launchLusk } from "./harness";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 const json = { "Content-Type": "application/json" };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -54,6 +56,11 @@ async function main() {
       if (r?.status === "exported") break;
       if (r?.status === "error") throw new Error(`render: ${r.message}`);
     }
+    const output = path.join(lusk.userDataDir, "lusk_temp", projectId, `output_${key}.mp4`);
+    if (!existsSync(output)) throw new Error(`render finished but ${output} does not exist`);
+    const duration = parseFloat(execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", output], { encoding: "utf-8" }));
+    console.log(`output plays: ffprobe duration ${duration}s`);
+    if (!(duration > 0)) throw new Error("rendered output has no duration");
     const after = await lusk.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
     console.log(`DONE transcribe + render, windows still ${after}, output ${path.join(lusk.userDataDir, "lusk_temp", projectId, `output_${key}.mp4`)}`);
   } finally {
