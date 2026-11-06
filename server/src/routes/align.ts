@@ -119,7 +119,35 @@ export function parseTsv(tsv: string, fallbackEndMs: number, source: TranscriptW
     const own = parsed[i].startMs !== null ? sourceEnd.get(words[i].startMs) : undefined;
     words[i].endMs = Math.max(own !== undefined ? Math.min(own, next) : next, words[i].startMs + 1);
   }
-  return words;
+  return splitJoinedWords(words);
+}
+
+/**
+ * A row can hold several words ("S. Lewis," where the correction joined a split row back, E64
+ * 4:55): a token with a space inside cannot be found word by word, and the proofread could not
+ * edit it ("S. Lewis" → "C. S. Lewis"). Each word becomes its own token and takes a share of the
+ * row's span in proportion to its length; the shares are monotonic and at least 1 ms wide where
+ * the span allows.
+ */
+export function splitJoinedWords(words: TranscriptWord[]): TranscriptWord[] {
+  const out: TranscriptWord[] = [];
+  for (const w of words) {
+    const parts = w.word.split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) {
+      out.push(parts.length === 1 && parts[0] !== w.word ? { ...w, word: parts[0] } : w);
+      continue;
+    }
+    const total = parts.reduce((n, p) => n + p.length, 0);
+    const span = Math.max(w.endMs - w.startMs, parts.length);
+    let at = w.startMs;
+    parts.forEach((part, i) => {
+      const last = i === parts.length - 1;
+      const end = last ? w.startMs + span : Math.max(at + 1, Math.round(w.startMs + (span * parts.slice(0, i + 1).reduce((n, p) => n + p.length, 0)) / total));
+      out.push({ ...w, word: part, startMs: at, endMs: end });
+      at = end;
+    });
+  }
+  return out;
 }
 
 /**

@@ -221,7 +221,10 @@ async function proofread(
       console.log(`[proofread] ${msToTimestamp(e.atMs)}  "${e.from}" → "${e.to}"${e.reason ? `  (${e.reason})` : ""}`);
     }
     if (result.rejected.length) {
-      console.log(`[proofread] dropped ${result.rejected.length} edit(s) that didn't match the transcript:`, JSON.stringify(result.rejected));
+      console.log(`[proofread] dropped ${result.rejected.length} edit(s) that were not applied:`, JSON.stringify(result.rejected));
+      const byReason = new Map<string, number>();
+      for (const e of result.rejected) byReason.set(e.why, (byReason.get(e.why) ?? 0) + 1);
+      console.log(`[proofread] dropped by reason: ${[...byReason].map(([why, n]) => `${why} ${n}`).join(", ")}`);
     }
     orchestrator.setRunReport(sessionId, { proofread: { status: "ok", applied: result.applied.length, rejected: result.rejected.length } });
     orchestrator.updateProgress(sessionId, 85, `Proofread fixed ${result.applied.length} word${result.applied.length === 1 ? "" : "s"}`);

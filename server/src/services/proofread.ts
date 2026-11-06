@@ -32,11 +32,16 @@ export interface AppliedEdit {
   reason?: string;
 }
 
+/** An edit that was not applied, with the reason it was dropped. */
+export interface RejectedEdit extends ProofreadEdit {
+  why: string;
+}
+
 export interface ProofreadResult {
   words: TranscriptWord[];
   applied: AppliedEdit[];
-  /** Edits dropped because their `find` didn't match the line, or they looked like a rewrite. */
-  rejected: ProofreadEdit[];
+  /** Edits dropped because their `find` didn't match the line, or they looked like a rewrite or a deletion. */
+  rejected: RejectedEdit[];
 }
 
 /** Lines longer than this are broken even without punctuation (a run-on or a missing period). */
@@ -54,7 +59,9 @@ export function buildProofreadLines(words: TranscriptWord[]): ProofreadLine[] {
   let current: number[] = [];
   for (let i = 0; i < words.length; i++) {
     current.push(i);
-    if (SENTENCE_END.test(words[i].word) || current.length >= MAX_LINE_WORDS) {
+    // a name's initial ("C. S. Lewis") ends no sentence: the line goes on, so an edit can span it
+    const initial = /^["'„“»(]*\p{Lu}\.$/u.test(words[i].word);
+    if ((SENTENCE_END.test(words[i].word) && !initial) || current.length >= MAX_LINE_WORDS) {
       lines.push({ id: lines.length + 1, words: current });
       current = [];
     }
@@ -94,6 +101,35 @@ function isRewrite(find: string[], replace: string[]): boolean {
   const a = normalize(find.join(" "));
   const b = normalize(replace.join(" "));
   return editDistance(a, b) > MAX_REWRITE_RATIO * Math.max(a.length, b.length);
+}
+
+const isWord = (t: string) => /[\p{L}\p{N}]/u.test(t);
+
+/**
+ * Whether an edit that puts in fewer words than it takes out is a legitimate one. Two kinds are:
+ * the dropped words repeat the words right beside them on the line ("je je" → "je"), or the
+ * missing words went into a similar one ("pre to" → "preto", a merge). Any other deletion is a
+ * word that was said ("nie ideálnych ľudí." → "nie ideálnych.", E64 14:15: the second "ľudí" was
+ * spoken, the first was no twin of it).
+ */
+function legitimateDeletion(lineTokens: string[], at: number, find: string[], replace: string[]): boolean {
+  if (replace.filter(isWord).length >= find.filter(isWord).length) return true;
+  let p = 0;
+  while (p < find.length && p < replace.length && normalize(find[p]) === normalize(replace[p])) p++;
+  let q = 0;
+  while (q < find.length - p && q < replace.length - p && normalize(find[find.length - 1 - q]) === normalize(replace[replace.length - 1 - q])) q++;
+  const oldMid = find.slice(p, find.length - q);
+  const newMid = replace.slice(p, replace.length - q);
+  if (newMid.some(isWord)) {
+    const a = normalize(oldMid.join(""));
+    const b = normalize(newMid.join(""));
+    return editDistance(a, b) <= 0.3 * Math.max(a.length, b.length);
+  }
+  const drop = oldMid.map(normalize).filter(Boolean);
+  const from = at + p;
+  const same = (run: string[]) => run.length === drop.length && run.every((t, i) => normalize(t) === drop[i]);
+  return same(lineTokens.slice(Math.max(0, from - oldMid.length), from).filter((t) => normalize(t)).slice(-drop.length)) ||
+    same(lineTokens.slice(from + oldMid.length, from + oldMid.length + drop.length));
 }
 
 /**
@@ -235,33 +271,48 @@ export function applyProofreadEdits(
   const byId = new Map(lines.map((l) => [l.id, l]));
   const taken = new Set<number>();
   const accepted: { start: number; end: number; replacement: string[]; edit: ProofreadEdit }[] = [];
-  const rejected: ProofreadEdit[] = [];
+  const rejected: RejectedEdit[] = [];
 
   for (const edit of edits) {
     const line = byId.get(Number(edit.line));
     const find = tokens(edit.find ?? "");
     const replace = tokens(edit.replace ?? "");
-    if (!line || find.length === 0 || find.length > MAX_FIND_WORDS || find.join(" ") === replace.join(" ") || isRewrite(find, replace)) {
-      rejected.push(edit);
+    if (!line) {
+      rejected.push({ ...edit, why: "no such line" });
+      continue;
+    }
+    if (find.length === 0 || find.length > MAX_FIND_WORDS || find.join(" ") === replace.join(" ")) {
+      rejected.push({ ...edit, why: "empty, too long or unchanged" });
+      continue;
+    }
+    if (isRewrite(find, replace)) {
+      rejected.push({ ...edit, why: "rewrite" });
       continue;
     }
     const lineTokens = line.words.map((i) => words[i].word);
     const at = findRun(lineTokens, find, taken, line.words[0]);
     if (at < 0) {
-      rejected.push(edit);
+      // a row that holds several words ("S. Lewis,") has a space inside one token
+      const split = tokens(lineTokens.join(" "));
+      const inJoined = lineTokens.some((t) => /\s/.test(t.trim())) && findRun(split, find, new Set(), 0) >= 0;
+      rejected.push({ ...edit, why: inJoined ? "joined token" : "no match" });
       continue;
     }
     const oldLast = lineTokens[at + find.length - 1];
     // a deletion would take the line's sentence end or comma with it; `find` didn't quote it
     if (replace.length === 0 && trailingPunct(oldLast) !== trailingPunct(find[find.length - 1])) {
-      rejected.push(edit);
+      rejected.push({ ...edit, why: "deletion takes the sentence end" });
+      continue;
+    }
+    if (!legitimateDeletion(lineTokens, at, find, replace)) {
+      rejected.push({ ...edit, why: "not adjacent" });
       continue;
     }
     const start = line.words[at];
     const oldTexts = lineTokens.slice(at, at + find.length);
     const final = keepLinePunctuation(oldTexts, find, replace);
     if (final.join(" ") === oldTexts.join(" ")) {
-      rejected.push(edit); // nothing left to change once the line's punctuation is kept
+      rejected.push({ ...edit, why: "no change" }); // nothing left to change once the line's punctuation is kept
       continue;
     }
     for (let k = 0; k < find.length; k++) taken.add(start + k);

@@ -12,7 +12,7 @@ const version = process.argv[2] && !process.argv[2].startsWith('-') ? process.ar
 const dirArg = process.argv.indexOf('--dir');
 const runs = dirArg >= 0 ? process.argv[dirArg + 1] : path.join(os.homedir(), 'LuskCorpus', 'runs');
 const verbose = process.argv.includes('-v');
-const MARK = "edit(s) that didn't match the transcript: ";
+const MARKS = ["edit(s) that didn't match the transcript: ", 'edit(s) that were not applied: '];
 
 let total = 0, replayed = 0, applied = 0, withScript = 0;
 for (const id of fs.readdirSync(path.join(runs, version)).sort()) {
@@ -21,8 +21,8 @@ for (const id of fs.readdirSync(path.join(runs, version)).sort()) {
   if (!fs.existsSync(logPath)) continue;
   const rejected: ProofreadEdit[] = [];
   for (const line of fs.readFileSync(logPath, 'utf-8').split('\n')) {
-    const at = line.indexOf(MARK);
-    if (at >= 0) rejected.push(...JSON.parse(line.slice(at + MARK.length)));
+    const mark = MARKS.find((m) => line.includes(m));
+    if (mark) rejected.push(...JSON.parse(line.slice(line.indexOf(mark) + mark.length)));
   }
   if (!rejected.length) continue;
   total += rejected.length;
