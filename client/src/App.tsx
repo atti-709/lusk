@@ -15,6 +15,7 @@ import {
 import { Logo } from "./components/Logo";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { NewProjectDialog } from "./components/NewProjectDialog";
+import type { ClipProfileValue } from "./components/ClipProfileFields";
 import { UpdateOverlay } from "./components/UpdateOverlay";
 import { useSSE } from "./hooks/useSSE";
 import type {
@@ -162,12 +163,12 @@ function App() {
     setNewProjectPath(saveResult.filePath);
   }, []);
 
-  const createProject = useCallback(async (projectPath: string, language: ProjectLanguage) => {
+  const createProject = useCallback(async (projectPath: string, language: ProjectLanguage, clipProfile: ClipProfileValue) => {
     setNewProjectPath(null);
     const res = await fetch("/api/projects/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectPath, language }),
+      body: JSON.stringify({ projectPath, language, ...clipProfile }),
     });
 
     if (res.ok) {
@@ -582,7 +583,7 @@ function App() {
       <NewProjectDialog
         open={newProjectPath !== null}
         onCancel={() => setNewProjectPath(null)}
-        onCreate={(language) => newProjectPath && createProject(newProjectPath, language)}
+        onCreate={(language, clipProfile) => newProjectPath && createProject(newProjectPath, language, clipProfile)}
       />
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onKeySet={setGeminiAvailable} />
@@ -846,6 +847,8 @@ function App() {
               onBack={() => setReadySubView("review")}
               onAddClip={handleAddClip}
               onClipsRegenerated={setViralClips}
+              contentProfile={state.contentProfile}
+              clipSettings={state.clipSettings}
             />
           </div>
         )}

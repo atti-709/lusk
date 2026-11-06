@@ -28,7 +28,7 @@ const FPS_OPTIONS = [
 
 const PROMPT_FIELDS = [
   { key: "correctionPrompt", label: "Correction Prompt", hint: "System prompt for transcript correction via Gemini" },
-  { key: "viralClipsPrompt", label: "Viral Clips Prompt (API)", hint: "System prompt for automatic viral clip detection via Gemini API" },
+  { key: "viralClipsPrompt", label: "Viral Clips Prompt (API)", hint: "System prompt for automatic viral clip detection via Gemini API. Applies to Podcast projects only; Sermon projects use the built-in sermon prompt." },
   { key: "viralClipsManualPrompt", label: "Viral Clips Prompt (Manual)", hint: "Prompt shown in the Align step for manual copy-paste to Gemini" },
 ] as const;
 

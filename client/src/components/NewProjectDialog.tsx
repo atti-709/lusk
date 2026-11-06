@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { DEFAULT_PROJECT_LANGUAGE, parseProjectLanguage, type ProjectLanguage } from "@lusk/shared";
 
+import { ClipProfileFields, type ClipProfileValue } from "./ClipProfileFields";
+
 export const LANGUAGE_OPTIONS: { value: ProjectLanguage; label: string }[] = [
   { value: "sk", label: "Slovenčina" },
   { value: "cs", label: "Čeština" },
@@ -10,12 +12,13 @@ export const LANGUAGE_OPTIONS: { value: ProjectLanguage; label: string }[] = [
 interface NewProjectDialogProps {
   open: boolean;
   onCancel: () => void;
-  onCreate: (language: ProjectLanguage) => void;
+  onCreate: (language: ProjectLanguage, clipProfile: ClipProfileValue) => void;
 }
 
 /** Asks for the project's spoken language. It is fixed for the project; Settings only sets the default offered here. */
 export function NewProjectDialog({ open, onCancel, onCreate }: NewProjectDialogProps) {
   const [language, setLanguage] = useState<ProjectLanguage>(DEFAULT_PROJECT_LANGUAGE);
+  const [clipProfile, setClipProfile] = useState<ClipProfileValue>({ contentProfile: "podcast", clipSettings: {} });
 
   useEffect(() => {
     if (!open) return;
@@ -48,9 +51,10 @@ export function NewProjectDialog({ open, onCancel, onCreate }: NewProjectDialogP
             Used for transcription, proofreading, translation and subtitle export of this project.
           </p>
         </div>
+        <ClipProfileFields idPrefix="new-project" value={clipProfile} onChange={setClipProfile} />
         <div className="settings-actions">
           <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
-          <button type="button" className="primary" data-testid="new-project-create" onClick={() => onCreate(language)}>Create</button>
+          <button type="button" className="primary" data-testid="new-project-create" onClick={() => onCreate(language, clipProfile)}>Create</button>
         </div>
       </div>
     </div>
