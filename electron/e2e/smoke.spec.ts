@@ -39,8 +39,8 @@ test("new project → select video via native dialogs", async ({ lusk }) => {
 });
 
 test("falls back to a free port when the preferred one is taken", async () => {
-  // Hold the port on IPv6 only — like another dev server on [::]:3000, which
-  // `localhost` resolves to before 127.0.0.1.
+  // Hold the port on IPv6 only — like another dev server on [::]:3000 (dual-stack, so it
+  // holds 127.0.0.1 too and the app must pick another port).
   const blocker = createServer((_req, res) => res.writeHead(418).end());
   await new Promise<void>((resolve) => blocker.listen(0, "::", resolve));
   const takenPort = (blocker.address() as AddressInfo).port;

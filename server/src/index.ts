@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import cors from "@fastify/cors";
+import { registerAuth } from "./auth.js";
 import { uploadRoute } from "./routes/upload.js";
 import { staticPlugin } from "./plugins/static.js";
 import { eventsRoute } from "./routes/events.js";
@@ -33,7 +33,22 @@ const server = Fastify({
         },
 });
 
-await server.register(cors, { origin: true });
+const PORT = parseInt(process.env.LUSK_PORT ?? "3000", 10);
+
+// Every request must carry the per-launch token (see auth.ts). Without one the server
+// refuses to start, unless auth is switched off explicitly (never the default).
+const TOKEN = process.env.LUSK_TOKEN;
+if (!TOKEN && process.env.LUSK_AUTH_DISABLED !== "1") {
+  console.error("LUSK_TOKEN is not set. Start dev with `npm run dev` from the repo root (it makes a random one per start), or set LUSK_TOKEN yourself.");
+  process.exit(1);
+}
+if (TOKEN) {
+  await registerAuth(server, {
+    token: TOKEN,
+    port: PORT,
+    extraOrigins: (process.env.LUSK_ALLOWED_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean),
+  });
+}
 await server.register(uploadRoute);
 await server.register(staticPlugin);
 await server.register(eventsRoute);
@@ -52,16 +67,14 @@ server.get("/api/health", async () => {
   return { status: "ok" as const, uptime: process.uptime(), whisperxAvailable, geminiApiKeySet };
 });
 
-const PORT = parseInt(process.env.LUSK_PORT ?? "3000", 10);
-
 // Clean up orphaned temp directories (sessions no longer in the registry).
 const recentProjects = await projectFileService.getRecentProjects();
 const knownIds = new Set(recentProjects.map((p) => p.projectId));
 await tempManager.cleanupOrphaned(knownIds);
 
 try {
-  await server.listen({ port: PORT, host: "0.0.0.0" });
-  console.log(`Server listening on http://localhost:${PORT}`);
+  await server.listen({ port: PORT, host: "127.0.0.1" });
+  console.log(`Server listening on http://127.0.0.1:${PORT}`);
 } catch (err) {
   server.log.error(err);
   process.exit(1);

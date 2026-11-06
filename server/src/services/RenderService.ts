@@ -1,4 +1,5 @@
 import path from "node:path";
+import { withToken } from "../auth.js";
 import fs from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -145,7 +146,9 @@ async function cutSourceSegment(
 
 const COMPOSITION_ID = "LuskClip";
 const LUSK_SERVER_ORIGIN =
-  process.env.LUSK_SERVER_ORIGIN ?? "http://localhost:3000";
+  process.env.LUSK_SERVER_ORIGIN ?? "http://127.0.0.1:3000";
+// Remotion's headless Chrome and compositor cannot send the token header or cookie
+const LUSK_TOKEN = process.env.LUSK_TOKEN;
 
 type ProgressCallback = (percent: number, message: string) => void;
 
@@ -297,7 +300,10 @@ class RenderService {
   ): Promise<string> {
     const serveUrl = await this.ensureBundled(onProgress, outroConfig != null);
     const segmentFileName = `source_${outputFileName}`;
-    const videoUrl = `${LUSK_SERVER_ORIGIN}/static/${sessionId}/${segmentFileName}`;
+    const videoUrl = withToken(
+      `${LUSK_SERVER_ORIGIN}/static/${sessionId}/${segmentFileName}`,
+      LUSK_TOKEN
+    );
     const segmentPath = path.join(sessionDir, segmentFileName);
     const outputPath = path.join(sessionDir, outputFileName);
     // Render beside the target and move it into place only when complete: a cancelled or
@@ -348,7 +354,7 @@ class RenderService {
         offsetX,
         // The segment already starts at the clip start
         startFrom: 0,
-        outroSrc: hasOutro ? outroConfig.outroSrc : "",
+        outroSrc: hasOutro ? withToken(outroConfig.outroSrc, LUSK_TOKEN) : "",
         outroDurationInFrames,
         outroOverlapFrames,
         sourceAspectRatio: sourceAspectRatio ?? null,

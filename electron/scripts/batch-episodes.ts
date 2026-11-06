@@ -432,14 +432,14 @@ async function runEpisode(ep: Episode) {
     // Subtitles (full episode) — the English translation only exists right after a run
     for (const lang of ["sk", "en"] as const) {
       if (lang === "sk" ? !plan.needSk : !plan.needEn) continue;
-      const url = `${lusk.baseUrl}/api/projects/${projectId}/captions${lang === "en" ? "-en" : ""}.srt`;
-      let res = await fetch(url);
+      const urlPath = `/api/projects/${projectId}/captions${lang === "en" ? "-en" : ""}.srt`;
+      let res = await lusk.fetch(urlPath);
       if (!res.ok && lang === "en") {
         // The run's translation failed (it carries on without one) — translate again
         log(`  ${ep.code} en subtitles unavailable (${res.status}) — translating again`);
-        const tr = await fetch(`${lusk.baseUrl}/api/projects/${projectId}/translate`, { method: "POST" });
+        const tr = await lusk.fetch(`/api/projects/${projectId}/translate`, { method: "POST" });
         if (!tr.ok) throw new Error(`english translation failed: ${(await tr.json().catch(() => ({}))).error ?? tr.status}`);
-        res = await fetch(url);
+        res = await lusk.fetch(urlPath);
       }
       // Failing the episode keeps its plan, so the next run resumes it; finished without the
       // file, the next run would see an episode missing subtitles and render it again
