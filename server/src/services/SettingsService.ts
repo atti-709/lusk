@@ -102,6 +102,12 @@ class SettingsService {
     return readFile(promptPath, "utf-8");
   }
 
+  /** The sermon clip prompt has no user override yet (`viralClipsPrompt` is podcast-only); length placeholders are filled by `renderSermonPrompt`. */
+  async getSermonClipsPrompt(): Promise<string> {
+    const promptPath = join(getClientPublicDir(), "prompts", "viral-clips-sermon.md");
+    return readFile(promptPath, "utf-8");
+  }
+
   async getDefaultViralClipsPrompt(): Promise<string> {
     const promptPath = join(getClientPublicDir(), "prompts", "viral-clips-api.md");
     return readFile(promptPath, "utf-8");

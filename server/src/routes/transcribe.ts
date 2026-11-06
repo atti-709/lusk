@@ -8,7 +8,8 @@ import { parseTsv, wordsToCaptions, groupCaptionBlocks, geminiClipsToViralClips 
 import { dropStrayStops, keepForeignSpeech } from "../services/alignCorrection.js";
 import { guardSpokenForms, guardHeardDiacritics } from "../services/spokenForms.js";
 import { restoreScriptDiacritics } from "../services/scriptForms.js";
-import { DEFAULT_PROJECT_LANGUAGE } from "@lusk/shared";
+import { DEFAULT_PROJECT_LANGUAGE, parseContentProfile } from "@lusk/shared";
+import { minClipMsFor } from "../services/clipProfile.js";
 import type { TranscribeRequest, ErrorResponse, ViralClip, TranscriptWord, TranslatedBlock } from "@lusk/shared";
 
 type Logger = Pick<FastifyInstance["log"], "error">;
@@ -247,13 +248,18 @@ async function detectClips(
   signal?: AbortSignal,
 ): Promise<ViralClip[]> {
   const lastTimestamp = msToTimestamp(transcriptEndMs);
+  const session = orchestrator.getSession(sessionId);
+  const profile = parseContentProfile(session?.contentProfile);
+  const clipSettings = session?.clipSettings ?? {};
   const raw = await geminiService.detectViralClips(
     tsv,
     lastTimestamp,
     (percent, message) => orchestrator.updateProgress(sessionId, percent, message),
     signal,
+    profile,
+    clipSettings,
   );
-  const clips = geminiClipsToViralClips(raw, words, transcriptEndMs);
+  const clips = geminiClipsToViralClips(raw, words, transcriptEndMs, minClipMsFor(profile, clipSettings));
   if (clips.length < raw.length) {
     console.log(`[detectClips] Dropped ${raw.length - clips.length} clip(s) with invalid time ranges (transcript ends ${lastTimestamp})`);
   }

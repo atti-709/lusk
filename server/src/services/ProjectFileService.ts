@@ -23,8 +23,10 @@ import type {
   RecentProject,
   PipelineState,
   ProjectLanguage,
+  ContentProfile,
+  ClipSettings,
 } from "@lusk/shared";
-import { DEFAULT_PROJECT_LANGUAGE, parseProjectLanguage } from "@lusk/shared";
+import { DEFAULT_PROJECT_LANGUAGE, parseClipSettings, parseContentProfile, parseProjectLanguage } from "@lusk/shared";
 import { tempManager } from "./TempManager.js";
 import { isCopyOf, makePlayableCopy, planPlayable, probeCodecs } from "./PlayableVideo.js";
 
@@ -192,6 +194,9 @@ function readLuskFile(filePath: string): ProjectData {
   const data = JSON.parse(raw) as ProjectData;
   // Projects saved before the language was stored were all made with the old default
   data.language = parseProjectLanguage(data.language);
+  // ...and the content profile: those are podcasts with default clip settings
+  data.contentProfile = parseContentProfile(data.contentProfile);
+  data.clipSettings = parseClipSettings(data.clipSettings);
   // Resolve videoPath relative to the .lusk file location (also handles legacy absolute paths)
   if (data.videoPath && !isAbsolute(data.videoPath)) {
     data.videoPath = resolve(dirname(filePath), data.videoPath);
@@ -342,6 +347,8 @@ class ProjectFileService {
     projectFilePath: string,
     videoPath?: string,
     language: ProjectLanguage = DEFAULT_PROJECT_LANGUAGE,
+    contentProfile: ContentProfile = "podcast",
+    clipSettings: ClipSettings = {},
   ): Promise<ProjectState> {
     const projectId = randomUUID();
     const now = new Date().toISOString();
@@ -363,6 +370,8 @@ class ProjectFileService {
       videoHeight: videoMeta.height,
       videoFps: videoMeta.fps,
       language,
+      contentProfile,
+      clipSettings,
       state: hasVideo ? "UPLOADING" : "IDLE",
       transcript: null,
       originalTranscript: null,
@@ -479,6 +488,8 @@ class ProjectFileService {
       videoHeight: session.videoHeight ?? null,
       videoFps: session.videoFps ?? null,
       language: session.language,
+      contentProfile: parseContentProfile(session.contentProfile),
+      clipSettings: session.clipSettings ?? {},
       state: session.state,
       transcript: session.transcript,
       originalTranscript: session.originalTranscript ?? null,

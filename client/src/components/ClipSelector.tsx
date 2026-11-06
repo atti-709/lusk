@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from "react";
-import type { ViralClip, ClipRenderState, CaptionWord } from "@lusk/shared";
+import type { ViralClip, ClipRenderState, CaptionWord, ContentProfile, ClipSettings } from "@lusk/shared";
+import { ClipProfileFields, type ClipProfileValue } from "./ClipProfileFields";
 import { getClipRange, getClipRenderKey } from "@lusk/shared";
 import type { Caption } from "@remotion/captions";
 import { useCancelPrompt } from "../contexts/CancelPromptContext";
@@ -345,9 +346,29 @@ interface ClipSelectorProps {
   onBack: () => void;
   onAddClip: (clip: ViralClip) => void;
   onClipsRegenerated: (clips: ViralClip[]) => void;
+  /** The project's saved profile and overrides (absent in older projects: podcast, none). */
+  contentProfile?: ContentProfile;
+  clipSettings?: ClipSettings;
 }
 
-export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, captions, geminiAvailable = false, onSelect, onBack, onAddClip, onClipsRegenerated }: ClipSelectorProps) {
+export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, captions, geminiAvailable = false, onSelect, onBack, onAddClip, onClipsRegenerated, contentProfile = "podcast", clipSettings }: ClipSelectorProps) {
+  // ── Clip profile (used by the next Regenerate) ─────────────────────────
+  const [profileDraft, setProfileDraft] = useState<ClipProfileValue>({ contentProfile, clipSettings: clipSettings ?? {} });
+  const [profileStatus, setProfileStatus] = useState<string | null>(null);
+  const saveProfile = useCallback(async () => {
+    setProfileStatus("Saving…");
+    try {
+      const res = await fetch(`/api/projects/${sessionId}/clip-profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profileDraft),
+      });
+      setProfileStatus(res.ok ? "Saved — applies to the next Regenerate" : "Could not save");
+    } catch {
+      setProfileStatus("Could not save");
+    }
+  }, [sessionId, profileDraft]);
+
   const { fps } = useAppSettings();
   const [showForm, setShowForm] = useState(false);
   const [sort, setSort] = useState<ClipSort>(readSort);
@@ -685,6 +706,17 @@ export function ClipSelector({ clips, videoUrl, sessionId, videoName, renders, c
           </div>
         )}
       </div>
+
+      {geminiAvailable && (
+        <details className="clip-profile-panel" data-testid="clip-profile-panel">
+          <summary>Clip profile: {profileDraft.contentProfile === "sermon" ? "Sermon" : "Podcast"}</summary>
+          <ClipProfileFields idPrefix="studio" value={profileDraft} onChange={(v) => { setProfileDraft(v); setProfileStatus(null); }} />
+          <div className="clip-profile-actions">
+            <button type="button" className="secondary" data-testid="clip-profile-save" onClick={saveProfile}>Save</button>
+            {profileStatus && <span className="settings-hint">{profileStatus}</span>}
+          </div>
+        </details>
+      )}
 
       <div className="clip-grid">
         {orderedClips.map((clip) => (

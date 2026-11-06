@@ -10,7 +10,7 @@ import type {
   RecentProject,
   ErrorResponse,
 } from "@lusk/shared";
-import { parseProjectLanguage } from "@lusk/shared";
+import { parseClipSettings, parseContentProfile, parseProjectLanguage } from "@lusk/shared";
 import { settingsService } from "../services/SettingsService.js";
 import { orchestrator } from "../services/Orchestrator.js";
 import { projectFileService, probeVideoMeta } from "../services/ProjectFileService.js";
@@ -74,13 +74,15 @@ export const projectsRoute: FastifyPluginAsync = async (server) => {
     Reply: CreateProjectResponse | ErrorResponse;
   }>("/api/projects/create", async (request, reply) => {
     try {
-      const { projectPath, videoPath, language } = request.body;
+      const { projectPath, videoPath, language, contentProfile, clipSettings } = request.body;
       // The Settings language is only the default for a new project; from here on the
       // project's own value is what every step reads
       const state = await projectFileService.createProject(
         projectPath,
         videoPath,
         parseProjectLanguage(language, await settingsService.getTranscriptionLanguage()),
+        parseContentProfile(contentProfile),
+        parseClipSettings(clipSettings),
       );
       orchestrator.restoreSession(state);
       return reply.send({ success: true, projectId: state.projectId });

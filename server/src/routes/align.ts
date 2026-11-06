@@ -2,8 +2,8 @@ import { FastifyInstance } from "fastify";
 import { orchestrator } from "../services/Orchestrator.js";
 import type { TranscriptionLanguage } from "../services/SettingsService.js";
 import archiver from "archiver";
-import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord, TranslatedBlock } from "@lusk/shared";
-import { viralityScore } from "@lusk/shared";
+import type { ErrorResponse, TranscriptWord, ViralClip, CaptionWord, TranslatedBlock, ContentProfile, ClipSettings } from "@lusk/shared";
+import { viralityScore, parseContentProfile, parseClipSettings } from "@lusk/shared";
 import { cutAfterClosingWord, leadIn, SNAP_TOLERANCE_MS, snapToWordStart, startAtSentence } from "../services/clipBoundaries.js";
 import type { GeminiClip } from "../services/GeminiService.js";
 import { runGeminiAutomation, regenerateViralClips, activeGeminiOperations, GEMINI_CANCELLED } from "./transcribe.js";
@@ -207,7 +207,7 @@ export function parseViralClipText(text: string): ViralClip[] {
   return clips;
 }
 
-/** Gemini occasionally returns a clip far below the 20-30 s it is asked for. */
+/** Gemini occasionally returns a clip far below the length it is asked for (podcast default). */
 const MIN_CLIP_MS = 15_000;
 
 /**
@@ -219,6 +219,7 @@ export function geminiClipsToViralClips(
   clips: GeminiClip[],
   words: TranscriptWord[],
   transcriptEndMs: number,
+  minClipMs: number = MIN_CLIP_MS,
 ): ViralClip[] {
   const lastEnd = words.at(-1)?.endMs ?? transcriptEndMs;
   const out: ViralClip[] = [];
@@ -235,7 +236,7 @@ export function geminiClipsToViralClips(
     if (endMs > lastEnd + SNAP_TOLERANCE_MS) continue;
     endMs = endMs >= lastEnd ? lastEnd : cutAfterClosingWord(snapToWordStart(endMs, words), words);
     if (startMs < 0 || endMs <= startMs || (transcriptEndMs > 0 && endMs > transcriptEndMs)) continue;
-    if (endMs - startMs < MIN_CLIP_MS) continue; // a fragment, not a short (the prompt asks for 20-30 s)
+    if (endMs - startMs < minClipMs) continue; // a fragment (default 15 s: the podcast prompt asks for 20-30 s; see minClipMsFor)
 
     const clamp = (n: unknown) => Math.max(1, Math.min(100, Math.round(Number(n) || 1)));
     const scores = {
@@ -781,6 +782,28 @@ export async function alignRoute(app: FastifyInstance) {
       // Push the saved list to every client so a stale copy can't overwrite it later
       orchestrator.emitAndPersist(projectId);
       return { success: true as const };
+    }
+  );
+
+  // 5d-c. Content profile and clip-detection overrides (length, count, instructions) of the
+  // project; read by the next clip detection / regeneration.
+  app.put<{
+    Params: { projectId: string };
+    Body: { contentProfile?: ContentProfile; clipSettings?: ClipSettings };
+    Reply: { success: true; contentProfile: ContentProfile; clipSettings: ClipSettings } | ErrorResponse;
+  }>(
+    "/api/projects/:projectId/clip-profile",
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const session = orchestrator.getSession(projectId);
+      if (!session) {
+        return reply.status(404).send({ success: false, error: "Session not found" });
+      }
+      const body = (request.body ?? {}) as { contentProfile?: unknown; clipSettings?: unknown };
+      session.contentProfile = parseContentProfile(body.contentProfile);
+      session.clipSettings = parseClipSettings(body.clipSettings);
+      orchestrator.emitAndPersist(projectId);
+      return { success: true as const, contentProfile: session.contentProfile, clipSettings: session.clipSettings };
     }
   );
 

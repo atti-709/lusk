@@ -5,6 +5,8 @@ import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { setGlobalDispatcher, Agent } from "undici";
 import { settingsService } from "./SettingsService.js";
 import { tempManager } from "./TempManager.js";
+import { buildClipUserMessage, renderSermonPrompt } from "./clipProfile.js";
+import type { ClipSettings, ContentProfile } from "@lusk/shared";
 import { scriptGlossary } from "./scriptForms.js";
 import { alignCorrectedRows, keepHeardScript, misplacedBreaks } from "./alignCorrection.js";
 import {
@@ -116,7 +118,7 @@ export interface GeminiClip {
   score_reason: string;
 }
 
-const CLIP_SCHEMA = {
+export const CLIP_SCHEMA = {
   type: "object",
   properties: {
     clips: {
@@ -177,13 +179,6 @@ export function stripEmbeddedImages(script: string): string {
     .replace(/!\[[^\]]*\]\[[^\]]*\]/g, "")                      // ![][image1] references
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-/** No more than one clip per ~35 s of transcript, capped at the prompt's 16. */
-function maxClipsFor(lastTimestamp: string): number {
-  const [h, m, sec] = lastTimestamp.split(":").map(Number);
-  const totalSec = (h || 0) * 3600 + (m || 0) * 60 + (sec || 0);
-  return Math.max(3, Math.min(16, Math.floor(totalSec / 35)));
 }
 
 export function parseClipResponse(text: string): GeminiClip[] {
@@ -608,24 +603,20 @@ export class GeminiService {
     lastTimestamp: string,
     onProgress: ProgressCallback,
     signal?: AbortSignal,
+    profile: ContentProfile = "podcast",
+    clipSettings: ClipSettings = {},
   ): Promise<GeminiClip[]> {
     if (signal?.aborted) throw new Error("Cancelled");
 
     onProgress(85, "Finding viral clips with Gemini...");
 
     const ai = await this.getClient();
-    const prompt = await this.getViralClipPrompt();
+    // The user's prompt override (Settings) applies to the podcast profile only
+    const prompt = profile === "sermon"
+      ? renderSermonPrompt(await settingsService.getSermonClipsPrompt(), clipSettings)
+      : await this.getViralClipPrompt();
 
-    const userMessage = [
-      prompt,
-      "",
-      `CONSTRAINT: The transcript ends at ${lastTimestamp}. All start and end timestamps MUST fall within 00:00:00.000 – ${lastTimestamp}. Do NOT suggest clips that extend beyond this range.`,
-      `CONSTRAINT: Return at most ${maxClipsFor(lastTimestamp)} clips, none overlapping another.`,
-      "",
-      "## Corrected Transcript (.tsv):",
-      "",
-      correctedTsv,
-    ].join("\n");
+    const userMessage = buildClipUserMessage(prompt, lastTimestamp, correctedTsv, profile, clipSettings);
 
     for (let attempt = 0; ; attempt++) {
       try {

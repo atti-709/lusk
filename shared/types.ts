@@ -251,6 +251,53 @@ export function parseProjectLanguage(value: unknown, fallback: ProjectLanguage =
   return PROJECT_LANGUAGES.includes(value as ProjectLanguage) ? (value as ProjectLanguage) : fallback;
 }
 
+/** What the recording is: picks the clip prompt, length and count. Absent in older .lusk files: read as "podcast". */
+export type ContentProfile = "podcast" | "sermon";
+export const CONTENT_PROFILES: readonly ContentProfile[] = ["podcast", "sermon"];
+export const DEFAULT_CONTENT_PROFILE: ContentProfile = "podcast";
+
+/** `value` if it is a known profile, else the podcast default. */
+export function parseContentProfile(value: unknown): ContentProfile {
+  return CONTENT_PROFILES.includes(value as ContentProfile) ? (value as ContentProfile) : DEFAULT_CONTENT_PROFILE;
+}
+
+/**
+ * Per-project overrides for clip detection; every field is optional and empty means the
+ * profile's own default. Lengths are seconds. `instructions` is free text appended to the prompt.
+ */
+export interface ClipSettings {
+  minSec?: number;
+  maxSec?: number;
+  count?: number;
+  instructions?: string;
+}
+
+/** Longest free-text instruction kept. */
+export const MAX_CLIP_INSTRUCTIONS_CHARS = 2000;
+
+/** Clean untrusted input into ClipSettings: unusable values are dropped, max is kept above min. */
+export function parseClipSettings(value: unknown): ClipSettings {
+  const v = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const num = (x: unknown, lo: number, hi: number): number | undefined => {
+    const n = typeof x === "string" && x.trim() !== "" ? Number(x) : x;
+    return typeof n === "number" && Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : undefined;
+  };
+  const out: ClipSettings = {};
+  const minSec = num(v.minSec, 5, 600);
+  let maxSec = num(v.maxSec, 5, 600);
+  const count = num(v.count, 1, 60);
+  if (minSec !== undefined) out.minSec = minSec;
+  if (maxSec !== undefined) {
+    if (minSec !== undefined && maxSec < minSec) maxSec = minSec;
+    out.maxSec = maxSec;
+  }
+  if (count !== undefined) out.count = count;
+  if (typeof v.instructions === "string" && v.instructions.trim()) {
+    out.instructions = v.instructions.trim().slice(0, MAX_CLIP_INSTRUCTIONS_CHARS);
+  }
+  return out;
+}
+
 // Persisted project data (saved to .lusk files)
 export interface ProjectData {
   version: number;
@@ -264,6 +311,8 @@ export interface ProjectData {
   videoHeight: number | null;  // source pixel height
   videoFps?: number | null;    // source frame rate (absent in projects saved before it was probed)
   language: ProjectLanguage;   // absent in older .lusk files: read as "sk"
+  contentProfile?: ContentProfile; // absent in older .lusk files: read as "podcast"
+  clipSettings?: ClipSettings;     // per-project clip length / count / instruction overrides
   state: PipelineState;
   transcript: TranscriptData | null;
   originalTranscript?: TranscriptData | null;
@@ -350,6 +399,9 @@ export interface CreateProjectRequest {
   videoPath?: string;
   /** Defaults to the Settings language when omitted. */
   language?: ProjectLanguage;
+  /** Defaults to "podcast". */
+  contentProfile?: ContentProfile;
+  clipSettings?: ClipSettings;
 }
 
 export interface CreateProjectResponse {
