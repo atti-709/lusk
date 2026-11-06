@@ -58,10 +58,11 @@ describe("restoreScriptDiacritics (E71 evanjelia)", () => {
 });
 
 describe("an opening quote in front of a proposed name", () => {
-  it("is not matched loosely (the quote would be lost), the edit must quote it", () => {
+  it("is matched loosely (T27) and kept, whether or not the edit quotes it", () => {
     const ws = words("tvrdí „Crap Groeschel, že");
     const r = applyProofreadEdits(ws, buildProofreadLines(ws), [{ line: 1, find: "Crap Groeschel", replace: "Craig Groeschel" }]);
-    expect(r.rejected).toHaveLength(1);
+    expect(r.rejected).toHaveLength(0);
+    expect(text(r.words)).toBe("tvrdí „Craig Groeschel, že");
     const ok = applyProofreadEdits(ws, buildProofreadLines(ws), [{ line: 1, find: "„Crap Groeschel,", replace: "„Craig Groeschel," }]);
     expect(text(ok.words)).toBe("tvrdí „Craig Groeschel, že");
   });
